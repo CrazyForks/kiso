@@ -73,10 +73,17 @@ export function requestsSoFar(work, tool) {
 				const u = o?.message?.usage;
 				if (u && typeof u === "object" && "input" in u) n++;
 			} else {
-				// Claude Code prints one result object per invocation, and
+				// Claude Code prints one result object per invocation and
 				// reports how many turns it took inside it.
-				if (o?.type !== undefined) continue;       // not the result object
+				//
+				// Identified by what it CARRIES, not by what it lacks: the
+				// first version skipped anything with a `type` key on the
+				// assumption that the result object had none. It has one, so
+				// the counter returned 0 while the ledger read 70 — a ceiling
+				// that could never fire on this arm. The shape was guessed
+				// rather than read.
 				if (!o?.usage || typeof o.usage !== "object") continue;
+				if (o.num_turns === undefined) continue;
 				n += Number(o.num_turns) || 1;
 			}
 		}

@@ -70,6 +70,8 @@ TOT=0
 # a looping arm spent the programme's budget on one task. Overridable, but
 # never absent.
 . "$B/leg-limits.sh"
+. "$B/bare-env.sh"
+BARE_HOME=$(bare_home "$WORK")
 LEG_DEADLINE_S=${KISO_LEG_DEADLINE_S:-1800}
 LEG_MAX_REQUESTS=${KISO_LEG_MAX_REQUESTS:-200}
 LEG_STARTED=$(date +%s)
@@ -105,13 +107,24 @@ TURN() { node -e "console.log(JSON.parse(require('fs').readFileSync('$B/tasks-t5
 case "$TOOL" in
   kiso)
     EXTDIR="$WORK/ext"; mkdir -p "$EXTDIR"; cp "$B/bench-allow.mjs" "$EXTDIR/"
-    KENV="OPENAI_BASE_URL=https://api.deepseek.com OPENAI_API_KEY=$DEEPSEEK_API_KEY OPENAI_MODEL=deepseek-v4-flash KISO_EXTENSIONS_DIR=$EXTDIR KISO_HOME=$WORK/kiso-home"
+    SKILLDIR="$WORK/skills"; mkdir -p "$SKILLDIR"
+    assert_bare kiso "$BARE_HOME" || exit 1
+    # §3: KISO_SKILLS_DIR was missing entirely — an arm reading the operator's
+    # skills is not the product as installed.
+    # §3: KISO_SKILLS_DIR was missing entirely — an arm reading the
+    # operator's skills is not the product as installed.
+    set -- "OPENAI_BASE_URL=https://api.deepseek.com" "OPENAI_API_KEY=$DEEPSEEK_API_KEY" \
+      "OPENAI_MODEL=deepseek-v4-flash" "KISO_EXTENSIONS_DIR=$EXTDIR" \
+      "KISO_HOME=$WORK/kiso-home" "KISO_SKILLS_DIR=$SKILLDIR" "KISO_NO_UPDATE_CHECK=1"
+    KISO_ENV_PAIRS="$*"
     seg() { # seg <n> <stdin-producer...>
       _n=$1; shift
       over_budget && return 0
       _left=$(remaining)
       S=$(date +%s)
-      "$@" | run_bounded "$_left" "$WORK/stdout-$_n.log" env $KENV $KISO_BIN --mode bypass "bench-t5-$TOOL-$RUN" || true
+      # shellcheck disable=SC2086
+      "$@" | bare_bounded "$BARE_HOME" "$_left" "$WORK/stdout-$_n.log" \
+        $KISO_ENV_PAIRS -- $KISO_BIN --mode bypass "bench-t5-$TOOL-$RUN" || true
       E=$(date +%s); TOT=$((TOT + E - S))
     }
     seg 1 printf '%s\n' "$(TURN 1)" "$(TURN 2)" "$(TURN 3)" "$(TURN 4)" "$(TURN 5)"
@@ -131,29 +144,63 @@ fs.writeFileSync('$WORK/meta.json', JSON.stringify(meta, null, 1) + '\n');
 "
     ;;
   pi)
+    assert_bare pi "$BARE_HOME" || exit 1
     for i in 1 2 3 4 5 6 7 8; do
       over_budget && break
       S=$(date +%s)
-      run_bounded "$(remaining)" "$WORK/stdout-$i.log" \
-        env DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" \
+      bare_bounded "$BARE_HOME" "$(remaining)" "$WORK/stdout-$i.log" \
+        "DEEPSEEK_API_KEY=$DEEPSEEK_API_KEY" -- \
         pi --provider deepseek --model deepseek-v4-flash -p --mode json \
         --session "$WORK/pi-session" "$(TURN $i)" < /dev/null || true
       E=$(date +%s); TOT=$((TOT + E - S))
     done
     ;;
   claude)
-    CENV="ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic ANTHROPIC_AUTH_TOKEN=$DEEPSEEK_API_KEY ANTHROPIC_MODEL=deepseek-v4-flash ANTHROPIC_DEFAULT_SONNET_MODEL=deepseek-v4-flash ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-v4-flash"
+    assert_bare claude "$BARE_HOME" || exit 1
+    CCFG="$WORK/claude-config"; mkdir -p "$CCFG"
+    # §3: a fresh HOME and CLAUDE_CONFIG_DIR. Without them the arm read the
+    # operator's ~/.claude.json and authenticated with THEIR account key —
+    # eight 401s recorded as a task failure.
+    set -- "CLAUDE_CONFIG_DIR=$CCFG" \
+      "ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic" \
+      "ANTHROPIC_AUTH_TOKEN=$DEEPSEEK_API_KEY" \
+      "ANTHROPIC_MODEL=deepseek-v4-flash" \
+      "ANTHROPIC_DEFAULT_SONNET_MODEL=deepseek-v4-flash" \
+      "ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-v4-flash"
+    CLAUDE_ENV_PAIRS="$*"
     SID=""
     for i in 1 2 3 4 5 6 7 8; do
       over_budget && break
       S=$(date +%s)
       if [ -z "$SID" ]; then
-        run_bounded "$(remaining)" "$WORK/stdout-$i.log" \
-          env $CENV claude -p "$(TURN $i)" --output-format json --dangerously-skip-permissions < /dev/null || true
-        SID=$(python3 -c "import json;print(json.load(open('$WORK/stdout-$i.log')).get('session_id',''))" 2>/dev/null || true)
+        bare_bounded "$BARE_HOME" "$(remaining)" "$WORK/stdout-$i.log" \
+          $CLAUDE_ENV_PAIRS -- \
+          claude -p "$(TURN $i)" --output-format json --strict-mcp-config --mcp-config '{"mcpServers":{}}' --dangerously-skip-permissions < /dev/null || true
+        # PARSE PER LINE. Claude Code prints warnings around its result JSON
+        # — `[claude-code:unrecognized_model] {...}` is line one here — so
+        # `json.load(whole file)` throws and SID stayed empty. Every turn then
+        # started a NEW session: eight turns, eight session ids, each
+        # re-sending the whole context. Read as a product result that is
+        # "Claude Code is 6.8x more expensive on a long session", when no long
+        # session ever existed.
+        #
+        # extract.py already parses per line for exactly this reason. The fix
+        # was made there and not here, and nobody asked the sibling.
+        SID=$(python3 -c "
+import json,sys
+for line in open('$WORK/stdout-$i.log', errors='ignore'):
+    t=line.strip()
+    if not t.startswith('{'): continue
+    try: o=json.loads(t)
+    except Exception: continue
+    if isinstance(o,dict) and o.get('session_id'):
+        print(o['session_id']); break
+" 2>/dev/null || true)
+        [ -n "$SID" ] || echo "WARN: no session_id in turn $i — the next turn cannot resume" >&2
       else
-        run_bounded "$(remaining)" "$WORK/stdout-$i.log" \
-          env $CENV claude -p "$(TURN $i)" --resume "$SID" --output-format json --dangerously-skip-permissions < /dev/null || true
+        bare_bounded "$BARE_HOME" "$(remaining)" "$WORK/stdout-$i.log" \
+          $CLAUDE_ENV_PAIRS -- \
+          claude -p "$(TURN $i)" --resume "$SID" --output-format json --strict-mcp-config --mcp-config '{"mcpServers":{}}' --dangerously-skip-permissions < /dev/null || true
       fi
       E=$(date +%s); TOT=$((TOT + E - S))
     done
