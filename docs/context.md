@@ -7,8 +7,22 @@ cache-friendly and replayable.
 
 ## MicroCompact — zero-API context relief
 
-**The CLI ships it ON by default**: threshold = half the model window
-(`KISO_CONTEXT_WINDOW` override included — 200k window → 100k tokens).
+**The CLI ships it ON by default**: threshold = half the LIVE model's
+window (`KISO_CONTEXT_WINDOW` override included — 200k window → 100k
+tokens). Live means live: `/model` recomputes it for the model it is
+switching to, and a session opened on a model this process was not started
+with — the `/resume` case, where the recorded model wins — takes that
+model's window too. Before finding CTX-1 the threshold was computed once at
+startup and neither door moved it, so the status row could report a
+1,000,000 window while old tool results were still being cleared at
+100,000.
+
+A model the registry has no window for falls back to 200,000, and its
+threshold to 100,000. That is a stated unknown, not a measurement: the
+registry never guesses. CAPACITY (what the model can hold) and POLICY (when
+we choose to clear) are separate questions that this single fallback
+currently answers together, and the 2:1 ratio between them has never been
+measured.
 Library users opt in with `microcompact: { thresholdTokens }` in
 `createAgent`. When a session's projected context crosses the threshold,
 the loop appends **one** `microcompacted` boundary event to the stream —

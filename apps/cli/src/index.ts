@@ -50,7 +50,7 @@ import { agentModel, atFiles, body, bodyLog, codingToolOptions, kisoHome, builtI
 import { askUi, resolveProjectTrust } from "./trust-ui.js";
 import { isFirstRun, scaffoldFirstRun } from "./first-run.js";
 import { fauxSkip, readFauxScript } from "./faux-glue.js";
-import { chat, contextWindowTokens, displayCtxRatio, statusModelLabel } from "./chat.js";
+import { chat, displayCtxRatio, microcompactThresholdFor, statusModelLabel } from "./chat.js";
 import { adapterOptionsFor } from "./auth/adapter-options.js";
 import { loadProjectConfig, loadUserConfig, mergeConfigs, resolveAutoCompact, resolveContextWindow, resolveModel } from "./config.js";
 import { checkForUpdate, knownUpdate, updateCardLines } from "./update-check.js";
@@ -809,7 +809,9 @@ async function makeAgent(sessionId: string | undefined, input?: LineInput, model
 		// half the model window (KISO_CONTEXT_WINDOW override included;
 		// 200k window → 100k tokens). Long sessions compact old read/list/
 		// search/shell outputs instead of silently growing past the window.
-		microcompact: { thresholdTokens: contextWindowTokens() / 2 },
+		// CTX-1: the startup value; `/model` recomputes it through the same
+		// function, so the two can never drift apart.
+		microcompact: { thresholdTokens: microcompactThresholdFor() },
 		// E6: the run-start context policy — OFF unless env-armed (beats the microcompact default when both fire).
 		...(contextPolicy !== undefined ? { contextPolicy } : {}),
 		// R3e (owner ruling, 2026-08-28): NO turn limit on an interactive
@@ -1132,6 +1134,22 @@ async function chatLoop(
 		// the global display state never outlives the session it described
 		// (pre-XP the row kept the previous session's /model selection).
 		setAgentModel(session.model, session.baseUrl);
+		// CTX-1: the session's OWN model decides the threshold, and it is
+		// only knowable here — `/resume` restores the recorded model, which
+		// need not be the one this process started on.
+		//
+		// The pair is passed EXPLICITLY rather than read back out of the
+		// display state the line above just set. Reading module state a
+		// caller is about to change, or has just changed, is how the
+		// threshold got stuck in the first place; depending on these two
+		// lines staying in this order would leave the same defect waiting
+		// for whoever reorders them.
+		session.setMicrocompactThreshold(
+			microcompactThresholdFor({
+				model: session.model,
+				...(session.baseUrl !== undefined ? { baseUrl: session.baseUrl } : {}),
+			}),
+		);
 		setCurrentModelName(session.model);
 		paintBootStatus(session);
 		const nav = {
