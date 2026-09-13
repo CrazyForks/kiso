@@ -2,6 +2,7 @@
 # The limits are only worth having if what they leave behind is usable.
 set -eu
 B="$(cd "$(dirname "$0")/.." && pwd)"
+export B
 . "$B/leg-limits.sh"
 P=0; F=0
 ok()   { printf "  ok   %s\n" "$1"; P=$((P+1)); }
@@ -41,6 +42,15 @@ printf '{"event":{"type":"usage","inputTokens":1}}\n{"event":{"type":"usage","in
 W5=$(mktemp -d)
 printf '{"type":"message_end","message":{"usage":{"input":1}}}\n' > "$W5/stdout-1.log"
 [ "$(requests_so_far "$W5" pi)" -ge 1 ] && ok "a comparator's log is counted too" || bad "comparator not counted"
+
+# 8. the counter must work when leg-limits.sh is SOURCED FROM ELSEWHERE.
+#    `$0` in a sourced file names the sourcing script, so resolving the
+#    helper from it found nothing from bench/tests/ while working by luck
+#    from bench/. This test is run from bench/tests/, which is the case that
+#    was broken.
+W6=$(mktemp -d); mkdir -p "$W6/kiso-home/sessions"
+printf '{"event":{"type":"usage","inputTokens":1}}\n' > "$W6/kiso-home/sessions/s.jsonl"
+[ "$(requests_so_far "$W6" kiso)" -eq 1 ] && ok "the counter resolves its helper when sourced from another directory" || bad "helper not found when sourced from elsewhere"
 
 echo
 echo "[leg-limits] $P ok, $F failed"

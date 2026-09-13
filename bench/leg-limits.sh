@@ -30,19 +30,25 @@ run_bounded() {
 }
 
 # requests_so_far <workdir> <tool>
-# A cheap count from what is already on disk, for a ceiling check BETWEEN
-# segments. It is a lower bound, not an audit: the authoritative count is the
-# extractor's, and this exists only to stop a runaway before it spends more.
+#
+# Delegates to requests-so-far.mjs, which uses THE EXTRACTOR'S definition of a
+# request, per arm. The first version grepped for lines containing "usage":
+# pi carries a usage block on every streaming `message_update`, so a healthy
+# leg four requests in counted as 551 and this ceiling stopped it. A leg
+# recorded as "hit the request ceiling" would have been a false finding about
+# a product, produced entirely by our own counter.
+#
+# The ceiling and the ledger must count the same thing, or the cap is
+# measuring something the budget is not made of.
 requests_so_far() {
-	_work=$1; _tool=$2
-	# `grep -c` EXITS 1 on zero matches while printing a perfectly good 0,
-	# so `|| echo 0` appended a SECOND zero and the caller compared "0\n0"
-	# against a number. The count is taken from grep's output alone and its
-	# exit status is discarded.
-	case "$_tool" in
-		kiso) find "$_work/kiso-home/sessions" -name '*.jsonl' -exec cat {} + 2>/dev/null | grep -c '"type":"usage"' | head -1 ;;
-		*)    cat "$_work"/stdout-*.log 2>/dev/null | grep -c '"type":"message_end"\|"usage"' | head -1 ;;
-	esac
+	# `$0` inside a SOURCED file is the SOURCING script, not this one — so
+	# resolving the helper from it worked in run-t5.sh (which lives in bench/)
+	# and silently found nothing from bench/tests/. The caller's $B is the
+	# bench directory; the $0 fallback is only for a direct run from bench/.
+	_bench=${B:-$(cd "$(dirname "$0")" && pwd)}
+	_n=$(node "$_bench/requests-so-far.mjs" "$1" "$2" 2>/dev/null) || _n=0
+	[ -n "$_n" ] || _n=0
+	echo "$_n"
 }
 
 # mark_incomplete <workdir> <reason> <detail>
