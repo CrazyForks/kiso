@@ -304,9 +304,13 @@ console.log("tier B OK — provider closure: the three factories import, error m
 {
 	const proj = tempProject("nested-cli");
 	const stage = mkdtempSync(join(tmpdir(), "kiso-pack-nested-cli-"));
-	const tarballs = ["@vincemakes/kiso-core", "@vincemakes/kiso-evals", "@vincemakes/kiso-runtime", "@vincemakes/kiso-tools-node", "@vincemakes/kiso-provider-anthropic", "@vincemakes/kiso-provider-openai", "@vincemakes/kiso-provider-openai-responses", "@vincemakes/kiso-tui-cells", "@vincemakes/kiso-tui", "@vincemakes/kiso-mcp-ext", "@vincemakes/kiso-skills-ext", "@vincemakes/kiso-subagent-ext", "@vincemakes/kiso-task-ext", "@vincemakes/kiso-ask-ext", "@vincemakes/kiso-code"].map((n) =>
-		pack(stage, n),
-	);
+	// REL-0340-F1's family: this was a SECOND hand-written copy of ALL, and
+	// the line below announced "14 tarballs" while installing 15. The list
+	// happened to be complete; the number in the prose had drifted, which is
+	// how a reader (me) went hunting for a missing package that was there.
+	// One source, and the count is derived from what was actually packed.
+	const closure = Object.keys(ALL);
+	const tarballs = closure.map((n) => pack(stage, n));
 	for (const tarball of tarballs) {
 		execSync(`npm install --install-strategy=nested --no-audit --no-fund --no-package-lock "${tarball}"`, {
 			cwd: proj,
@@ -330,7 +334,7 @@ console.log("tier B OK — provider closure: the three factories import, error m
 	);
 	if (/ERR_MODULE_NOT_FOUND/.test(openai)) throw new Error(`nested openai CLI failed to resolve:\n${openai}`);
 
-	console.log("[smoke:nested-cli] all 14 tarballs nested; CLI constructs BOTH real providers (Anthropic + OpenAI) and lists sessions");
+	console.log(`[smoke:nested-cli] all ${tarballs.length} tarballs nested; CLI constructs BOTH real providers (Anthropic + OpenAI) and lists sessions`);
 	rmSync(proj, { recursive: true, force: true });
 }
 

@@ -31,6 +31,7 @@
  * declared change surface.
  */
 import { readFileSync } from "node:fs";
+import { isMain } from "../scripts/is-main.mjs";
 
 const ALIAS = { costWeighted: "cost_weighted" };
 function norm(r) {
@@ -115,6 +116,6 @@ function main() {
 	process.stdout.write(JSON.stringify(v, null, 1) + "\n");
 }
 
-if (process.argv[1] !== undefined && import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
 	main();
 }
