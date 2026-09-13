@@ -54,8 +54,12 @@ afterEach(async () => {
 	await rig.close();
 });
 
-async function sendKey(options: Partial<StreamOptions>): Promise<void> {
-	const adapter = createOpenAIResponsesProvider({ apiKey: "sk-rig", baseUrl: rig.baseUrl });
+async function sendKey(options: Partial<StreamOptions>, promptCacheKey?: string): Promise<void> {
+	const adapter = createOpenAIResponsesProvider({
+		apiKey: "sk-rig",
+		baseUrl: rig.baseUrl,
+		...(promptCacheKey !== undefined ? { promptCacheKey } : {}),
+	});
 	for await (const _ of adapter.stream({ model: "gpt-5.5", messages: PLAIN, ...options })) void _;
 }
 
@@ -130,6 +134,33 @@ describe("OR-1 request rig — the frozen shapes", () => {
 		expect(req.body).not.toContain("store");
 		expect(req.body).not.toContain("include");
 		expect(req.body).not.toContain("prompt_cache_key");
+	});
+
+	/**
+	 * IA-0360-F1 — THE FIRST-PARTY TARGET DROPS A CACHE KEY IT IS GIVEN.
+	 *
+	 * The assertion above says `prompt_cache_key` is absent on the
+	 * first-party target — and it was GREEN FOR THE WRONG REASON: `sendKey`
+	 * never passed one, so "absent" was proved by nobody offering it. That
+	 * left room for a release note claiming a first-party cache lane that
+	 * does not exist. The discriminating case is this one: HAND the API-key
+	 * adapter a cache key and watch the wire still omit it, because
+	 * `resolveTarget` builds an empty `extraBody` for that target.
+	 *
+	 * The OAuth half is asserted beside it so the test says what the rule IS,
+	 * not only what it is not — and so a future change that serializes the
+	 * field on both paths turns this red rather than quietly making a
+	 * withdrawn claim true again.
+	 */
+	it("IA-0360-F1: a cache key GIVEN to the first-party target never reaches the wire; the ChatGPT target carries it", async () => {
+		await sendKey({ systemPrompt: "sys" }, "sess-first-party");
+		const firstParty = rig.requests[0]!;
+		expect(firstParty.body).not.toContain("prompt_cache_key");
+		expect(firstParty.body).not.toContain("sess-first-party");
+
+		await sendOauth({ systemPrompt: "sys" }, "sess-subscription");
+		const chatgpt = rig.requests[1]!;
+		expect(chatgpt.body).toContain('"prompt_cache_key":"sess-subscription"');
 	});
 
 	it("no system prompt sends no instructions — a default prompt is never invented", async () => {

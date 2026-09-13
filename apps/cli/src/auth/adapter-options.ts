@@ -15,12 +15,17 @@
  * The extraction found the two sites had ALREADY drifted:
  *
  *   - `promptCacheKey` was passed at startup whenever the session had an
- *     id, but on `/model` only for an OAuth profile. It reaches the wire in
- *     the openai-responses adapter alone (runtime resolveAdapter), where it
- *     becomes `prompt_cache_key`. So a first-party Responses profile got a
- *     cache key when you started with it and none when you switched to it —
- *     the same session, two cache lanes, decided by how you arrived. The
- *     startup rule is the one kept: the cache lane is the SESSION (OR-1).
+ *     id, but on `/model` only for an OAuth profile. Both sites pass it
+ *     identically now, which is a tidiness fix and NOT a wire change —
+ *     finding IA-0360-F1 corrects the claim this comment used to make.
+ *     The Responses adapter serializes it on the ChatGPT (OAuth) target
+ *     ALONE; the first-party API-key target builds an empty `extraBody`
+ *     (provider-openai-responses `resolveTarget`), so it never carried a
+ *     cache key and still does not. Passing an internal option at two
+ *     construction sites is not evidence that the adapter puts it on the
+ *     wire on both authentication paths — I traced the field as far as the
+ *     provider's constructor and stopped one level short of the branch
+ *     that drops it.
  *   - `streamIdleMs` is set at startup and not on `/model`. It is NOT an
  *     adapter option — it is an agent-definition field the runtime reads —
  *     so it is out of this function's scope and stays where it is, noted
