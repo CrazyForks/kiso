@@ -53,28 +53,32 @@ else
   # cwd and matches the root manifest alone, and the closure comes back
   # EMPTY. An empty closure is a FAILED READ, not a true answer — which is
   # why the count is asserted below before anything is packed.
-  PACKED=""
-  PKGS=$(cd "$B/.." && node -e "
-const {execFileSync}=require('node:child_process');const fs=require('fs');
-const files=execFileSync('git',['ls-files','*package.json'],{encoding:'utf8'}).split('\n').filter(Boolean);
-const names=[];
-for(const f of files){ if(f==='package.json'||f.includes('node_modules'))continue;
-  const d=JSON.parse(fs.readFileSync(f,'utf8')); if(!d.private)names.push(d.name); }
-console.log(names.join(' '));")
+  PKGS=$("$B/../scripts/publishable-packages.mjs")
   PKG_N=$(echo "$PKGS" | tr ' ' '\n' | grep -c .)
-  [ "$PKG_N" -ge 2 ] || { echo "FAIL: derived $PKG_N publishable packages — a failed read, not an empty workspace"; exit 1; }
+  # A derivation that finds nothing is a FAILED READ, not an empty workspace.
+  [ "$PKG_N" -ge 2 ] || { echo "FAIL: derived $PKG_N publishable packages — a failed read"; exit 1; }
   echo "derived closure: $PKG_N packages"
+  PACKED=""
   for pkg in $PKGS; do
     TGZ_ONE=$(npm pack -w "$pkg" --pack-destination "$TMP" 2>/dev/null | tail -1)
     [ -n "$TGZ_ONE" ] && [ -f "$TMP/$TGZ_ONE" ] || { echo "FAIL pack: $pkg"; exit 1; }
     PACKED="$PACKED $TMP/$TGZ_ONE"
   done
+  PACKED_N=$(echo "$PACKED" | tr ' ' '\n' | grep -c '\.tgz$')
+  [ "$PACKED_N" = "$PKG_N" ] || { echo "FAIL: packed $PACKED_N tarballs for $PKG_N packages"; exit 1; }
   mkdir -p "$TMP/proj"; cd "$TMP/proj"
   npm init -y > /dev/null 2>&1
-  for tgz in $PACKED; do
-    npm install --install-strategy=nested --no-audit --no-fund --no-package-lock "$tgz" > "$TMP/install.log" 2>&1 \
-      || { echo "FAIL install: $tgz"; tail -5 "$TMP/install.log"; exit 1; }
-  done
+  # ONE install over the whole set, never one at a time. The derived order is
+  # the repo's, not a dependency order — the cli sorts first and depends on
+  # all fourteen others — and a lockstep release's pins are NOT on the
+  # registry while the publish is still ahead of us, so installing them
+  # individually asks npm for a version that does not exist yet. Installed
+  # together, every pin resolves from the set itself. This passed only
+  # because 0.36.0 happens to be published; it would have failed at the next
+  # ceremony, which is the one moment this script matters.
+  # shellcheck disable=SC2086
+  npm install --install-strategy=nested --no-audit --no-fund --no-package-lock $PACKED > "$TMP/install.log" 2>&1 \
+    || { echo "FAIL install: the $PACKED_N-package closure"; tail -12 "$TMP/install.log"; exit 1; }
   BIN="$TMP/proj/node_modules/.bin/kiso"
   [ -x "$BIN" ] || { echo "FAIL: no kiso bin after installing the closure"; exit 1; }
 fi

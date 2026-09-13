@@ -27,14 +27,33 @@ B="$(cd "$(dirname "$0")" && pwd)"
 # historical caveat on runs recorded before this change stands; the records
 # are not rewritten.
 KISO_BIN=${KISO_BIN:-kiso}
-if [ -z "${KISO_VERSION:-}" ]; then
+# Only the kiso arm needs a kiso version, and only when one was not given.
+# Probing unconditionally made every OTHER agent's run require kiso to be
+# installed — a bench runner that cannot measure a competitor without our
+# own binary present is a broken runner (Astra, PR #32).
+if [ "$TOOL" = "kiso" ] && [ -z "${KISO_VERSION:-}" ]; then
   # `$KISO_BIN --version` unquoted on purpose: KISO_BIN may be a COMMAND with
   # arguments ("npx -y @vincemakes/kiso-code@0.2.1"), not a single path.
-  KISO_VERSION=$($KISO_BIN --version 2>/dev/null | tr -d '\r' | tail -1 || true)
+  # The EXIT STATUS is kept: a bin that fails while printing to stdout used to
+  # have its error message recorded as the version — "error: unknown flag
+  # --version" went into meta.json as if it were 0.34.0.
+  if PROBE=$($KISO_BIN --version 2>/dev/null); then
+    KISO_VERSION=$(printf '%s' "$PROBE" | tr -d '\r' | tail -1)
+  else
+    KISO_VERSION=""
+  fi
+  # And it must LOOK like a version. Anything else is a bin that answered
+  # something other than the question.
+  case "$KISO_VERSION" in
+    [0-9]*.[0-9]*.[0-9]*) : ;;
+    *) KISO_VERSION="" ;;
+  esac
   if [ -z "$KISO_VERSION" ]; then
-    echo "FAIL: could not read a version from KISO_BIN ($KISO_BIN)." >&2
-    echo "      A run labelled with the wrong version is worse than no run:" >&2
-    echo "      set KISO_VERSION explicitly if this bin cannot report one." >&2
+    echo "FAIL: KISO_BIN ($KISO_BIN) did not report a version." >&2
+    echo "      A run labelled with the WRONG version is worse than no run —" >&2
+    echo "      an arm's version is the one field a comparison cannot afford" >&2
+    echo "      to have wrong. Set KISO_VERSION explicitly if this bin cannot" >&2
+    echo "      report one." >&2
     exit 1
   fi
 fi

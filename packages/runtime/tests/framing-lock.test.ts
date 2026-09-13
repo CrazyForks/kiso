@@ -157,6 +157,9 @@ describe("lock semantics — legacy interop and the single-writer race (ADR-0050
 		expect(store.load("s")).toHaveLength(1);
 	});
 
+	/** The barrier wait, named ONCE: the diagnostic quotes it and the test's
+	 *  own timeout is derived from it, so neither can drift from the other. */
+	const BARRIER_WAIT_MS = 60_000;
 	it("THREE real processes race behind a barrier: exactly one writer, deterministically", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "kiso-race3-"));
 		writeFileSync(join(dir, "s.lock"), JSON.stringify({ pid: 99999999, token: "dead" }));
@@ -214,7 +217,6 @@ try {
 		// the experiment had run. The bound is generous for the same reason
 		// the other process-spawning legs are: these measure correctness,
 		// never speed.
-		const BARRIER_WAIT_MS = 60_000;
 		const deadline = Date.now() + BARRIER_WAIT_MS;
 		let ready = 0;
 		while (Date.now() < deadline) {
@@ -234,7 +236,11 @@ try {
 		// The winner's write is the only record.
 		const store = new SessionStore(dir);
 		expect(store.load("s")).toHaveLength(1);
-	});
+		// The test's own bound must EXCEED the barrier wait above, or vitest's
+		// 5s default kills this test first and the harness diagnostic — the
+		// whole point of that assertion — can never print. Astra reproduced
+		// it on PR #32 by delaying the contenders six seconds.
+	}, BARRIER_WAIT_MS * 2);
 });
 
 describe("two REAL concurrent processes race a stale lock behind a barrier (round 2)", () => {
