@@ -24,6 +24,7 @@
  *     coordinates on the work-per-token trajectory, plus the ratio.
  */
 import { readFileSync } from "node:fs";
+import { isMain } from "../scripts/is-main.mjs";
 
 const METRICS = ["costWeighted", "wall"];
 const CLAUSE = "out-below + all verifies pass → improvement-class (proposed, for the reviewer)";
@@ -122,6 +123,6 @@ function main() {
   process.stdout.write(JSON.stringify(verdict(rows(prev), rows(thisRows)), null, 1) + "\n");
 }
 
-if (process.argv[1] !== undefined && import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   main();
 }

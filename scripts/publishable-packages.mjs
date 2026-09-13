@@ -10,6 +10,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { isMain } from "./is-main.mjs";
 
 const ROOT = resolve(new URL("..", import.meta.url).pathname);
 
@@ -51,6 +52,6 @@ export function inDependencyOrder(root = ROOT) {
 	return out;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
 	console.log((process.argv[2] === "--dependency-order" ? inDependencyOrder() : publishablePackages()).join(" "));
 }

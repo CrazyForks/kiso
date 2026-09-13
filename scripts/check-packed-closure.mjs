@@ -25,6 +25,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { publishablePackages } from "./publishable-packages.mjs";
+import { isMain } from "./is-main.mjs";
 
 const ROOT = resolve(new URL("..", import.meta.url).pathname);
 
@@ -48,7 +49,7 @@ export function fromWorkspaceGlobs(root = ROOT) {
 	return names.sort();
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
 	const errs = [];
 	const derived = publishablePackages();
 	const independent = fromWorkspaceGlobs();
