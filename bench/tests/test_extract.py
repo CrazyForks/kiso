@@ -78,6 +78,59 @@ class KisoAccountingTest(unittest.TestCase):
         # NOT 2000 — the v8-and-older first_prompt counted inputTokens +
         # cacheRead with the cache hit twice (raw already includes it).
 
+    # ── unknown usage is NOT zero ────────────────────────────────────
+    #
+    # The runtime states the invariant and keeps it: `known: false` means the
+    # provider reported NO usage, "the token fields are null, never faked as
+    # zero" (packages/core/src/protocol/events.ts, Area 6). The extractor then
+    # read them as `or 0` and added that to a cost total — destroying exactly
+    # the distinction the product goes to the trouble of preserving, and never
+    # once consulting the `known` flag the runtime sets for this purpose.
+    #
+    # The bias has a direction: a request whose usage is unknown still counted
+    # as a request but contributed zero cost, so an arm whose provider does
+    # not report usage measures as the CHEAPEST arm. In a comparison that is
+    # the worst possible failure — it rewards the least observable product.
+
+    def test_unknown_usage_is_counted_as_unknown_not_as_zero(self):
+        d = self._session_dir([
+            {"inputTokens": 1000, "cacheRead": 0, "outputTokens": 50, "known": True},
+            {"inputTokens": None, "cacheRead": None, "outputTokens": None, "known": False},
+        ])
+        m = extract.kiso(d)
+        # the known request is accounted exactly as before
+        self.assertEqual(m["fresh"], 1000)
+        self.assertEqual(m["output"], 50)
+        # the unknown one is VISIBLE, and is not spent as zero
+        self.assertEqual(m["unknown_requests"], 1)
+        self.assertEqual(m["requests"], 2)
+
+    def test_a_leg_with_unknown_usage_says_so(self):
+        d = self._session_dir([{"inputTokens": None, "cacheRead": None, "outputTokens": None, "known": False}])
+        m = extract.kiso(d)
+        # A caller comparing arms must be able to refuse this leg rather than
+        # read it as free. The flag is the refusal handle.
+        self.assertTrue(m["usage_incomplete"])
+        self.assertEqual(m["unknown_requests"], 1)
+
+    def test_a_GENUINE_zero_is_not_unknown(self):
+        # Zero is a real measurement and must stay distinguishable from
+        # "nobody told us" — otherwise the fix trades one conflation for
+        # another.
+        d = self._session_dir([{"inputTokens": 0, "cacheRead": 0, "outputTokens": 0, "known": True}])
+        m = extract.kiso(d)
+        self.assertEqual(m["unknown_requests"], 0)
+        self.assertFalse(m["usage_incomplete"])
+        self.assertEqual(m["requests"], 1)
+
+    def test_a_missing_field_without_a_known_flag_is_also_unknown(self):
+        # Older logs predate the flag. A field that is absent is still not a
+        # measured zero.
+        d = self._session_dir([{"inputTokens": 900, "outputTokens": 40}])   # no cacheRead
+        m = extract.kiso(d)
+        self.assertEqual(m["unknown_requests"], 1)
+        self.assertTrue(m["usage_incomplete"])
+
     def test_kiso_v2_sidecar_reads_the_canonical_block(self):
         # The df2 fixture: canonical fresh 58 + cache 1920 (raw total 1978).
         # The session log for the same sid exists — the dedup must NOT
@@ -157,6 +210,38 @@ class KisoAccountingTest(unittest.TestCase):
         self.assertEqual(m["total"], 6000)
         self.assertEqual(m["requests"], 2)
         self.assertEqual(m["cost_weighted"], 500 + 0.1 * 5500)
+
+    # The comparators matter MORE than kiso here: we do not control pi's or
+    # Claude Code's trace format, so a field they stop emitting would make
+    # that arm measure as free — in the very comparison a claim rests on.
+
+    def test_pi_a_missing_usage_field_is_unknown_not_zero(self):
+        d = tempfile.mkdtemp()
+        with open(f"{d}/stdout.log", "w") as f:
+            f.write(json.dumps({"type": "message_end", "message": {"usage": {"input": 900, "cacheRead": 0, "output": 40}}}) + "\n")
+            f.write(json.dumps({"type": "message_end", "message": {"usage": {"input": 500}}}) + "\n")  # no output, no cacheRead
+        m = extract.pi(d)
+        self.assertEqual(m["unknown_requests"], 1)
+        self.assertTrue(m["usage_incomplete"])
+        self.assertEqual(m["requests"], 2)
+        self.assertEqual(m["input"], 900)   # the incomplete record is not spent as zero
+
+    def test_claude_a_missing_usage_field_is_unknown_not_zero(self):
+        d = tempfile.mkdtemp()
+        with open(f"{d}/stdout.log", "w") as f:
+            f.write(json.dumps({"usage": {"input_tokens": 900, "cache_read_input_tokens": 10}, "num_turns": 3}) + "\n")  # no output_tokens
+        m = extract.claude(d)
+        self.assertTrue(m["usage_incomplete"])
+        self.assertEqual(m["unknown_requests"], 1)
+
+    def test_claude_a_complete_usage_block_is_not_flagged(self):
+        d = tempfile.mkdtemp()
+        with open(f"{d}/stdout.log", "w") as f:
+            f.write(json.dumps({"usage": {"input_tokens": 900, "cache_read_input_tokens": 10, "output_tokens": 40}, "num_turns": 3}) + "\n")
+        m = extract.claude(d)
+        self.assertFalse(m["usage_incomplete"])
+        self.assertEqual(m["unknown_requests"], 0)
+        self.assertEqual(m["cost_equivalent"], 900 + 0.02 * 10 + 4 * 40)
 
     def test_pi_and_claude_fresh_is_input(self):
         # pi: message_end JSONL with usage.input (fresh-only).
@@ -259,6 +344,48 @@ class KisoAccountingTest(unittest.TestCase):
         self.assertEqual(m["fresh"], 400)
         self.assertEqual(m["total"], 5000)
         self.assertEqual(m["cost_weighted"], 400 + 0.1 * 4600)
+
+    # ── the T5 extractor is a SEPARATE entry point ────────────────────
+    #
+    # A T5-based calibration does not go through extract.py at all. Fixing
+    # only the file I happened to find would have left the path the
+    # calibration actually uses producing the biased figures the fix exists
+    # to prevent (Astra, 2026-09-13). And it emitted only the v1 metric,
+    # so it could not produce the measure the claim names as PRIMARY.
+
+    def test_t5_unknown_usage_is_not_zero(self):
+        d = tempfile.mkdtemp()
+        os.makedirs(f"{d}/kiso-home/sessions")
+        with open(f"{d}/kiso-home/sessions/s.jsonl", "w") as f:
+            f.write(json.dumps({"event": {"type": "usage", "inputTokens": 5000, "cacheRead": 4600, "outputTokens": 60, "known": True}}) + "\n")
+            f.write(json.dumps({"event": {"type": "usage", "inputTokens": None, "cacheRead": None, "outputTokens": None, "known": False}}) + "\n")
+        m = extract_t5.kiso(d)
+        self.assertEqual(m["fresh"], 400)
+        self.assertEqual(m["unknown_requests"], 1)
+        self.assertTrue(m["usage_incomplete"])
+
+    def test_t5_emits_the_primary_measure(self):
+        d = tempfile.mkdtemp()
+        os.makedirs(f"{d}/kiso-home/sessions")
+        with open(f"{d}/kiso-home/sessions/s.jsonl", "w") as f:
+            f.write(json.dumps({"event": {"type": "usage", "inputTokens": 5000, "cacheRead": 4600, "outputTokens": 60, "known": True}}) + "\n")
+        m = extract_t5.kiso(d)
+        # the claim's PRIMARY measure, on the entry point a T5 calibration uses
+        self.assertEqual(m["cost_equivalent"], 400 + 0.02 * 4600 + 4 * 60)
+
+    def test_t5_pi_and_claude_carry_the_same_two_handles(self):
+        d = tempfile.mkdtemp()
+        with open(f"{d}/stdout-1.log", "w") as f:
+            f.write(json.dumps({"type": "message_end", "message": {"usage": {"input": 500}}}) + "\n")  # incomplete
+        m = extract_t5.pi(d)
+        self.assertTrue(m["usage_incomplete"])
+        self.assertIn("cost_equivalent", m)
+        d2 = tempfile.mkdtemp()
+        with open(f"{d2}/stdout-1.log", "w") as f:
+            f.write(json.dumps({"usage": {"input_tokens": 900, "cache_read_input_tokens": 10}, "num_turns": 2}) + "\n")  # no output
+        m2 = extract_t5.claude(d2)
+        self.assertTrue(m2["usage_incomplete"])
+        self.assertIn("cost_equivalent", m2)
 
 
 class MetricV2Test(unittest.TestCase):

@@ -58,7 +58,7 @@ def kiso(work):
     files = sorted(glob.glob(f"{sessions}/traces/*.jsonl") +
                    [p for p in glob.glob(f"{sessions}/*.jsonl")
                     if os.path.basename(p)[:-6] not in traced])
-    fresh = out = cache = reqs = 0
+    fresh = out = cache = reqs = unknown = 0
     first = None
     for f in files:
         for line in open(f):
@@ -72,9 +72,20 @@ def kiso(work):
                 e = r.get("event")
                 if not isinstance(e, dict) or e.get("type") != "usage":
                     continue                          # header/run_end/crash, non-usage
-                i = e.get("inputTokens") or 0
-                ca = e.get("cacheRead") or 0
-                o = e.get("outputTokens") or 0
+                # UNKNOWN IS NOT ZERO. The runtime states this and keeps it:
+                # `known: false` means the provider reported no usage and the
+                # token fields are null, "never faked as zero" (Area 6,
+                # packages/core/src/protocol/events.ts). Reading them as
+                # `or 0` destroyed exactly that distinction and never once
+                # consulted the flag set for this purpose — so a request whose
+                # usage nobody reported counted as a request costing NOTHING,
+                # and the arm with the least observable provider measured as
+                # the cheapest. In a comparison that rewards being unmeasurable.
+                i, ca, o = e.get("inputTokens"), e.get("cacheRead"), e.get("outputTokens")
+                if e.get("known") is False or i is None or ca is None or o is None:
+                    reqs += 1
+                    unknown += 1
+                    continue
                 fr = i - ca                           # legacy session log: the 0.1.23 derivation
             reqs += 1
             fresh += fr; cache += ca; out += o
@@ -82,12 +93,15 @@ def kiso(work):
     return dict(input=fresh, cache_read=cache, output=out, requests=reqs,
                 fresh=fresh, total=fresh + cache, cost_weighted=fresh + 0.1 * cache,
                 cost_equivalent=fresh + 0.02 * cache + 4 * out,
+                # The refusal handles: a caller comparing arms can see that a
+                # leg's usage is incomplete instead of reading it as cheap.
+                unknown_requests=unknown, usage_incomplete=unknown > 0,
                 first_prompt=first)
 
 def pi(work):
     # pi --mode json emits JSONL: one event per line; usage lives on
     # assistant "message"/"message_end" events' message.usage.
-    inp = out = cache = reqs = 0
+    inp = out = cache = reqs = unknown = 0
     first = None
     for line in open(f"{work}/stdout.log"):
         line = line.strip()
@@ -103,13 +117,19 @@ def pi(work):
         u = (msg or {}).get("usage") if isinstance(msg, dict) else None
         if u and isinstance(u, dict) and "input" in u:
             reqs += 1
-            inp += u.get("input") or 0
-            cache += u.get("cacheRead") or 0
-            out += u.get("output") or 0
-            if first is None: first = (u.get("input") or 0) + (u.get("cacheRead") or 0)
+            # UNKNOWN IS NOT ZERO — and this matters more here than for kiso:
+            # pi's trace format is not ours. A field it stops emitting would
+            # make this arm measure as free in the comparison a claim rests on.
+            i, ca, o = u.get("input"), u.get("cacheRead"), u.get("output")
+            if i is None or ca is None or o is None:
+                unknown += 1
+                continue
+            inp += i; cache += ca; out += o
+            if first is None: first = i + ca
     return dict(input=inp, cache_read=cache, output=out, requests=reqs,
                 fresh=inp, total=inp + cache, cost_weighted=inp + 0.1 * cache,
                 cost_equivalent=inp + 0.02 * cache + 4 * out,
+                unknown_requests=unknown, usage_incomplete=unknown > 0,
                 first_prompt=first)
 
 def claude(work):
@@ -131,14 +151,19 @@ def claude(work):
     if d is None:
         raise ValueError("no usage JSON line in stdout.log")
     u = d.get("usage", {})
-    inp = u.get("input_tokens", 0)
-    cache = u.get("cache_read_input_tokens", 0)
-    out = u.get("output_tokens", 0)
+    # UNKNOWN IS NOT ZERO. `u.get(..., 0)` turned an absent field — or an
+    # absent usage block entirely — into a free run.
+    i, ca, o = u.get("input_tokens"), u.get("cache_read_input_tokens"), u.get("output_tokens")
+    unknown = 1 if (i is None or ca is None or o is None) else 0
+    inp = i or 0
+    cache = ca or 0
+    out = o or 0
     return dict(input=inp, cache_read=cache,
                 output=out,
                 requests=d.get("num_turns", 0),
                 fresh=inp, total=inp + cache, cost_weighted=inp + 0.1 * cache,
                 cost_equivalent=inp + 0.02 * cache + 4 * out,
+                unknown_requests=unknown, usage_incomplete=unknown > 0,
                 first_prompt=None)
 
 def main(workdir):
