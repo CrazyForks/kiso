@@ -128,13 +128,16 @@ a broken config file fails loudly with the file named.
   session's adapter for subsequent turns (a NoticeCell records it).
 - A profile whose env var is unset is refused loudly on switch — configs
   never store keys, so a missing env is an honest "not configured".
-- **Changed in 0.36.0 — `/model` and startup now agree about the cache
-  lane.** Both build the adapter's wire configuration in one place, so
-  switching to a first-party OpenAI Responses profile with `/model` sends
-  `prompt_cache_key` (the session id), which starting with that profile
-  already did. One session used to have two cache lanes depending on how
-  you arrived. Nothing changes for the other provider kinds: the field
-  reaches the wire in the Responses adapter alone.
+- **`prompt_cache_key` is the SUBSCRIPTION target's, and only its**
+  (finding IA-0360-F1). The Responses adapter adds the session id as
+  `prompt_cache_key` on the ChatGPT (OAuth) target; the first-party
+  API-key target sends an empty `extraBody` and no cache key, at startup
+  and after `/model` alike. 0.36.0 made the two construction sites PASS
+  the option identically, which is a tidiness fix and not a wire change —
+  the adapter serializes it on one authentication path either way. An
+  earlier draft of this paragraph announced a first-party cache lane that
+  does not exist; passing an internal option at two construction sites is
+  not evidence that the adapter puts it on the wire on both paths.
 - The project's own `.kiso/config.json` rides the E3 trust gate: a
   granted project's config applies, an untrusted one is never even read
   (its digest covers the config file).
