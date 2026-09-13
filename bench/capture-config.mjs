@@ -78,7 +78,29 @@ export function packageOf(binPath) {
 	return null;
 }
 
-export function captureArm({ tool, command, cwd = process.cwd(), envNames = [], model = null, endpoint = null, reasoning = null, extensions = null }) {
+/**
+ * SPECIFIED is what we asked for; OBSERVED is what the run actually did.
+ *
+ * They are different facts and a manifest that merges them cannot answer the
+ * question it exists for. `model: "deepseek-v4-flash"` written into the old
+ * meta.json was a specification presented as a measurement — the protocol
+ * asks for the SERVED id, confirmed from a response. Anything not seen is
+ * null with a reason, and an observed value that CONTRADICTS the specified
+ * one is kept beside it rather than overwriting it: the disagreement is the
+ * finding.
+ */
+export function reconcile(specified, observed) {
+	const out = { specified, observed: observed ?? null, agrees: null };
+	if (observed === null || observed === undefined) {
+		out.why = "not observed in this run";
+		return out;
+	}
+	out.agrees = specified === observed;
+	if (!out.agrees) out.why = "the run did not use what was specified — both are kept";
+	return out;
+}
+
+export function captureArm({ tool, command, cwd = process.cwd(), envNames = [], model = null, endpoint = null, reasoning = null, extensions = null, observed = {} }) {
 	const [bin, ...args] = command;
 	// The executable ACTUALLY invoked, resolved — not the name given.
 	const resolved = probe("/usr/bin/which", [bin], cwd).value ?? (existsSync(bin) ? bin : null);
@@ -95,12 +117,16 @@ export function captureArm({ tool, command, cwd = process.cwd(), envNames = [], 
 		package: resolved ? packageOf(resolved) : null,
 		version,
 		versionWhy: version === null ? (versionProbe.why ?? `did not report a version (got ${JSON.stringify(versionProbe.value)})`) : null,
-		model,
-		endpoint,
+		// Specified vs observed, never merged.
+		model: reconcile(model, observed.model ?? null),
+		endpoint: reconcile(endpoint, observed.endpoint ?? null),
 		// Amendment 4b: the effort key is part of the inference configuration
 		// and must be stated per arm — a comparison of products at different
 		// reasoning levels compares settings, not products.
-		reasoning,
+		// Amendment 4b: the effort key is inference configuration. What was
+		// ASKED FOR and what went ON THE WIRE are captured separately —
+		// comparing products at different reasoning levels compares settings.
+		reasoning: reconcile(reasoning === null ? null : JSON.stringify(reasoning), observed.reasoning === undefined || observed.reasoning === null ? null : JSON.stringify(observed.reasoning)),
 		extensions,
 		// NAMES ONLY. Values would archive credentials.
 		envNames: [...envNames].sort(),

@@ -66,6 +66,39 @@ cp -R "$B/fixture-t5/" "$WORK/repo/"
 rm -rf "$WORK/repo/.git"
 . "${XDG_CONFIG_HOME:-$HOME/.config}/claude-deepseek/credentials.env"
 TOT=0
+# PER-LEG HARD LIMITS. A leg had none: a hung arm ran until someone noticed,
+# a looping arm spent the programme's budget on one task. Overridable, but
+# never absent.
+. "$B/leg-limits.sh"
+LEG_DEADLINE_S=${KISO_LEG_DEADLINE_S:-1800}
+LEG_MAX_REQUESTS=${KISO_LEG_MAX_REQUESTS:-200}
+LEG_STARTED=$(date +%s)
+LEG_STOPPED=""
+
+# Remaining wall budget for the next segment, or empty when it is spent.
+remaining() {
+	_used=$(( $(date +%s) - LEG_STARTED ))
+	_left=$(( LEG_DEADLINE_S - _used ))
+	[ "$_left" -gt 0 ] && echo "$_left" || echo ""
+}
+
+# Stop between segments when a bound is reached. Marks the leg INCOMPLETE
+# with its reason — never `fail`: a product that would have finished in one
+# more minute did not fail the task, it hit OUR limit.
+over_budget() {
+	_left=$(remaining)
+	if [ -z "$_left" ]; then
+		mark_incomplete "$WORK" deadline "the leg's ${LEG_DEADLINE_S}s wall budget was spent"
+		LEG_STOPPED=deadline; return 0
+	fi
+	_reqs=$(requests_so_far "$WORK" "$TOOL")
+	if [ "$_reqs" -ge "$LEG_MAX_REQUESTS" ]; then
+		mark_incomplete "$WORK" requests "the leg reached $_reqs requests (ceiling $LEG_MAX_REQUESTS)"
+		LEG_STOPPED=requests; return 0
+	fi
+	return 1
+}
+
 cd "$WORK/repo"
 TURN() { node -e "console.log(JSON.parse(require('fs').readFileSync('$B/tasks-t5.json','utf8'))[$1-1])"; }
 
@@ -73,18 +106,17 @@ case "$TOOL" in
   kiso)
     EXTDIR="$WORK/ext"; mkdir -p "$EXTDIR"; cp "$B/bench-allow.mjs" "$EXTDIR/"
     KENV="OPENAI_BASE_URL=https://api.deepseek.com OPENAI_API_KEY=$DEEPSEEK_API_KEY OPENAI_MODEL=deepseek-v4-flash KISO_EXTENSIONS_DIR=$EXTDIR KISO_HOME=$WORK/kiso-home"
-    S=$(date +%s)
-    printf '%s\n' "$(TURN 1)" "$(TURN 2)" "$(TURN 3)" "$(TURN 4)" "$(TURN 5)" |
-      env $KENV $KISO_BIN --mode bypass "bench-t5-$TOOL-$RUN" > "$WORK/stdout-1.log" 2>&1 || true
-    E=$(date +%s); TOT=$((TOT + E - S))
-    S=$(date +%s)
-    printf '/compact\n' |
-      env $KENV $KISO_BIN --mode bypass "bench-t5-$TOOL-$RUN" > "$WORK/stdout-2.log" 2>&1 || true
-    E=$(date +%s); TOT=$((TOT + E - S))
-    S=$(date +%s)
-    printf '%s\n' "$(TURN 6)" "$(TURN 7)" "$(TURN 8)" |
-      env $KENV $KISO_BIN --mode bypass "bench-t5-$TOOL-$RUN" > "$WORK/stdout-3.log" 2>&1 || true
-    E=$(date +%s); TOT=$((TOT + E - S))
+    seg() { # seg <n> <stdin-producer...>
+      _n=$1; shift
+      over_budget && return 0
+      _left=$(remaining)
+      S=$(date +%s)
+      "$@" | run_bounded "$_left" "$WORK/stdout-$_n.log" env $KENV $KISO_BIN --mode bypass "bench-t5-$TOOL-$RUN" || true
+      E=$(date +%s); TOT=$((TOT + E - S))
+    }
+    seg 1 printf '%s\n' "$(TURN 1)" "$(TURN 2)" "$(TURN 3)" "$(TURN 4)" "$(TURN 5)"
+    seg 2 printf '/compact\n'
+    seg 3 printf '%s\n' "$(TURN 6)" "$(TURN 7)" "$(TURN 8)"
     node -e "
 const fs = require('fs');
 const { execSync } = require('child_process');
@@ -100,10 +132,12 @@ fs.writeFileSync('$WORK/meta.json', JSON.stringify(meta, null, 1) + '\n');
     ;;
   pi)
     for i in 1 2 3 4 5 6 7 8; do
+      over_budget && break
       S=$(date +%s)
-      env DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" \
+      run_bounded "$(remaining)" "$WORK/stdout-$i.log" \
+        env DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" \
         pi --provider deepseek --model deepseek-v4-flash -p --mode json \
-        --session "$WORK/pi-session" "$(TURN $i)" < /dev/null > "$WORK/stdout-$i.log" 2>&1 || true
+        --session "$WORK/pi-session" "$(TURN $i)" < /dev/null || true
       E=$(date +%s); TOT=$((TOT + E - S))
     done
     ;;
@@ -111,20 +145,60 @@ fs.writeFileSync('$WORK/meta.json', JSON.stringify(meta, null, 1) + '\n');
     CENV="ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic ANTHROPIC_AUTH_TOKEN=$DEEPSEEK_API_KEY ANTHROPIC_MODEL=deepseek-v4-flash ANTHROPIC_DEFAULT_SONNET_MODEL=deepseek-v4-flash ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-v4-flash"
     SID=""
     for i in 1 2 3 4 5 6 7 8; do
+      over_budget && break
       S=$(date +%s)
       if [ -z "$SID" ]; then
-        env $CENV claude -p "$(TURN $i)" --output-format json --dangerously-skip-permissions \
-          < /dev/null > "$WORK/stdout-$i.log" 2>&1 || true
+        run_bounded "$(remaining)" "$WORK/stdout-$i.log" \
+          env $CENV claude -p "$(TURN $i)" --output-format json --dangerously-skip-permissions < /dev/null || true
         SID=$(python3 -c "import json;print(json.load(open('$WORK/stdout-$i.log')).get('session_id',''))" 2>/dev/null || true)
       else
-        env $CENV claude -p "$(TURN $i)" --resume "$SID" --output-format json --dangerously-skip-permissions \
-          < /dev/null > "$WORK/stdout-$i.log" 2>&1 || true
+        run_bounded "$(remaining)" "$WORK/stdout-$i.log" \
+          env $CENV claude -p "$(TURN $i)" --resume "$SID" --output-format json --dangerously-skip-permissions < /dev/null || true
       fi
       E=$(date +%s); TOT=$((TOT + E - S))
     done
     ;;
 esac
 echo "$TOT" > "$WORK/wall_seconds"
+
+# ── the per-arm configuration manifest (§10.3, amendment 4b) ────────────
+#
+# Written for ALL THREE arms. Before this only kiso got a meta.json, and it
+# carried `model: 'deepseek-v4-flash'` as a hardcoded string — a
+# SPECIFICATION presented as a MEASUREMENT — plus a `commit` read from the
+# host checkout, which is the same defect as the version field: hand the
+# runner a pinned published bin and the record names a commit it was never
+# built from.
+#
+# Specified and observed are kept apart. The served model id is read back
+# from what the run actually produced; when it cannot be seen, the field is
+# null with a reason rather than the specification copied over.
+case "$TOOL" in
+  kiso)   ARM_CMD="$KISO_BIN"; ARM_MODEL="deepseek-v4-flash"; ARM_ENDPOINT="https://api.deepseek.com"; ARM_ENV="OPENAI_API_KEY OPENAI_BASE_URL OPENAI_MODEL KISO_HOME KISO_EXTENSIONS_DIR" ;;
+  pi)     ARM_CMD="pi";        ARM_MODEL="deepseek-v4-flash"; ARM_ENDPOINT="https://api.deepseek.com"; ARM_ENV="DEEPSEEK_API_KEY" ;;
+  claude) ARM_CMD="claude";    ARM_MODEL="deepseek-v4-flash"; ARM_ENDPOINT="https://api.deepseek.com/anthropic"; ARM_ENV="ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_MODEL" ;;
+esac
+OBSERVED_MODEL=$(node "$B/observed-model.mjs" "$WORK" "$TOOL" 2>/dev/null || echo "")
+export OBSERVED_MODEL
+node --input-type=module -e "
+import { captureArm } from '$B/capture-config.mjs';
+import { writeFileSync } from 'node:fs';
+const observed = {};
+const m = process.env.OBSERVED_MODEL;
+if (m) observed.model = m;
+const cfg = captureArm({
+  tool: '$TOOL',
+  command: '$ARM_CMD'.split(' ').filter(Boolean),
+  model: '$ARM_MODEL',
+  endpoint: '$ARM_ENDPOINT',
+  envNames: '$ARM_ENV'.split(' ').filter(Boolean),
+  observed,
+});
+cfg.task = 'T5'; cfg.run = '$RUN'; cfg.round = process.env.KISO_ROUND || null;
+cfg.legDeadlineSeconds = $LEG_DEADLINE_S; cfg.legMaxRequests = $LEG_MAX_REQUESTS;
+writeFileSync('$WORK/config.json', JSON.stringify(cfg, null, 1) + '\n');
+" 2>/dev/null || echo "WARN: configuration capture failed for $TOOL" >&2
+[ -f "$WORK/status" ] || mark_complete "$WORK"
 VERIFY=$("$B/t5-verify.sh" "$WORK/repo")
 echo "$VERIFY" > "$WORK/verify"
 echo "DONE T5 $TOOL run=$RUN wall=${TOT}s verify=$VERIFY"

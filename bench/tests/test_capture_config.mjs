@@ -69,9 +69,31 @@ it("the effort key and the endpoint are RECORDED, not assumed (amendment 4b)", (
 		tool: "kiso", command: [b], model: "deepseek-flash",
 		endpoint: "https://api.deepseek.com", reasoning: { effort: "high", thinking: "enabled" },
 	});
-	assert.equal(m.reasoning.effort, "high");
-	assert.equal(m.endpoint, "https://api.deepseek.com");
-	assert.equal(m.model, "deepseek-flash");
+	assert.equal(JSON.parse(m.reasoning.specified).effort, "high");
+	assert.equal(m.endpoint.specified, "https://api.deepseek.com");
+	assert.equal(m.model.specified, "deepseek-flash");
+	// nothing was observed in this capture, and the record says so rather
+	// than presenting the specification as a measurement
+	assert.equal(m.model.observed, null);
+	assert.match(m.model.why, /not observed/);
+});
+
+it("an OBSERVED value that contradicts the specified one is kept beside it", () => {
+	const b = bin("ok3", "#!/bin/sh\necho 2.0.0\n");
+	const m = captureArm({
+		tool: "kiso", command: [b], model: "deepseek-flash",
+		observed: { model: "deepseek-v4-flash" },
+	});
+	assert.equal(m.model.specified, "deepseek-flash");
+	assert.equal(m.model.observed, "deepseek-v4-flash");
+	assert.equal(m.model.agrees, false);
+	assert.match(m.model.why, /did not use what was specified/);
+});
+
+it("agreement is recorded as agreement, not as silence", () => {
+	const b = bin("ok4", "#!/bin/sh\necho 2.0.0\n");
+	const m = captureArm({ tool: "pi", command: [b], model: "x", observed: { model: "x" } });
+	assert.equal(m.model.agrees, true);
 });
 
 it("the environment is recorded by NAME ONLY — a manifest never archives a credential", () => {
