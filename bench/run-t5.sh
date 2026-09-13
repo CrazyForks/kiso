@@ -17,9 +17,27 @@ TOOL=$1; RUN=$2
 B="$(cd "$(dirname "$0")" && pwd)"
 # KISO_BIN overrides the kiso command (band A/B runs against a pinned
 # published bin: KISO_BIN="npx -y @vincemakes/kiso-code@0.2.1"). KISO_VERSION
-# names that bin in meta.json (default: the local checkout's version).
+# names that bin in meta.json.
+#
+# THE DEFAULT ASKS THE BINARY THAT WILL RUN, NOT THE CHECKOUT AROUND IT.
+# It used to read the local apps/cli/package.json unconditionally, so handing
+# this script a pinned published bin recorded the HOST's version in
+# meta.json — an arm labelled with a version it never executed, which is the
+# one field a comparison between arms cannot afford to have wrong. The
+# historical caveat on runs recorded before this change stands; the records
+# are not rewritten.
 KISO_BIN=${KISO_BIN:-kiso}
-KISO_VERSION=${KISO_VERSION:-$(node -p "require('$B/../apps/cli/package.json').version")}
+if [ -z "${KISO_VERSION:-}" ]; then
+  # `$KISO_BIN --version` unquoted on purpose: KISO_BIN may be a COMMAND with
+  # arguments ("npx -y @vincemakes/kiso-code@0.2.1"), not a single path.
+  KISO_VERSION=$($KISO_BIN --version 2>/dev/null | tr -d '\r' | tail -1 || true)
+  if [ -z "$KISO_VERSION" ]; then
+    echo "FAIL: could not read a version from KISO_BIN ($KISO_BIN)." >&2
+    echo "      A run labelled with the wrong version is worse than no run:" >&2
+    echo "      set KISO_VERSION explicitly if this bin cannot report one." >&2
+    exit 1
+  fi
+fi
 # E4-e: KISO_ROUND scopes the runs under runs/<round>/ (the run-hygiene
 # discipline — a round never reuses a historical run name); absent = the
 # historical flat layout.

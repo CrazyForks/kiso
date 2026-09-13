@@ -200,12 +200,32 @@ try {
 		const p1 = run("A");
 		const p2 = run("B");
 		const p3 = run("C");
-		const deadline = Date.now() + 5000;
+		// THE HARNESS ASSERTS ITS OWN PRECONDITION.
+		//
+		// This loop used to fall through its deadline and write the barrier
+		// whether or not the three contenders had arrived. On a loaded runner
+		// they had not, and the assertion below then reported ZERO winners —
+		// which reads as a lock defect and is not one. CI run 34695436610 on
+		// 21b62c7 (2026-09-12) failed exactly that way; the same file passes
+		// locally 11/11 in under a second.
+		//
+		// A harness that cannot reach its own starting state must say so IN
+		// THOSE WORDS, not hand the experiment's verdict to a reader as if
+		// the experiment had run. The bound is generous for the same reason
+		// the other process-spawning legs are: these measure correctness,
+		// never speed.
+		const BARRIER_WAIT_MS = 60_000;
+		const deadline = Date.now() + BARRIER_WAIT_MS;
+		let ready = 0;
 		while (Date.now() < deadline) {
-			const entries = readdirSync(dir);
-			if (entries.filter((f) => f.startsWith("ready-")).length >= 3) break;
+			ready = readdirSync(dir).filter((f) => f.startsWith("ready-")).length;
+			if (ready >= 3) break;
 			await new Promise((r) => setTimeout(r, 10));
 		}
+		expect(
+			ready,
+			`HARNESS FAILURE, not a lock failure: only ${ready} of 3 contenders reached the barrier within ${BARRIER_WAIT_MS / 1000}s, so the race below never happened. Re-run; if it repeats, the child processes are failing to start, not the lock.`,
+		).toBe(3);
 		writeFileSync(barrier, "go");
 		await Promise.all([p1, p2, p3]);
 

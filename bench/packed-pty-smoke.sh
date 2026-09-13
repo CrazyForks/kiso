@@ -40,15 +40,30 @@ else
   # installs are redirected to /dev/null, leaving a missing BIN and an
   # exit with no output. Caught at the 0.15.2 ceremony.
   #
-  # scripts/smoke.mjs already nests the full closure for its tier D; this
-  # is the same list in the same order.
+  # scripts/smoke.mjs already nests the full closure for its tier D.
+  # REL-0340-F1: DERIVED, never named. This was a hand-written list of 14
+  # names beside a workspace of 15 publishable packages; the one it omitted
+  # was kiso-provider-openai-responses, missing for four releases including
+  # the one that changed that package. A list a human maintains beside a set
+  # a build produces drifts, and it drifts SILENTLY — the script passed the
+  # whole time, having nested one package fewer than the release ships.
+  #
+  # An ARGV array inside node, not a shell string: `git ls-files
+  # *package.json` goes through /bin/sh, which expands the glob against the
+  # cwd and matches the root manifest alone, and the closure comes back
+  # EMPTY. An empty closure is a FAILED READ, not a true answer — which is
+  # why the count is asserted below before anything is packed.
   PACKED=""
-  PKGS="@vincemakes/kiso-core @vincemakes/kiso-evals @vincemakes/kiso-runtime \
-        @vincemakes/kiso-tools-node @vincemakes/kiso-provider-anthropic \
-        @vincemakes/kiso-provider-openai @vincemakes/kiso-tui-cells \
-        @vincemakes/kiso-tui @vincemakes/kiso-mcp-ext @vincemakes/kiso-skills-ext \
-        @vincemakes/kiso-subagent-ext @vincemakes/kiso-task-ext \
-        @vincemakes/kiso-ask-ext @vincemakes/kiso-code"
+  PKGS=$(cd "$B/.." && node -e "
+const {execFileSync}=require('node:child_process');const fs=require('fs');
+const files=execFileSync('git',['ls-files','*package.json'],{encoding:'utf8'}).split('\n').filter(Boolean);
+const names=[];
+for(const f of files){ if(f==='package.json'||f.includes('node_modules'))continue;
+  const d=JSON.parse(fs.readFileSync(f,'utf8')); if(!d.private)names.push(d.name); }
+console.log(names.join(' '));")
+  PKG_N=$(echo "$PKGS" | tr ' ' '\n' | grep -c .)
+  [ "$PKG_N" -ge 2 ] || { echo "FAIL: derived $PKG_N publishable packages — a failed read, not an empty workspace"; exit 1; }
+  echo "derived closure: $PKG_N packages"
   for pkg in $PKGS; do
     TGZ_ONE=$(npm pack -w "$pkg" --pack-destination "$TMP" 2>/dev/null | tail -1)
     [ -n "$TGZ_ONE" ] && [ -f "$TMP/$TGZ_ONE" ] || { echo "FAIL pack: $pkg"; exit 1; }
