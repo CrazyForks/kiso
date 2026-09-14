@@ -178,7 +178,7 @@ case "$TOOL" in
     # across the switch, which is CTX-1's lesson one field over.
     mkdir -p "$WORK/kiso-home"
     cat > "$WORK/kiso-home/config.json" <<CFG
-{ "models": { "ds": { "kind": "openai-compat", "model": "deepseek-v4-flash",
+{ "models": { "ds": { "kind": "openai-compat", "model": "deepseek-flash",
   "baseUrl": "https://api.deepseek.com", "apiKeyEnv": "OPENAI_API_KEY" } } }
 CFG
     assert_bare kiso "$BARE_HOME" || exit 1
@@ -187,7 +187,7 @@ CFG
     # §3: KISO_SKILLS_DIR was missing entirely — an arm reading the
     # operator's skills is not the product as installed.
     set -- "OPENAI_BASE_URL=https://api.deepseek.com" "OPENAI_API_KEY=$DEEPSEEK_API_KEY" \
-      "OPENAI_MODEL=deepseek-v4-flash" "KISO_EXTENSIONS_DIR=$EXTDIR" \
+      "OPENAI_MODEL=deepseek-flash" "KISO_EXTENSIONS_DIR=$EXTDIR" \
       "KISO_HOME=$WORK/kiso-home" "KISO_SKILLS_DIR=$SKILLDIR" "KISO_NO_UPDATE_CHECK=1"
     KISO_ENV_PAIRS="$*"
     # F33-R4: the exit status is KEPT, not discarded. Every segment used to
@@ -227,7 +227,7 @@ const fs = require('fs');
 const { execSync } = require('child_process');
 const meta = {
   tool: 'kiso', task: 'T5', run: '$RUN', round: process.env.KISO_ROUND || null,
-  model: 'deepseek-v4-flash',
+  model: 'deepseek-flash',
   kisoVersion: '$KISO_VERSION',
   commit: execSync('git -C $B/.. rev-parse --short HEAD').toString().trim(),
   createdAt: Date.now(),
@@ -243,7 +243,7 @@ fs.writeFileSync('$WORK/meta.json', JSON.stringify(meta, null, 1) + '\n');
       set +e
       bare_bounded "$BARE_HOME" "$_left" "$WORK/stdout-$i.log" \
         "DEEPSEEK_API_KEY=$DEEPSEEK_API_KEY" -- \
-        pi --provider deepseek --model deepseek-v4-flash --thinking "$BENCH_EFFORT" -p --mode json \
+        pi --provider deepseek --model deepseek-flash --thinking "$BENCH_EFFORT" -p --mode json \
         --session "$WORK/pi-session" "$(TURN $i)" < /dev/null
       _rc=$?
       set -e
@@ -261,9 +261,9 @@ fs.writeFileSync('$WORK/meta.json', JSON.stringify(meta, null, 1) + '\n');
     set -- "CLAUDE_CONFIG_DIR=$CCFG" \
       "ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic" \
       "ANTHROPIC_AUTH_TOKEN=$DEEPSEEK_API_KEY" \
-      "ANTHROPIC_MODEL=deepseek-v4-flash" \
-      "ANTHROPIC_DEFAULT_SONNET_MODEL=deepseek-v4-flash" \
-      "ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-v4-flash"
+      "ANTHROPIC_MODEL=deepseek-flash" \
+      "ANTHROPIC_DEFAULT_SONNET_MODEL=deepseek-flash" \
+      "ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-flash"
     CLAUDE_ENV_PAIRS="$*"
     SID=""
     for i in 1 2 3 4 5 6 7 8; do
@@ -316,7 +316,7 @@ echo "$TOT" > "$WORK/wall_seconds"
 # ── the per-arm configuration manifest (§10.3, amendment 4b) ────────────
 #
 # Written for ALL THREE arms. Before this only kiso got a meta.json, and it
-# carried `model: 'deepseek-v4-flash'` as a hardcoded string — a
+# carried `model: 'deepseek-flash'` as a hardcoded string — a
 # SPECIFICATION presented as a MEASUREMENT — plus a `commit` read from the
 # host checkout, which is the same defect as the version field: hand the
 # runner a pinned published bin and the record names a commit it was never
@@ -325,10 +325,26 @@ echo "$TOT" > "$WORK/wall_seconds"
 # Specified and observed are kept apart. The served model id is read back
 # from what the run actually produced; when it cannot be seen, the field is
 # null with a reason rather than the specification copied over.
+# THE ID WE ASK FOR IS THE ID THE SERVER SERVES.
+#
+# Every leg until now requested `deepseek-v4-flash`, a RETIRED name the
+# vendor still resolves — confirmed on the wire: requested
+# `deepseek-v4-flash`, served `deepseek-flash`. Four days of legs carried a
+# specification that did not match what ran, and the reconciliation built
+# to catch that had no observed half to compare against (TRACE-F1).
+#
+# `deepseek-flash` is what /models lists and what the vendor's own v4.1
+# migration alias resolves to (`deepseek-v4.1-flash-expires-on-0910` ->
+# `deepseek-flash`, while the v4-named equivalent is refused). The API
+# prints no version string, so that alias topology is the evidence, not a
+# vendor statement.
+#
+# The wire is unchanged: both ids reach the same model. What changes is
+# that the manifest stops recording a name nobody serves.
 case "$TOOL" in
-  kiso)   ARM_CMD="$KISO_BIN"; ARM_MODEL="deepseek-v4-flash"; ARM_ENDPOINT="https://api.deepseek.com"; ARM_ENV="OPENAI_API_KEY OPENAI_BASE_URL OPENAI_MODEL KISO_HOME KISO_EXTENSIONS_DIR" ;;
-  pi)     ARM_CMD="pi";        ARM_MODEL="deepseek-v4-flash"; ARM_ENDPOINT="https://api.deepseek.com"; ARM_ENV="DEEPSEEK_API_KEY" ;;
-  claude) ARM_CMD="claude";    ARM_MODEL="deepseek-v4-flash"; ARM_ENDPOINT="https://api.deepseek.com/anthropic"; ARM_ENV="ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_MODEL" ;;
+  kiso)   ARM_CMD="$KISO_BIN"; ARM_MODEL="deepseek-flash"; ARM_ENDPOINT="https://api.deepseek.com"; ARM_ENV="OPENAI_API_KEY OPENAI_BASE_URL OPENAI_MODEL KISO_HOME KISO_EXTENSIONS_DIR" ;;
+  pi)     ARM_CMD="pi";        ARM_MODEL="deepseek-flash"; ARM_ENDPOINT="https://api.deepseek.com"; ARM_ENV="DEEPSEEK_API_KEY" ;;
+  claude) ARM_CMD="claude";    ARM_MODEL="deepseek-flash"; ARM_ENDPOINT="https://api.deepseek.com/anthropic"; ARM_ENV="ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_MODEL" ;;
 esac
 case "$TOOL" in
   # Amendment 4b: the level is STATED per arm. An arm with no knob states
