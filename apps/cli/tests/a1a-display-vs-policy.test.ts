@@ -15,6 +15,7 @@ import { describe, expect, it } from "vitest";
 import { defineTool, type Adapter, type AdapterEvent } from "@vincemakes/kiso-core";
 import { createAgent, SessionStore } from "@vincemakes/kiso-runtime";
 import { autoCompactRatio, displayCtxRatio, estimateCtxRatio } from "../src/chat.js";
+import { setAgentModel, setConfiguredWindow } from "../src/state.js";
 
 const adapter = {
 	stream: async function* (): AsyncIterable<AdapterEvent> {
@@ -29,9 +30,34 @@ describe("A1a — display counts the parts, the policy does not move", () => {
 		);
 		const agent = createAgent({ model: "faux", store: new SessionStore(mkdtempSync(join(tmpdir(), "kiso-a1a-"))), tools, adapter, systemPrompt: "s".repeat(4000) });
 		const session = await agent.session({ id: "a1a-display" });
+		// A WINDOW HAS TO EXIST for either ratio to mean anything, and this
+		// case is about the NUMERATOR — the display counts the tool table and
+		// the system prompt, the policy does not. It used to get its
+		// denominator from a hardcoded 200,000 fallback without saying so;
+		// now an unstated window makes the display refuse to divide, so the
+		// case states its own denominator instead of leaning on a default.
+		setConfiguredWindow(200_000);
 		const policy = estimateCtxRatio(session);
 		const display = displayCtxRatio(session);
 		expect(display).toBeGreaterThan(policy); // the tool table and the system prompt are real
 		expect(autoCompactRatio(session)).toBe(policy); // the policy's input is the old estimate, unchanged
+		setConfiguredWindow(undefined);
+	});
+
+	it("with NO stated window the display refuses to divide, while the policy still has its number", async () => {
+		// The two questions separate here: "how much is left" is unanswerable
+		// without a window, but the compaction policy must still have a value
+		// to compare against.
+		//
+		// NOT faux: faux is OURS and we declare its window, so it has an
+		// answer. The live case is a vendor model nobody publishes a window
+		// for — DeepSeek today — and an unregistered id stands for it here
+		// without pinning this case to one vendor's current silence.
+		setAgentModel("no-such-model-anyone-registered", undefined);
+		const agent = createAgent({ model: "no-such-model-anyone-registered", store: new SessionStore(mkdtempSync(join(tmpdir(), "kiso-a1a-nw-"))), tools: [], adapter });
+		const session = await agent.session({ id: "a1a-no-window" });
+		setConfiguredWindow(undefined);
+		expect(Number.isFinite(displayCtxRatio(session))).toBe(false);
+		expect(Number.isFinite(autoCompactRatio(session))).toBe(true);
 	});
 });
