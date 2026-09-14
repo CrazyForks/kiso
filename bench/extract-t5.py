@@ -15,6 +15,32 @@ cost_weighted = fresh + 0.1 × cache (the pi/claude shape).
 """
 import json, os, sys, glob
 
+def unknown_in_session_log(path):
+    """How many requests in a PLAIN session log had no reported usage.
+
+    F33-1: pre-v5 sidecars cannot tell an unmeasured request from a free
+    one — the writer's own convention is "0 = unknown". The plain log kept
+    the flag, so for those generations it is the surviving source of
+    known-ness. A session whose plain log is gone is UNDECIDABLE, which is
+    reported as incomplete rather than as complete.
+    """
+    n = 0
+    if not os.path.exists(path):
+        return None
+    for line in open(path):
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        e = r.get("event")
+        if not isinstance(e, dict) or e.get("type") != "usage":
+            continue
+        i, ca, o = e.get("inputTokens"), e.get("cacheRead"), e.get("outputTokens")
+        if e.get("known") is False or i is None or ca is None or o is None:
+            n += 1
+    return n
+
+
 def kiso(work):
     sessions = f"{work}/kiso-home/sessions"
     traced = set()
@@ -24,13 +50,29 @@ def kiso(work):
                    [p for p in glob.glob(f"{sessions}/*.jsonl")
                     if os.path.basename(p)[:-6] not in traced])
     fresh = out = cache = reqs = unknown = 0
+    pre_v5_sessions = set()
     for f in files:
         for line in open(f):
             r = json.loads(line)
             if "canonical" in r:                      # v2 ledger: the canonical block
+                # F33-1: a v5 record SAYS whether the provider reported;
+                # before v5 an unmeasured request and a free one are the
+                # same four zeros, so the sibling plain log decides.
+                if r.get("usageKnown") is False:
+                    reqs += 1
+                    unknown += 1
+                    continue
+                if r.get("kind") == "request" and "usageKnown" not in r:
+                    pre_v5_sessions.add(os.path.basename(f)[:-6])
                 c = r["canonical"]
                 fr, ca, o = c["input"], c["cacheRead"], c["output"]
             elif r.get("kind") == "request":          # v1 ledger: the guard's fresh
+                if r.get("usageKnown") is False:
+                    reqs += 1
+                    unknown += 1
+                    continue
+                if "usageKnown" not in r:
+                    pre_v5_sessions.add(os.path.basename(f)[:-6])
                 fr, ca, o = r["freshInput"], r["cacheRead"], r["output"]
             else:
                 e = r.get("event")
@@ -47,10 +89,19 @@ def kiso(work):
                 fr = i - ca                           # legacy session log
             reqs += 1
             fresh += fr; cache += ca; out += o
+    undecidable = 0
+    for sid in sorted(pre_v5_sessions):
+        n = unknown_in_session_log(f"{sessions}/{sid}.jsonl")
+        if n is None:
+            undecidable += 1
+        else:
+            unknown += n
     return dict(input=fresh, cache_read=cache, output=out, requests=reqs,
                 fresh=fresh, total=fresh + cache, cost_weighted=fresh + 0.1 * cache,
                 cost_equivalent=fresh + 0.02 * cache + 4 * out,
-                unknown_requests=unknown, usage_incomplete=unknown > 0)
+                unknown_requests=unknown,
+                usage_incomplete=unknown > 0 or undecidable > 0,
+                undecidable_sessions=undecidable)
 
 def pi(work):
     inp = out = cache = reqs = unknown = 0
@@ -68,14 +119,21 @@ def pi(work):
                 continue
             if not isinstance(ev, dict) or ev.get("type") != "message_end":
                 continue
-            u = ((ev.get("message") or {}).get("usage") or {}) if isinstance(ev.get("message"), dict) else {}
-            if u and isinstance(u, dict) and "input" in u:
-                reqs += 1
-                i, ca, o = u.get("input"), u.get("cacheRead"), u.get("output")
-                if i is None or ca is None or o is None:
-                    unknown += 1
-                    continue
-                inp += i; cache += ca; out += o
+            # F33-2: a `message_end` IS a billable completion. The old
+            # filter admitted it only when a usage block with an `input`
+            # key was present, so a request whose usage was missing —
+            # entirely, or just its input — vanished from the request count
+            # as well as the unknown count. A request nobody measured must
+            # still be a request; dropping it is the same error as pricing
+            # it at zero, one level earlier.
+            reqs += 1
+            m = ev.get("message")
+            u = (m.get("usage") if isinstance(m, dict) else None) or {}
+            i, ca, o = (u.get("input"), u.get("cacheRead"), u.get("output")) if isinstance(u, dict) else (None, None, None)
+            if i is None or ca is None or o is None:
+                unknown += 1
+                continue
+            inp += i; cache += ca; out += o
     return dict(input=inp, cache_read=cache, output=out, requests=reqs,
                 fresh=inp, total=inp + cache, cost_weighted=inp + 0.1 * cache,
                 cost_equivalent=inp + 0.02 * cache + 4 * out,
@@ -100,14 +158,19 @@ def claude(work):
                 o = json.loads(line)
             except Exception:
                 continue
-            if "usage" in o:
+            # F33-2: the LAST result line is this leg's completion, with or
+            # without a usage block. Keeping only lines that carry one meant
+            # a turn whose usage went missing was not counted at all, and a
+            # leg with one good turn reported "usage complete".
+            if o.get("type") == "result" or "usage" in o:
                 d = o
         if d is None:
             continue
         seen += 1
-        u = d.get("usage", {})
+        u = d.get("usage") or {}
         i_, c_, o_ = u.get("input_tokens"), u.get("cache_read_input_tokens"), u.get("output_tokens")
-        reqs += d.get("num_turns", 0)
+        # a completion with no turn count is still one completion
+        reqs += d.get("num_turns", 0) or 1
         if i_ is None or c_ is None or o_ is None:
             unknown += 1
             continue

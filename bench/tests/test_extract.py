@@ -460,5 +460,73 @@ class MetricV2Test(unittest.TestCase):
         m = self._kiso(1000, 100000, 100)
         self.assertGreater(m["cost_weighted"], m["cost_equivalent"])
 
+
+class UnknownSurvivesTheSidecar(unittest.TestCase):
+    """Astra F33-1 / F33-2: the counterexamples, pinned.
+
+    Both were found by adding evidence, not by removing it — a leg read as
+    incomplete became complete when a conforming sidecar was added beside
+    its log, and a request whose usage went missing left the request count
+    entirely. Both hide in the same direction: the arm that reports least
+    measures cheapest.
+    """
+
+    KNOWN = {"event": {"type": "usage", "inputTokens": 1000, "cacheRead": 0, "outputTokens": 50, "known": True}}
+    UNKNOWN = {"event": {"type": "usage", "inputTokens": None, "cacheRead": None, "outputTokens": None, "known": False}}
+
+    def _leg(self, sidecar_records=None):
+        work = tempfile.mkdtemp(prefix="f33-")
+        sessions = os.path.join(work, "kiso-home", "sessions")
+        os.makedirs(sessions)
+        with open(os.path.join(sessions, "sid.jsonl"), "w") as fh:
+            for r in (self.KNOWN, self.UNKNOWN):
+                fh.write(json.dumps(r) + "\n")
+        if sidecar_records is not None:
+            os.makedirs(os.path.join(sessions, "traces"))
+            with open(os.path.join(sessions, "traces", "sid.jsonl"), "w") as fh:
+                for r in sidecar_records:
+                    fh.write(json.dumps(r) + "\n")
+        return work
+
+    def test_a_pre_v5_sidecar_does_not_erase_the_unknown(self):
+        # The sidecar is read FIRST and excludes the plain log, and before
+        # v5 its four zeros cannot say whether anyone measured. The plain
+        # log still can, and it is consulted rather than shadowed.
+        bare = extract.kiso(self._leg())
+        withcar = extract.kiso(self._leg([
+            {"kind": "request", "canonical": {"input": 1000, "cacheRead": 0, "output": 50}},
+            {"kind": "request", "canonical": {"input": 0, "cacheRead": 0, "output": 0}},
+        ]))
+        self.assertEqual(bare["unknown_requests"], 1)
+        self.assertEqual(withcar["unknown_requests"], 1, "adding a sidecar erased the unknown")
+        self.assertTrue(withcar["usage_incomplete"])
+
+    def test_a_v5_sidecar_says_so_itself(self):
+        m = extract.kiso(self._leg([
+            {"kind": "request", "usageKnown": True, "canonical": {"input": 1000, "cacheRead": 0, "output": 50}},
+            {"kind": "request", "usageKnown": False, "canonical": {"input": 0, "cacheRead": 0, "output": 0}},
+        ]))
+        self.assertEqual(m["unknown_requests"], 1)
+
+    def test_a_genuine_zero_stays_known(self):
+        # The fix must not turn every zero into an unknown: a provider that
+        # really reported zero said something, and erasing that would be the
+        # same failure pointed the other way.
+        m = extract.kiso(self._leg([
+            {"kind": "request", "usageKnown": True, "canonical": {"input": 0, "cacheRead": 0, "output": 0}},
+        ]))
+        self.assertEqual(m["unknown_requests"], 0)
+        self.assertFalse(m["usage_incomplete"])
+
+    def test_pi_keeps_a_request_whose_usage_went_missing(self):
+        work = tempfile.mkdtemp(prefix="f33-pi-")
+        with open(os.path.join(work, "stdout.log"), "w") as fh:
+            fh.write(json.dumps({"type": "message_end", "message": {"usage": {"input": 1000, "cacheRead": 0, "output": 50}}}) + "\n")
+            fh.write(json.dumps({"type": "message_end", "message": {"usage": {"cacheRead": 0, "output": 50}}}) + "\n")
+        m = extract.pi(work)
+        self.assertEqual(m["requests"], 2, "a request with no input vanished from the count")
+        self.assertEqual(m["unknown_requests"], 1)
+        self.assertTrue(m["usage_incomplete"])
+
 if __name__ == "__main__":
     unittest.main()

@@ -24,6 +24,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { isAbsolute, resolve as resolvePath } from "node:path";
 import { isMain } from "../scripts/is-main.mjs";
 
 /** Run a command and return its trimmed stdout, or null — with the reason.
@@ -103,8 +104,19 @@ export function reconcile(specified, observed) {
 export function captureArm({ tool, command, cwd = process.cwd(), envNames = [], model = null, endpoint = null, reasoning = null, extensions = null, observed = {} }) {
 	const [bin, ...args] = command;
 	// The executable ACTUALLY invoked, resolved — not the name given.
-	const resolved = probe("/usr/bin/which", [bin], cwd).value ?? (existsSync(bin) ? bin : null);
-	const versionProbe = probe(bin, [...args, "--version"], cwd);
+	//
+	// F33-4: ANCHOR IT AT THE TARGET CWD FIRST. `which` runs in the arm's
+	// directory and can answer with a RELATIVE path; every reader after it —
+	// realpath, digest, package — resolves against the MAIN process's cwd
+	// instead. With a `./tool` in each of two directories, the manifest
+	// reported the arm's VERSION beside the caller's executable, digest and
+	// package: one manifest describing two different artifacts, which is the
+	// one thing it exists to rule out. The version probe runs on the same
+	// anchored path for the same reason.
+	const found = probe("/usr/bin/which", [bin], cwd).value;
+	const anchor = (p) => (p === null ? null : isAbsolute(p) ? p : resolvePath(cwd, p));
+	const resolved = anchor(found) ?? (existsSync(resolvePath(cwd, bin)) ? resolvePath(cwd, bin) : null);
+	const versionProbe = probe(resolved ?? bin, [...args, "--version"], cwd);
 	const version = asVersion(versionProbe.value);
 	return {
 		tool,

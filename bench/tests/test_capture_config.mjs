@@ -9,7 +9,7 @@
  * file must not reintroduce one field over).
  */
 import { strict as assert } from "node:assert";
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { asVersion, captureArm, digestOf, packageOf, probe } from "../capture-config.mjs";
@@ -119,3 +119,33 @@ it("probe never yields a value from a non-zero exit", () => {
 });
 
 console.log(`\n[capture-config] ${pass} assertions OK`);
+
+// ── F33-4: the manifest must describe ONE artifact ──────────────────────
+// `which` runs in the arm's directory and can answer with a relative path;
+// every reader after it resolved against the MAIN process's cwd instead.
+// With a `./tool` in each of two directories the manifest reported the
+// arm's VERSION beside the caller's executable, digest and package — the
+// one thing a configuration manifest exists to rule out.
+{
+	const root = mkdtempSync(join(tmpdir(), "capture-relcwd-"));
+	const caller = join(root, "caller");
+	const arm = join(root, "arm");
+	for (const [dir, version] of [[caller, "1.0.0"], [arm, "2.0.0"]]) {
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "tool"), `#!/bin/sh\necho ${version}\n`, { mode: 0o755 });
+		writeFileSync(join(dir, "package.json"), JSON.stringify({ name: `package-${dir === arm ? "arm" : "caller"}`, version }));
+	}
+	const prevCwd = process.cwd();
+	process.chdir(caller);
+	try {
+		const cfg = captureArm({ tool: "kiso", command: ["./tool"], cwd: arm });
+		assert.ok(cfg.executable?.endsWith("/arm/tool"), `executable came from the caller: ${cfg.executable}`);
+		assert.equal(cfg.version, "2.0.0", "version came from the wrong directory");
+		assert.equal(cfg.package?.name, "package-arm", "package identity came from the caller");
+		// the digest must be OF THE ARM'S FILE, so it must differ from the caller's
+		assert.notEqual(cfg.entryDigest, digestOf(join(caller, "tool")), "the digest is the caller's file");
+	} finally {
+		process.chdir(prevCwd);
+	}
+	console.log("ok  F33-4: a relative command resolves entirely within the target cwd");
+}

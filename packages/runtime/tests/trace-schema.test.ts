@@ -84,6 +84,7 @@ const canonicalRecord: TraceRecord = {
 	toolCalls: ["read_file", "write_file"],
 	outcome: "ok",
 	purpose: "safer-options",
+	usageKnown: true,
 	lineageLink: {
 		parentSessionId: "session-0142",
 		parentRunId: "run-0142",
@@ -110,9 +111,11 @@ describe("E1 slice 1 — the record schema gate (proposal §1.1)", () => {
 
 	it("every required field missing is rejected", () => {
 		// TUI2-R3v2 ③: `purpose` joins `lineageLink` as an OPTIONAL field —
-		// absent on every run request, present on a side query.
+		// absent on every run request, present on a side query. F33-1 adds
+		// `usageKnown` on the same terms: v5 writers record it, and v1-v4
+		// sidecars have none, which a consumer must read as unknown.
 		for (const key of TRACE_RECORD_FIELDS) {
-			if (key === "lineageLink" || key === "purpose") continue;
+			if (key === "lineageLink" || key === "purpose" || key === "usageKnown") continue;
 			const broken = looseCopy(canonicalRecord);
 			delete broken[key];
 			expect(validateTraceRecord(broken), `missing ${key}`).toBe(false);
@@ -124,6 +127,9 @@ describe("E1 slice 1 — the record schema gate (proposal §1.1)", () => {
 		const noPurpose = looseCopy(canonicalRecord);
 		delete noPurpose.purpose;
 		expect(validateTraceRecord(noPurpose), "a run request carries no purpose").toBe(true);
+		const noUsageKnown = looseCopy(canonicalRecord);
+		delete noUsageKnown.usageKnown;
+		expect(validateTraceRecord(noUsageKnown), "a v1-v4 sidecar carries no usageKnown").toBe(true);
 	});
 
 	it("TUI2-R3v2 ③: `purpose`, when present, must be a NON-EMPTY string", () => {
@@ -158,9 +164,9 @@ describe("E1 slice 1 — the record schema gate (proposal §1.1)", () => {
 	});
 
 	it("schemaVersion is pinned to the current version", () => {
-		// the probe is always ONE PAST the current version — it moved from 4
-		// to 5 when TUI2-R3v2 ③ took 4 for the `purpose` marker.
-		expect(validateTraceRecord({ ...canonicalRecord, schemaVersion: 5 })).toBe(false);
+		// the probe is always ONE PAST the current version — it moved 4 -> 5
+		// for `purpose`, and 5 -> 6 when F33-1 took 5 for `usageKnown`.
+		expect(validateTraceRecord({ ...canonicalRecord, schemaVersion: 6 })).toBe(false);
 		const noVersion = looseCopy(canonicalRecord);
 		delete noVersion.schemaVersion;
 		expect(validateTraceRecord(noVersion)).toBe(false);
@@ -188,9 +194,9 @@ describe("E1 slice 1 — the record schema gate (proposal §1.1)", () => {
 		});
 		expect(hashSpecFor(TRACE_SCHEMA_VERSION)).toEqual({ algorithm: "sha-256", output: "full-hex" });
 		// a version with no pinned algorithm cannot be used — the probe is
-		// ONE PAST the current version (it moved 4 -> 5 when TUI2-R3v2 ③
-		// pinned v4 for the `purpose` marker)
-		expect(() => hashSpecFor(5)).toThrow(/no hash spec pinned/i);
+		// ONE PAST the current version (4 -> 5 for `purpose`, 5 -> 6 when
+		// F33-1 pinned v5 for `usageKnown`)
+		expect(() => hashSpecFor(6)).toThrow(/no hash spec pinned/i);
 		// and the record's hashes are sha-256 full-hex by construction
 		const HEX_64 = /^[0-9a-f]{64}$/;
 		for (const key of ["systemPromptHash", "toolSchemaHash", "contextHash", "stablePrefixFingerprint"] as const) {
@@ -269,8 +275,11 @@ describe("E1 slice 1 — the record schema gate (proposal §1.1)", () => {
 		delete v1.canonical;
 		delete v1.rent;
 		// TUI2-R3v2 ③: a v1 sidecar predates side queries, so it cannot
-		// carry a purpose — every request in it WAS a run request.
+		// carry a purpose — every request in it WAS a run request. F33-1:
+		// nor can it carry usageKnown — a v1 writer had no way to say, and
+		// that silence is exactly what a consumer must read as unknown.
 		delete v1.purpose;
+		delete v1.usageKnown;
 		v1.schemaVersion = 1;
 		expect(validateTraceRecord(v1)).toBe(true); // accepted — readers derive defaults
 		expect(validateTraceLine(v1)).toBe(true);
@@ -289,6 +298,7 @@ describe("E1 slice 1 — the record schema gate (proposal §1.1)", () => {
 		const v2 = looseCopy(canonicalRecord);
 		delete v2.rent;
 		delete v2.purpose; // TUI2-R3v2 ③: predates side queries
+		delete v2.usageKnown; // F33-1: predates the marker; silence = unknown
 		v2.schemaVersion = 2;
 		expect(validateTraceRecord(v2)).toBe(true); // accepted — readers derive defaults
 		expect(validateTraceLine(v2)).toBe(true);
@@ -319,12 +329,13 @@ describe("E1 slice 1 — the record schema gate (proposal §1.1)", () => {
 		expect(validateTraceRecord({ ...canonicalRecord, canonical: { ...c, costUsd: exact + 1e-7 } })).toBe(true); // within epsilon
 	});
 
-	it("the closed-field-set gate spans all FOUR generations (R1d-1, R2-1)", () => {
+	it("the closed-field-set gate spans all FIVE generations (R1d-1, R2-1)", () => {
 		// MOVED (TUI2-R3v2 ③, the safer-options seam adjudicated 2026-08-18):
-		// the v4 generation adds `purpose`. The additive discipline is the
-		// property this case exists for and it is unchanged — each
-		// generation is the previous one plus its new field, in order.
-		expect(TRACE_RECORD_FIELDS).toEqual([...TRACE_RECORD_FIELDS_V1, "canonical", "rent", "purpose"]);
+		// the v4 generation adds `purpose`. MOVED again (F33-1): v5 adds
+		// `usageKnown`. The additive discipline is the property this case
+		// exists for and it is unchanged — each generation is the previous
+		// one plus its new field, in order.
+		expect(TRACE_RECORD_FIELDS).toEqual([...TRACE_RECORD_FIELDS_V1, "canonical", "rent", "purpose", "usageKnown"]);
 		expect(TRACE_RECORD_FIELDS_V3).toEqual([...TRACE_RECORD_FIELDS_V1, "canonical", "rent"]);
 		expect(new Set(TRACE_RECORD_FIELDS_V1).size).toBe(TRACE_RECORD_FIELDS_V1.length);
 	});
