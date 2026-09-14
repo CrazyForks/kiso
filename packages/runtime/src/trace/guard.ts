@@ -241,7 +241,27 @@ export class RequestTracer {
 		// F33-1: the settle path has always been TOLD whether the provider
 		// reported usage; it just never wrote it down, and every consumer
 		// downstream then had to guess from four zeros.
-		record.usageKnown = p.usageKnown;
+		//
+		// F33-R3: but `known` is NOT completeness. Core states the contract
+		// exactly — `known: true` means AT LEAST ONE field was reported and
+		// the others may still be null (protocol/events.ts, Area 6 round 9)
+		// — and canonicalization then fills the unreported ones with zero.
+		// Copying the boolean therefore re-lost the distinction one level
+		// down: a provider that reported input and cache but no output wrote
+		// `usageKnown: true, canonical.output: 0`, and every consumer read a
+		// measured zero.
+		//
+		// What a consumer needs is whether THE FIELDS THE COST IS MADE OF
+		// were each reported. That is a property of the raw quartet, so it
+		// is computed from the raw quartet rather than inherited from a flag
+		// that answers a weaker question. A genuine reported zero stays
+		// known: null is unreported, 0 is measured, and only null makes this
+		// false.
+		record.usageKnown =
+			p.usageKnown &&
+			p.inputTokens !== null &&
+			p.cacheRead !== null &&
+			p.outputTokens !== null;
 		if (p.usageKnown) {
 			record.freshInput =
 				this.#provider === "anthropic"

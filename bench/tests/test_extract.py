@@ -218,8 +218,8 @@ class KisoAccountingTest(unittest.TestCase):
     def test_pi_a_missing_usage_field_is_unknown_not_zero(self):
         d = tempfile.mkdtemp()
         with open(f"{d}/stdout.log", "w") as f:
-            f.write(json.dumps({"type": "message_end", "message": {"usage": {"input": 900, "cacheRead": 0, "output": 40}}}) + "\n")
-            f.write(json.dumps({"type": "message_end", "message": {"usage": {"input": 500}}}) + "\n")  # no output, no cacheRead
+            f.write(json.dumps({"type": "message_end", "message": {"role": "assistant", "usage": {"input": 900, "cacheRead": 0, "output": 40}}}) + "\n")
+            f.write(json.dumps({"type": "message_end", "message": {"role": "assistant", "usage": {"input": 500}}}) + "\n")  # no output, no cacheRead
         m = extract.pi(d)
         self.assertEqual(m["unknown_requests"], 1)
         self.assertTrue(m["usage_incomplete"])
@@ -247,7 +247,7 @@ class KisoAccountingTest(unittest.TestCase):
         # pi: message_end JSONL with usage.input (fresh-only).
         d = tempfile.mkdtemp()
         with open(f"{d}/stdout.log", "w") as f:
-            f.write(json.dumps({"type": "message_end", "message": {"usage": {"input": 800, "cacheRead": 1500, "output": 90}}}) + "\n")
+            f.write(json.dumps({"type": "message_end", "message": {"role": "assistant", "usage": {"input": 800, "cacheRead": 1500, "output": 90}}}) + "\n")
         m = extract.pi(d)
         self.assertEqual(m["fresh"], 800)           # pi input is fresh-only
         self.assertEqual(m["total"], 2300)
@@ -320,6 +320,7 @@ class KisoAccountingTest(unittest.TestCase):
         for i in range(1, 21):                     # turns 21-24 never ran
             with open(f"{d}/stdout-{i}.log", "w") as f:
                 f.write(json.dumps({"type": "message_end", "message": {
+                    "role": "assistant",
                     "usage": {"input": 800, "cacheRead": 1500, "output": 90}}}) + "\n")
         for p in range(4):
             with open(f"{d}/wall_{p + 1}", "w") as f:
@@ -376,7 +377,7 @@ class KisoAccountingTest(unittest.TestCase):
     def test_t5_pi_and_claude_carry_the_same_two_handles(self):
         d = tempfile.mkdtemp()
         with open(f"{d}/stdout-1.log", "w") as f:
-            f.write(json.dumps({"type": "message_end", "message": {"usage": {"input": 500}}}) + "\n")  # incomplete
+            f.write(json.dumps({"type": "message_end", "message": {"role": "assistant", "usage": {"input": 500}}}) + "\n")  # incomplete
         m = extract_t5.pi(d)
         self.assertTrue(m["usage_incomplete"])
         self.assertIn("cost_equivalent", m)
@@ -410,7 +411,7 @@ class MetricV2Test(unittest.TestCase):
     def _pi(self, inp, cache, out):
         d = tempfile.mkdtemp()
         with open(f"{d}/stdout.log", "w") as f:
-            f.write(json.dumps({"type": "message_end", "message": {"usage": {
+            f.write(json.dumps({"type": "message_end", "message": {"role": "assistant", "usage": {
                 "input": inp, "cacheRead": cache, "output": out}}}) + "\n")
         return extract.pi(d)
 
@@ -521,11 +522,58 @@ class UnknownSurvivesTheSidecar(unittest.TestCase):
     def test_pi_keeps_a_request_whose_usage_went_missing(self):
         work = tempfile.mkdtemp(prefix="f33-pi-")
         with open(os.path.join(work, "stdout.log"), "w") as fh:
-            fh.write(json.dumps({"type": "message_end", "message": {"usage": {"input": 1000, "cacheRead": 0, "output": 50}}}) + "\n")
-            fh.write(json.dumps({"type": "message_end", "message": {"usage": {"cacheRead": 0, "output": 50}}}) + "\n")
+            fh.write(json.dumps({"type": "message_end", "message": {"role": "assistant", "usage": {"input": 1000, "cacheRead": 0, "output": 50}}}) + "\n")
+            fh.write(json.dumps({"type": "message_end", "message": {"role": "assistant", "usage": {"cacheRead": 0, "output": 50}}}) + "\n")
         m = extract.pi(work)
         self.assertEqual(m["requests"], 2, "a request with no input vanished from the count")
         self.assertEqual(m["unknown_requests"], 1)
+        self.assertTrue(m["usage_incomplete"])
+
+class PiRolesAreNotAllRequests(unittest.TestCase):
+    """F33-R2 (Astra): pi emits `message_end` for user messages and tool
+    results too. The real calibration archive holds 8 user, 32 assistant and
+    24 toolResult; counting all of them turned a fully measured 32-request
+    leg into 64 requests with 32 unknown, and rejected a valid comparator."""
+
+    def _leg(self, events):
+        work = tempfile.mkdtemp(prefix="f33r2-")
+        with open(os.path.join(work, "stdout.log"), "w") as fh:
+            for e in events:
+                fh.write(json.dumps(e) + "\n")
+        return work
+
+    @staticmethod
+    def _msg(role, **usage):
+        m = {"role": role}
+        if usage:
+            m["usage"] = usage
+        return {"type": "message_end", "message": m}
+
+    def test_only_assistant_completions_are_requests(self):
+        m = extract.pi(self._leg([
+            self._msg("user"),
+            self._msg("assistant", input=100, cacheRead=10, output=5),
+            self._msg("toolResult"),
+            self._msg("assistant", input=200, cacheRead=20, output=7),
+        ]))
+        self.assertEqual(m["requests"], 2, "a user message or a tool result is not a model request")
+        self.assertEqual(m["unknown_requests"], 0)
+        self.assertEqual(m["fresh"], 300)
+
+    def test_an_assistant_completion_with_no_usage_is_still_a_request(self):
+        # F33-2's rule survives R2: it now applies to completions.
+        m = extract.pi(self._leg([self._msg("assistant"), self._msg("user")]))
+        self.assertEqual(m["requests"], 1)
+        self.assertEqual(m["unknown_requests"], 1)
+        self.assertTrue(m["usage_incomplete"])
+
+    def test_a_MISSING_role_is_neither_dropped_nor_priced(self):
+        # Calling it assistant re-admits what R2 excludes; dropping it makes
+        # a request vanish. It counts, and it counts as unknown.
+        m = extract.pi(self._leg([{"type": "message_end", "message": {"usage": {"input": 9, "cacheRead": 0, "output": 1}}}]))
+        self.assertEqual(m["requests"], 1)
+        self.assertEqual(m["unknown_requests"], 1)
+        self.assertEqual(m["fresh"], 0, "an event we cannot classify is never priced")
         self.assertTrue(m["usage_incomplete"])
 
 if __name__ == "__main__":

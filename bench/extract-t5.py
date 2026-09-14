@@ -103,6 +103,31 @@ def kiso(work):
                 usage_incomplete=unknown > 0 or undecidable > 0,
                 undecidable_sessions=undecidable)
 
+def completion_role(ev):
+    """What a pi `message_end` IS: "assistant", another role, or unknown.
+
+    F33-R2: pi emits message_end for user messages and tool results too —
+    the real calibration archive holds 8 user, 32 assistant and 24
+    toolResult — and counting all of them doubled a fully measured
+    32-request leg to 64 with 32 "unknown".
+
+    A MISSING role is its own answer and neither of the two convenient
+    ones. Calling it assistant re-admits the events R2 exists to exclude;
+    dropping it makes a request vanish, which is the same error one level
+    earlier. So it is counted as a completion whose usage is UNKNOWN: the
+    leg goes incomplete and says so, rather than being silently inflated or
+    silently shrunk.
+
+    The request COUNTER shares this predicate. Two definitions of "a
+    request" is how a leg's count and its ledger stop agreeing.
+    """
+    msg = ev.get("message")
+    if not isinstance(msg, dict):
+        return None
+    role = msg.get("role")
+    return role if isinstance(role, str) and role != "" else None
+
+
 def pi(work):
     inp = out = cache = reqs = unknown = 0
     for i in range(1, 9):
@@ -119,14 +144,22 @@ def pi(work):
                 continue
             if not isinstance(ev, dict) or ev.get("type") != "message_end":
                 continue
-            # F33-2: a `message_end` IS a billable completion. The old
-            # filter admitted it only when a usage block with an `input`
-            # key was present, so a request whose usage was missing —
-            # entirely, or just its input — vanished from the request count
-            # as well as the unknown count. A request nobody measured must
-            # still be a request; dropping it is the same error as pricing
-            # it at zero, one level earlier.
+            # F33-R2: only an ASSISTANT completion is a model request.
+            # Native pi emits message_end for user messages and tool results
+            # too — the real calibration archive holds 8 user, 32 assistant
+            # and 24 toolResult — and counting all of them doubled a fully
+            # measured 32-request leg to 64 with 32 "unknown".
+            #
+            # F33-2's rule stands and simply applies to completions: one
+            # nobody measured is still one, so the role is checked before
+            # the usage and the usage after.
+            _role = completion_role(ev)
+            if _role is not None and _role != "assistant":
+                continue
             reqs += 1
+            if _role is None:
+                unknown += 1
+                continue
             m = ev.get("message")
             u = (m.get("usage") if isinstance(m, dict) else None) or {}
             i, ca, o = (u.get("input"), u.get("cacheRead"), u.get("output")) if isinstance(u, dict) else (None, None, None)

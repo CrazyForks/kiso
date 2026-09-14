@@ -63,7 +63,22 @@ export const TRACE_SCHEMA_VERSION = 5;
 /** The versions a reader may meet in a ledger. v1 and v2 records are
  *  accepted (generation-compat) and read as defaults — no canonical
  *  block (v1), no rent block (v1, v2). */
-export const TRACE_SCHEMA_VERSIONS: Readonly<Set<number>> = new Set([1, 2, 3, TRACE_SCHEMA_VERSION]);
+/**
+ * EVERY generation ever written, named explicitly.
+ *
+ * F33-R1: this was `[1, 2, 3, TRACE_SCHEMA_VERSION]`, and a set spelled
+ * with a MOVING member drops the generation it was standing on every time
+ * the version rises. Raising 4 to 5 silently removed 4 — the version every
+ * trace the deployed 0.36.0 has ever written carries — so the reader
+ * stopped accepting the product's own live output while a v5 record went
+ * through. The whole generation-compat discipline exists to prevent that,
+ * and its own constant undid it.
+ *
+ * A new version is added here BY HAND, next to its field set and its hash
+ * spec. Three lists to extend is the point: a bump that forgets one is a
+ * bump that fails loudly rather than a reader that quietly narrows.
+ */
+export const TRACE_SCHEMA_VERSIONS: Readonly<Set<number>> = new Set([1, 2, 3, 4, 5]);
 
 import { PRICING_TABLE_V1, priceFor, pricingTableFor, validateCanonicalUsage } from "../usage/canonical.js";
 import type { CanonicalUsage } from "../usage/canonical.js";
@@ -319,9 +334,20 @@ export function validateTraceRecord(v: unknown): v is TraceRecord {
 	// no `purpose` on any record, which reads as "every request was a run
 	// request", the true statement about a ledger written before side
 	// queries existed.
-	if (version !== 1 && version !== 2 && version !== 3 && version !== TRACE_SCHEMA_VERSION) return false;
+	// F33-R1: the same moving-member defect lived here too. Every generation
+	// dispatches to ITS OWN field set; v4 is not "whatever the current one
+	// is minus a field", it is the set a v4 writer actually emitted.
+	if (typeof version !== "number" || !TRACE_SCHEMA_VERSIONS.has(version)) return false;
 	const fields =
-		version === 1 ? TRACE_RECORD_FIELDS_V1 : version === 2 ? TRACE_RECORD_FIELDS_V2 : version === 3 ? TRACE_RECORD_FIELDS_V3 : TRACE_RECORD_FIELDS;
+		version === 1
+			? TRACE_RECORD_FIELDS_V1
+			: version === 2
+				? TRACE_RECORD_FIELDS_V2
+				: version === 3
+					? TRACE_RECORD_FIELDS_V3
+					: version === 4
+						? TRACE_RECORD_FIELDS_V4
+						: TRACE_RECORD_FIELDS;
 	if (!hasClosedKeys(v, fields, ["lineageLink", ...TRACE_RECORD_OPTIONAL])) return false;
 	if (v.purpose !== undefined && (typeof v.purpose !== "string" || v.purpose === "")) return false;
 	if (v.kind !== "request") return false;

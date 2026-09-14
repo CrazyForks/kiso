@@ -93,9 +93,14 @@ over_budget() {
 		mark_incomplete "$WORK" deadline "the leg's ${LEG_DEADLINE_S}s wall budget was spent"
 		LEG_STOPPED=deadline; return 0
 	fi
-	_reqs=$(requests_so_far "$WORK" "$TOOL")
+	# F33-R5: a counter that cannot answer stops the leg rather than waving
+	# it through. "unknown requests so far" is not "none so far".
+	if ! _reqs=$(requests_so_far "$WORK" "$TOOL"); then
+		mark_incomplete "$WORK" counter "the request counter could not read this leg's ledger"
+		LEG_STOPPED=counter; return 0
+	fi
 	if [ "$_reqs" -ge "$LEG_MAX_REQUESTS" ]; then
-		mark_incomplete "$WORK" requests "the leg reached $_reqs requests (ceiling $LEG_MAX_REQUESTS)"
+		mark_incomplete "$WORK" requests "the leg was admitted at $_reqs requests (segment-admission ceiling $LEG_MAX_REQUESTS; not a hard cap during a process)"
 		LEG_STOPPED=requests; return 0
 	fi
 	return 1
@@ -117,15 +122,36 @@ case "$TOOL" in
       "OPENAI_MODEL=deepseek-v4-flash" "KISO_EXTENSIONS_DIR=$EXTDIR" \
       "KISO_HOME=$WORK/kiso-home" "KISO_SKILLS_DIR=$SKILLDIR" "KISO_NO_UPDATE_CHECK=1"
     KISO_ENV_PAIRS="$*"
+    # F33-R4: the exit status is KEPT, not discarded. Every segment used to
+    # end in `|| true`, and the absence of a limit status later became
+    # `complete` — a fake CLI that reported a valid version and exited 7 on
+    # every invocation produced three launch-error logs, runner rc=0 and a
+    # leg recorded as COMPLETE. The verifier caught that particular fixture,
+    # but the execution-validity record was false, and a killed FINAL
+    # segment needs no successor to check it.
+    #
+    # 142 is the deadline (perl's alarm, through the shell). Anything else
+    # non-zero is the process failing to run or failing while running; both
+    # are OURS or the environment's, never the task's verdict.
+    SEG_FAILURE=""
     seg() { # seg <n> <stdin-producer...>
       _n=$1; shift
       over_budget && return 0
       _left=$(remaining)
       S=$(date +%s)
+      set +e
       # shellcheck disable=SC2086
       "$@" | bare_bounded "$BARE_HOME" "$_left" "$WORK/stdout-$_n.log" \
-        $KISO_ENV_PAIRS -- $KISO_BIN --mode bypass "bench-t5-$TOOL-$RUN" || true
+        $KISO_ENV_PAIRS -- $KISO_BIN --mode bypass "bench-t5-$TOOL-$RUN"
+      _rc=$?
+      set -e
       E=$(date +%s); TOT=$((TOT + E - S))
+      printf '%s\n' "$_rc" > "$WORK/exit-$_n"
+      if [ "$_rc" -eq 142 ]; then
+        [ -n "$SEG_FAILURE" ] || SEG_FAILURE="deadline:segment $_n hit the ${_left}s remaining wall budget"
+      elif [ "$_rc" -ne 0 ]; then
+        [ -n "$SEG_FAILURE" ] || SEG_FAILURE="launch_or_run_error:segment $_n exited $_rc"
+      fi
     }
     seg 1 printf '%s\n' "$(TURN 1)" "$(TURN 2)" "$(TURN 3)" "$(TURN 4)" "$(TURN 5)"
     seg 2 printf '/compact\n'
@@ -245,7 +271,15 @@ cfg.task = 'T5'; cfg.run = '$RUN'; cfg.round = process.env.KISO_ROUND || null;
 cfg.legDeadlineSeconds = $LEG_DEADLINE_S; cfg.legMaxRequests = $LEG_MAX_REQUESTS;
 writeFileSync('$WORK/config.json', JSON.stringify(cfg, null, 1) + '\n');
 " 2>/dev/null || echo "WARN: configuration capture failed for $TOOL" >&2
-[ -f "$WORK/status" ] || mark_complete "$WORK"
+# F33-R4: execution validity is decided BEFORE the task verdict, and the
+# two are kept apart. A leg whose process never ran did not fail the task.
+if [ -f "$WORK/status" ]; then
+  : # a budget limit already classified this leg
+elif [ -n "$SEG_FAILURE" ]; then
+  mark_incomplete "$WORK" "${SEG_FAILURE%%:*}" "${SEG_FAILURE#*:}"
+else
+  mark_complete "$WORK"
+fi
 VERIFY=$("$B/t5-verify.sh" "$WORK/repo")
 echo "$VERIFY" > "$WORK/verify"
 echo "DONE T5 $TOOL run=$RUN wall=${TOT}s verify=$VERIFY"

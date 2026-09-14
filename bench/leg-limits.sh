@@ -1,5 +1,18 @@
 #!/bin/sh
-# PER-LEG HARD LIMITS — wall clock and request ceiling.
+# PER-LEG LIMITS — a hard wall clock, and a SEGMENT-ADMISSION request check.
+#
+# F33-R5: the request number is NOT a hard per-leg cap and this file used to
+# imply it was. It is checked before each process starts, never while one is
+# making requests: with a ceiling of 1, a first segment wrote five requests
+# before the runner noticed, and a single looping process can spend
+# arbitrarily more until the WALL deadline stops it. The wall clock is the
+# only bound that holds during a process.
+#
+# Enforcing it properly means refusing at request admission, inside the
+# product, which is not something a runner can do from outside. Until that
+# exists, this is named for what it does — and it must never be cited as
+# evidence that the programme's request budget is bounded. The wall deadline
+# is what bounds a runaway leg.
 #
 # A leg had neither. A hung arm ran until someone noticed; a looping arm
 # spent the programme's budget on one task. With caps of ¥50, 3,500 requests
@@ -31,6 +44,10 @@ run_bounded() {
 
 # requests_so_far <workdir> <tool>
 #
+# F33-R5: a counter failure must not read as zero. `|| _n=0` below turns an
+# unreadable ledger into "no requests yet", which is the one answer that
+# never stops a leg. It now distinguishes them.
+#
 # Delegates to requests-so-far.mjs, which uses THE EXTRACTOR'S definition of a
 # request, per arm. The first version grepped for lines containing "usage":
 # pi carries a usage block on every streaming `message_update`, so a healthy
@@ -46,8 +63,13 @@ requests_so_far() {
 	# and silently found nothing from bench/tests/. The caller's $B is the
 	# bench directory; the $0 fallback is only for a direct run from bench/.
 	_bench=${B:-$(cd "$(dirname "$0")" && pwd)}
-	_n=$(node "$_bench/requests-so-far.mjs" "$1" "$2" 2>/dev/null) || _n=0
-	[ -n "$_n" ] || _n=0
+	if ! _n=$(node "$_bench/requests-so-far.mjs" "$1" "$2" 2>/dev/null) || [ -z "$_n" ]; then
+		# UNREADABLE, not zero. Returning 0 would say "plenty of budget left"
+		# on exactly the evidence that we cannot tell — the direction that
+		# never stops anything.
+		echo "unknown"
+		return 1
+	fi
 	echo "$_n"
 }
 
