@@ -31,6 +31,16 @@ import { isMain } from "../scripts/is-main.mjs";
 /** Provider-side refusals: ours to retry later, never the product's fault. */
 const PROVIDER_STATUS = (s) => s === 402 || s === 429 || (s >= 500 && s <= 599);
 
+/**
+ * A TRANSPORT failure is infrastructure too, and it carries no HTTP status.
+ * The first version tested only the status code, so a leg that lost two
+ * turns to `code: "network", message: "Connection error."` came back as
+ * `error_terminal` — the class reserved for errors that ARE the product's.
+ * Nothing about a dropped connection is the product's, and a comparison
+ * that scores it as one is measuring the network.
+ */
+const INFRA_CODE = (c) => c === "network" || c === "timeout";
+
 export function classify(work, { rc = 0, expectedTurns = null } = {}) {
 	const dir = join(work, "kiso-home", "sessions");
 	if (!existsSync(dir)) return { status: "startup_error", reason: "no session directory" };
@@ -49,6 +59,7 @@ export function classify(work, { rc = 0, expectedTurns = null } = {}) {
 	}
 	const errs = terminals.filter((o) => o.kind === "error");
 	const provider = errs.filter((o) => PROVIDER_STATUS(Number(o.error?.status)));
+	const transport = errs.filter((o) => INFRA_CODE(o.error?.code));
 	const base = {
 		turns: terminals.length,
 		completedTurns: terminals.filter((o) => o.kind === "completed").length,
@@ -57,6 +68,10 @@ export function classify(work, { rc = 0, expectedTurns = null } = {}) {
 	};
 	if (provider.length > 0) {
 		return { ...base, status: "vendor_interrupted", reason: `${provider.length} provider refusal(s) ended turns` };
+	}
+	if (transport.length > 0) {
+		return { ...base, status: "transport_failure", reason: `${transport.length} transport error(s) ended turns`,
+			transportErrors: transport.map((o) => `${o.error?.code} ${o.error?.message ?? ""}`.trim()).slice(0, 4) };
 	}
 	if (rc === 142) return { ...base, status: "deadline", reason: "killed at the wall-clock cap" };
 	if (errs.length > 0) return { ...base, status: "error_terminal", reason: `${errs.length} error terminal(s), none from the provider` };
