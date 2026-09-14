@@ -112,7 +112,10 @@ describe("D: byte-identical projection discipline", () => {
 		// byte-discipline gate". The three admission conditions are what this
 		// pins: (i) old logs project byte-identically, (iii) the field never
 		// changes the meaning of existing bytes. (ii), the validator's true
-		// optionality, is pinned in event-schema's isUsage cases.
+		// optionality, is pinned by event-schema's `TRACE-F1: servedModel is
+		// optional` case — which did NOT exist when this comment first
+		// claimed it did (Astra caught the claim). A comment asserting a
+		// gate is not a gate.
 		//
 		// The field is the SERVER's statement about which model answered. It
 		// is recorded so a silently aliased id stops being invisible — it is

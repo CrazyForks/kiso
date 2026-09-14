@@ -461,8 +461,16 @@ export interface Usage {
 	 * Optional because it is the SERVER's statement, not ours: a provider
 	 * that reports no model leaves this undefined, and undefined means
 	 * "not stated", never "same as requested" (Area 6 — unknown is not a
-	 * default). It rides the usage event because that is emitted exactly
-	 * once per call, at the point where the adapter holds the response.
+	 * default).
+	 *
+	 * It rides the usage event because that is where the adapter holds the
+	 * response. NOT because usage arrives once: the contract is AT LEAST
+	 * once, and the openai-compat adapter has three exits that can emit it
+	 * — believing otherwise is what W22-R1 was, where a second report for
+	 * one call was added to the first and put a wrong number on screen. A
+	 * consumer of this field must therefore expect repeats, and they are
+	 * the same statement rather than two: the adapters capture the served
+	 * id ONCE per call and every exit reports that one value.
 	 */
 	readonly servedModel?: string;
 }

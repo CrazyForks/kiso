@@ -278,14 +278,21 @@ case "$TOOL" in
   pi)     ARM_CMD="pi";        ARM_MODEL="deepseek-v4-flash"; ARM_ENDPOINT="https://api.deepseek.com"; ARM_ENV="DEEPSEEK_API_KEY" ;;
   claude) ARM_CMD="claude";    ARM_MODEL="deepseek-v4-flash"; ARM_ENDPOINT="https://api.deepseek.com/anthropic"; ARM_ENV="ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_MODEL" ;;
 esac
-OBSERVED_MODEL=$(node "$B/observed-model.mjs" "$WORK" "$TOOL" 2>/dev/null || echo "")
-export OBSERVED_MODEL
+# TRACE-F1-R1: the WHOLE-leg aggregate, not the first answer. A scalar
+# could not say "two different models answered this leg", and the manifest
+# read that as agreement.
+OBSERVED_MODEL_JSON=$(node -e '
+import("'"$B"'/observed-model.mjs").then((m) => {
+  process.stdout.write(JSON.stringify(m.observedModels(process.argv[1], process.argv[2])));
+}).catch(() => process.stdout.write(""));
+' "$WORK" "$TOOL" 2>/dev/null || echo "")
+export OBSERVED_MODEL_JSON
 node --input-type=module -e "
 import { captureArm } from '$B/capture-config.mjs';
 import { writeFileSync } from 'node:fs';
 const observed = {};
-const m = process.env.OBSERVED_MODEL;
-if (m) observed.model = m;
+const mj = process.env.OBSERVED_MODEL_JSON;
+if (mj) { try { observed.model = JSON.parse(mj); } catch {} }
 const cfg = captureArm({
   tool: '$TOOL',
   command: '$ARM_CMD'.split(' ').filter(Boolean),
