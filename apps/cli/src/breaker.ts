@@ -18,8 +18,8 @@
  * deny beat `bypass` — and the model receives it as the call's result with
  * the reason (the 1c grammar: refuse with a reason and continue), so the
  * next turn has to change course. The human sees the denial on the
- * transcript with `decidedBy: breaker`; the 50-turn checkpoint (part two)
- * is where a human is asked.
+ * transcript with `decidedBy: breaker`. LT2B-F1 removes the periodic
+ * turn-count question; this evidence-based refusal remains independent.
  *
  * Counting: CONSECUTIVE failed results of one (tool, input) key within a
  * run. A success, a different call, or the run's terminal resets it. The
