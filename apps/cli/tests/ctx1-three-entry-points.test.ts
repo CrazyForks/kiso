@@ -29,13 +29,32 @@ import { SessionStore } from "@vincemakes/kiso-runtime";
 
 const CLI = join(new URL("../..", import.meta.url).pathname, "cli", "dist", "index.js");
 const SESSION = "s";
-/** KISO_FAUX_SCRIPT names a FILE, not inline JSON. One turn, ending cleanly:
- *  the run has to reach its first turn for the boundary decision to happen at
- *  all, and nothing beyond that is under test here. */
+/** KISO_FAUX_SCRIPT names a FILE, not inline JSON.
+ *
+ *  F34-R1 (Astra): this held EIGHT responses while the seed advances the
+ *  script position past FIFTY, so every continuation exhausted the script
+ *  and exited 1 with "the scripted demo turns are exhausted". The test
+ *  reported 6/6 green anyway, because it counted only boundaries — and the
+ *  boundary is written BEFORE the model request, so it survives a run that
+ *  then dies. Enough responses to outlast the seed, by a wide margin. */
 function fauxScript(): string {
 	const f = join(mkdtempSync(join(tmpdir(), "kiso-ctx1-faux-")), "faux.json");
-	writeFileSync(f, JSON.stringify(Array.from({ length: 8 }, () => ({ events: [{ type: "stop", reason: "end_turn" }] }))));
+	writeFileSync(f, JSON.stringify(Array.from({ length: 200 }, () => ({ events: [{ type: "stop", reason: "end_turn" }] }))));
 	return f;
+}
+
+/** Terminals whose outcome is `completed`, from the durable log. */
+function completedTerminals(home: string): number {
+	const log = join(home, "sessions", `${SESSION}.jsonl`);
+	let n = 0;
+	for (const line of readFileSync(log, "utf8").split("\n")) {
+		if (line.trim() === "") continue;
+		let rec: { event?: { type?: string; outcome?: { kind?: string } } };
+		try { rec = JSON.parse(line) as typeof rec; } catch { continue; }
+		const e = rec.event ?? (rec as { type?: string; outcome?: { kind?: string } });
+		if (e.type === "terminal" && e.outcome?.kind === "completed") n += 1;
+	}
+	return n;
 }
 
 /** A history whose projected estimate lands between the two thresholds:
@@ -83,10 +102,28 @@ function boundaries(home: string): number {
 /** One door, from a clean isolated home: create, seed, record, reopen. */
 async function openThrough(args: readonly string[], modelId: string): Promise<number> {
 	const { env, dirs } = isolatedEnv({ KISO_FAUX_SCRIPT: fauxScript() });
-	runCli(["-p", "first", SESSION], env);
+
+	// F34-R1: EVERY step is asserted to have worked before the boundary
+	// count means anything. The first version asserted none of them, and all
+	// six continuations were exiting 1 on an exhausted script while the test
+	// read 6/6 green. A control does not protect you when it reads the SAME
+	// signal as the case: both "a boundary appeared" and "no boundary
+	// appeared" survive a run that died, because the boundary is written
+	// before the model request.
+	const created = runCli(["-p", "first", SESSION], env);
+	expect(created.status, `creating the session failed: ${created.stderr}`).toBe(0);
+
 	await seedHistory(dirs.home);
 	recordModel(dirs.home, modelId);
-	runCli([...args], env);
+	const before = completedTerminals(dirs.home);
+
+	const reopened = runCli([...args], env);
+	expect(reopened.status, `${args.join(" ")} failed: ${reopened.stderr}`).toBe(0);
+	expect(
+		completedTerminals(dirs.home),
+		`${args.join(" ")} produced no NEW completed terminal — it did not actually run a turn`,
+	).toBeGreaterThan(before);
+
 	return boundaries(dirs.home);
 }
 
