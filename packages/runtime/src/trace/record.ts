@@ -350,6 +350,11 @@ export function validateTraceRecord(v: unknown): v is TraceRecord {
 						: TRACE_RECORD_FIELDS;
 	if (!hasClosedKeys(v, fields, ["lineageLink", ...TRACE_RECORD_OPTIONAL])) return false;
 	if (v.purpose !== undefined && (typeof v.purpose !== "string" || v.purpose === "")) return false;
+	// F33-R8: the completeness marker is a BOOLEAN. It was accepted as
+	// anything at all, so a record carrying `usageKnown: "yes"` validated and
+	// every consumer that branches on it read truthy — a marker a reader acts
+	// on has to be the type it claims to be.
+	if (v.usageKnown !== undefined && typeof v.usageKnown !== "boolean") return false;
 	if (v.kind !== "request") return false;
 	if (typeof v.requestId !== "string" || typeof v.runId !== "string") return false;
 	if (!isNonNegInt(v.requestIndex) || !isNonNegInt(v.retryAttempt)) return false;

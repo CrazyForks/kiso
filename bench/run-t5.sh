@@ -109,6 +109,25 @@ over_budget() {
 cd "$WORK/repo"
 TURN() { node -e "console.log(JSON.parse(require('fs').readFileSync('$B/tasks-t5.json','utf8'))[$1-1])"; }
 
+# F33-R6: declared for EVERY arm, not inside one. It lived in the kiso
+# branch while the completion decision at the end is shared by all three, so
+# a pi or claude leg reached that line with the variable never set and
+# `set -u` killed the runner — after the work was done, leaving no status and
+# no verify record. Initialising it alone would only have turned the crash
+# into silence: those two arms discard their exit codes as well, so they
+# record them now too.
+SEG_FAILURE=""
+
+# note_exit <label> <rc> <budget-seconds> — one classifier for three arms.
+note_exit() {
+	[ "$2" -eq 0 ] && return 0
+	if [ "$2" -eq 142 ]; then
+		[ -n "$SEG_FAILURE" ] || SEG_FAILURE="deadline:$1 hit the $3s remaining wall budget"
+	else
+		[ -n "$SEG_FAILURE" ] || SEG_FAILURE="launch_or_run_error:$1 exited $2"
+	fi
+}
+
 case "$TOOL" in
   kiso)
     EXTDIR="$WORK/ext"; mkdir -p "$EXTDIR"; cp "$B/bench-allow.mjs" "$EXTDIR/"
@@ -133,7 +152,6 @@ case "$TOOL" in
     # 142 is the deadline (perl's alarm, through the shell). Anything else
     # non-zero is the process failing to run or failing while running; both
     # are OURS or the environment's, never the task's verdict.
-    SEG_FAILURE=""
     seg() { # seg <n> <stdin-producer...>
       _n=$1; shift
       over_budget && return 0
@@ -147,11 +165,7 @@ case "$TOOL" in
       set -e
       E=$(date +%s); TOT=$((TOT + E - S))
       printf '%s\n' "$_rc" > "$WORK/exit-$_n"
-      if [ "$_rc" -eq 142 ]; then
-        [ -n "$SEG_FAILURE" ] || SEG_FAILURE="deadline:segment $_n hit the ${_left}s remaining wall budget"
-      elif [ "$_rc" -ne 0 ]; then
-        [ -n "$SEG_FAILURE" ] || SEG_FAILURE="launch_or_run_error:segment $_n exited $_rc"
-      fi
+      note_exit "segment $_n" "$_rc" "$_left"
     }
     seg 1 printf '%s\n' "$(TURN 1)" "$(TURN 2)" "$(TURN 3)" "$(TURN 4)" "$(TURN 5)"
     seg 2 printf '/compact\n'
@@ -173,12 +187,17 @@ fs.writeFileSync('$WORK/meta.json', JSON.stringify(meta, null, 1) + '\n');
     assert_bare pi "$BARE_HOME" || exit 1
     for i in 1 2 3 4 5 6 7 8; do
       over_budget && break
-      S=$(date +%s)
-      bare_bounded "$BARE_HOME" "$(remaining)" "$WORK/stdout-$i.log" \
+      S=$(date +%s); _left=$(remaining)
+      set +e
+      bare_bounded "$BARE_HOME" "$_left" "$WORK/stdout-$i.log" \
         "DEEPSEEK_API_KEY=$DEEPSEEK_API_KEY" -- \
         pi --provider deepseek --model deepseek-v4-flash -p --mode json \
-        --session "$WORK/pi-session" "$(TURN $i)" < /dev/null || true
+        --session "$WORK/pi-session" "$(TURN $i)" < /dev/null
+      _rc=$?
+      set -e
       E=$(date +%s); TOT=$((TOT + E - S))
+      printf '%s\n' "$_rc" > "$WORK/exit-$i"
+      note_exit "turn $i" "$_rc" "$_left"
     done
     ;;
   claude)
@@ -197,11 +216,15 @@ fs.writeFileSync('$WORK/meta.json', JSON.stringify(meta, null, 1) + '\n');
     SID=""
     for i in 1 2 3 4 5 6 7 8; do
       over_budget && break
-      S=$(date +%s)
+      S=$(date +%s); _left=$(remaining)
       if [ -z "$SID" ]; then
-        bare_bounded "$BARE_HOME" "$(remaining)" "$WORK/stdout-$i.log" \
+        set +e
+        bare_bounded "$BARE_HOME" "$_left" "$WORK/stdout-$i.log" \
           $CLAUDE_ENV_PAIRS -- \
-          claude -p "$(TURN $i)" --output-format json --strict-mcp-config --mcp-config '{"mcpServers":{}}' --dangerously-skip-permissions < /dev/null || true
+          claude -p "$(TURN $i)" --output-format json --strict-mcp-config --mcp-config '{"mcpServers":{}}' --dangerously-skip-permissions < /dev/null
+        _rc=$?; set -e
+        printf '%s\n' "$_rc" > "$WORK/exit-$i"
+        note_exit "turn $i" "$_rc" "$_left"
         # PARSE PER LINE. Claude Code prints warnings around its result JSON
         # — `[claude-code:unrecognized_model] {...}` is line one here — so
         # `json.load(whole file)` throws and SID stayed empty. Every turn then
@@ -224,9 +247,13 @@ for line in open('$WORK/stdout-$i.log', errors='ignore'):
 " 2>/dev/null || true)
         [ -n "$SID" ] || echo "WARN: no session_id in turn $i — the next turn cannot resume" >&2
       else
-        bare_bounded "$BARE_HOME" "$(remaining)" "$WORK/stdout-$i.log" \
+        set +e
+        bare_bounded "$BARE_HOME" "$_left" "$WORK/stdout-$i.log" \
           $CLAUDE_ENV_PAIRS -- \
-          claude -p "$(TURN $i)" --resume "$SID" --output-format json --strict-mcp-config --mcp-config '{"mcpServers":{}}' --dangerously-skip-permissions < /dev/null || true
+          claude -p "$(TURN $i)" --resume "$SID" --output-format json --strict-mcp-config --mcp-config '{"mcpServers":{}}' --dangerously-skip-permissions < /dev/null
+        _rc=$?; set -e
+        printf '%s\n' "$_rc" > "$WORK/exit-$i"
+        note_exit "turn $i" "$_rc" "$_left"
       fi
       E=$(date +%s); TOT=$((TOT + E - S))
     done

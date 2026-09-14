@@ -70,8 +70,21 @@ export function requestsSoFar(work, tool) {
 			if (tool === "pi") {
 				// the extractor's own rule: the FINAL per-request usage
 				if (o?.type !== "message_end") continue;
-				const u = o?.message?.usage;
-				if (u && typeof u === "object" && "input" in u) n++;
+				// F33-R7: ONE definition of a request, shared with the
+				// extractors. This tested `"input" in usage`, so an assistant
+				// completion whose usage never arrived counted as 1 there and
+				// 0 here — the ledger and the ceiling disagreeing about the
+				// same leg, which is the exact failure the shared predicate
+				// was introduced to prevent and which this file was not
+				// included in.
+				//
+				// Role first, usage after: pi emits message_end for user
+				// messages and tool results too. A missing role is counted,
+				// because an event we cannot classify must not be the one
+				// that silently frees up budget.
+				const role = o?.message?.role;
+				if (typeof role === "string" && role !== "" && role !== "assistant") continue;
+				n++;
 			} else {
 				// Claude Code prints one result object per invocation and
 				// reports how many turns it took inside it.
