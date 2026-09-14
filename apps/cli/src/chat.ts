@@ -66,23 +66,58 @@ export function autoCompactFromEnv(): AutoCompact | undefined {
  * config window (merge round B), both beat the 200k default. The microcompact
  * threshold is derived from it (50%), and the status line's ~ctx estimate
  * is measured against it — one source of truth for the window.
+ *
+ * CTX-1: with no argument this reads the LIVE binding, which is what every
+ * display caller wants. `/model` needs the window of the model it is
+ * switching TO, before that binding is live, so it passes the pair
+ * explicitly. Reading module state a caller is about to change is how the
+ * threshold got stuck in the first place.
+ *
+ * The argument is a PAIR, never two optional halves: a profile with no
+ * `baseUrl` is endpoint-less, and a half-given argument would have it
+ * inherit the OUTGOING model's endpoint — the same bug one field over.
  */
-export function contextWindowTokens(): number {
+export function contextWindowTokens(of?: { readonly model: string; readonly baseUrl?: string }): number {
 	const windowOverride = configuredWindow;
 	if (windowOverride !== undefined) return windowOverride;
 	const window = Number.parseInt(process.env.KISO_CONTEXT_WINDOW ?? "", 10);
 	if (Number.isFinite(window) && window > 0) return window;
 	// PH-1c (finding PH-F15): the window follows the LIVE model when the
 	// metadata registry knows it — /model to a known model moves the
-	// window (and the microcompact threshold derived from it) without an
-	// env var. agentModel is the same live binding the status row shows;
-	// an unknown model keeps the 200k default — the registry never
-	// guesses, so neither do we. OR-1: the ENDPOINT narrows the row —
-	// gpt-5.5 is 1,050,000 at the first-party API and 272,000 at the
-	// subscription backend; the two are set together (setAgentModel).
-	const known = lookupModelMetadata(agentModel, agentBaseUrl)?.capabilities.contextWindow;
+	// window without an env var. The default argument is the same live
+	// binding the status row shows; an unknown model keeps the 200k
+	// default — the registry never guesses, so neither do we. OR-1: the
+	// ENDPOINT narrows the row — gpt-5.5 is 1,050,000 at the first-party
+	// API and 272,000 at the subscription backend; the two are set
+	// together (setAgentModel).
+	//
+	// CTX-1 erratum: this comment used to add "(and the microcompact
+	// threshold derived from it)". The window moved; the threshold did
+	// not — it was computed once at startup and the switch path never
+	// asked again. The claim is true now because the switch path calls
+	// `microcompactThresholdFor` below, not because deriving a number
+	// from this function makes anything follow it.
+	const known = lookupModelMetadata(of?.model ?? agentModel, of !== undefined ? of.baseUrl : agentBaseUrl)?.capabilities.contextWindow;
 	if (known !== undefined && known !== null) return known;
 	return DEFAULT_CONTEXT_WINDOW;
+}
+
+/**
+ * CTX-1: THE ONE derivation of the compaction threshold from the window.
+ *
+ * Startup (`index.ts`) and the `/model` switch (`dispatch.ts`) both need
+ * this number, and two call sites computing the same thing is how
+ * `promptCacheKey` drifted before `adapterOptionsFor` collected it. The
+ * policy — half the window — lives here and nowhere else.
+ *
+ * CAPACITY is not POLICY. The window is what the model can hold; this is
+ * when we choose to clear old tool results. They are 2:1 today because
+ * that ratio has never been measured, not because it is derived from
+ * anything. Moving the policy means changing this line, and the whole
+ * product moves with it.
+ */
+export function microcompactThresholdFor(of?: { readonly model: string; readonly baseUrl?: string }): number {
+	return contextWindowTokens(of) / 2;
 }
 
 /**
