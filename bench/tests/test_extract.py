@@ -576,5 +576,89 @@ class PiRolesAreNotAllRequests(unittest.TestCase):
         self.assertEqual(m["fresh"], 0, "an event we cannot classify is never priced")
         self.assertTrue(m["usage_incomplete"])
 
+def _v5_request(marker, canonical=True, **over):
+    """A conforming v5 request record, with the completeness marker under
+    test. `canonical` selects which of the extractor's TWO branches reads
+    it — the canonical block (v2+) or the guard's freshInput (v1)."""
+    rec = {"schemaVersion": 5, "kind": "request", "requestId": "r1", "runId": "r1",
+           "requestIndex": 0, "retryAttempt": 0, "provider": "openai-compat",
+           "model": "m", "adapterVersion": "1", "systemPromptHash": "a" * 64,
+           "toolSchemaHash": "b" * 64, "contextHash": "c" * 64, "contextManifest": [],
+           "segmentHashes": [], "stablePrefixFingerprint": "d" * 64,
+           "freshInput": 58, "cacheRead": 1920, "cacheWrite": None, "output": 111,
+           "latencyMs": 1, "ttftMs": 1, "toolCalls": [], "outcome": "ok", "ts": 1}
+    if marker is not _ABSENT:
+        rec["usageKnown"] = marker
+    if canonical:
+        rec["canonical"] = {"input": 58, "cacheRead": 1920, "cacheWrite": None,
+                            "output": 111, "reasoning": None, "costUsd": 0.1,
+                            "pricingTableVersion": 1}
+    rec.update(over)
+    return rec
+
+
+_ABSENT = object()
+
+
+class MalformedCompletenessMarkerTest(unittest.TestCase):
+    """F33-RR3 (Astra) — the consumer half of "unknown is not zero".
+
+    The TypeScript validator rejects a non-boolean `usageKnown`; these two
+    extractors parse the sidecar themselves and never call it. They tested
+    `is False`, so a record carrying the STRING "false" was not unknown —
+    and, the key being present, it also skipped the pre-v5 fallback that
+    consults the sibling plain log. A corrupt marker read as a fully
+    measured request: the very defect the marker exists to close, through
+    the one door nobody checked.
+
+    Both entrypoints, both record branches, because the rule lived in four
+    places before it lived in one.
+    """
+
+    def _leg(self, records):
+        d = tempfile.mkdtemp()
+        _sidecar_ledger(d, "s", records)
+        return d
+
+    def test_a_string_false_is_not_a_boolean_false(self):
+        for name, fn in (("extract", extract.kiso), ("extract-t5", extract_t5.kiso)):
+            for branch in (True, False):
+                with self.subTest(entrypoint=name, canonical=branch):
+                    m = fn(self._leg([_v5_request("false", canonical=branch)]))
+                    self.assertEqual(m["unknown_requests"], 1, "a corrupt marker is not a measurement")
+                    self.assertTrue(m["usage_incomplete"])
+                    self.assertEqual(m["fresh"], 0, "an unmeasured request is never priced")
+
+    def test_every_non_boolean_shape_fails_CLOSED(self):
+        # 1 and 0 compare EQUAL to True/False in Python and are not the
+        # same statement; None is the shape a half-written record takes.
+        for marker in ("false", "true", 1, 0, None, [], {}):
+            with self.subTest(marker=marker):
+                m = extract.kiso(self._leg([_v5_request(marker)]))
+                self.assertEqual(m["unknown_requests"], 1)
+                self.assertTrue(m["usage_incomplete"])
+
+    def test_the_booleans_still_mean_what_they_meant(self):
+        for name, fn in (("extract", extract.kiso), ("extract-t5", extract_t5.kiso)):
+            for branch in (True, False):
+                with self.subTest(entrypoint=name, canonical=branch):
+                    known = fn(self._leg([_v5_request(True, canonical=branch)]))
+                    self.assertEqual(known["unknown_requests"], 0)
+                    self.assertFalse(known["usage_incomplete"])
+                    self.assertEqual(known["fresh"], 58)
+                    unknown = fn(self._leg([_v5_request(False, canonical=branch)]))
+                    self.assertEqual(unknown["unknown_requests"], 1)
+                    self.assertTrue(unknown["usage_incomplete"])
+
+    def test_an_ABSENT_marker_keeps_the_pre_v5_policy(self):
+        # A record from before the marker existed must NOT be treated as
+        # corrupt: absence means "this generation could not say", and the
+        # sibling plain log decides. Losing that would make every archived
+        # v1-v4 leg read as incomplete.
+        m = extract.kiso(self._leg([_v5_request(_ABSENT)]))
+        self.assertEqual(m["unknown_requests"], 0, "absence is not corruption")
+        self.assertEqual(m["fresh"], 58)
+
+
 if __name__ == "__main__":
     unittest.main()

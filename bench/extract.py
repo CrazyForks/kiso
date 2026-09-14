@@ -46,6 +46,8 @@ twice; no README table ever rendered it, but the fix is pinned in
 tests/test_extract.py so it stays honest.
 """
 import json, os, sys, glob
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from usage_marker import usage_marker, unmeasured, MISSING, MALFORMED  # F33-RR3
 
 def unknown_in_session_log(path):
     """How many requests in a PLAIN session log had no reported usage.
@@ -97,20 +99,28 @@ def kiso(work):
                 # Before v5 the record could not say, and the four zeros of
                 # an unmeasured request are the four zeros of a free one —
                 # so the sibling plain log is consulted below instead.
-                if r.get("usageKnown") is False:
+                mk = usage_marker(r)
+                if unmeasured(mk):
                     reqs += 1
                     unknown += 1
+                    if mk == MALFORMED:
+                        print(f"[extract] {f}: usageKnown is {r['usageKnown']!r}, not a boolean"
+                              " — counted as UNMEASURED", file=sys.stderr)
                     continue
-                if r.get("kind") == "request" and "usageKnown" not in r:
+                if r.get("kind") == "request" and mk == MISSING:
                     pre_v5_sessions.add(os.path.basename(f)[:-6])
                 c = r["canonical"]
                 fr, ca, o = c["input"], c["cacheRead"], c["output"]
             elif r.get("kind") == "request":          # v1 ledger: the guard's fresh
-                if r.get("usageKnown") is False:
+                mk = usage_marker(r)
+                if unmeasured(mk):
                     reqs += 1
                     unknown += 1
+                    if mk == MALFORMED:
+                        print(f"[extract] {f}: usageKnown is {r['usageKnown']!r}, not a boolean"
+                              " — counted as UNMEASURED", file=sys.stderr)
                     continue
-                if "usageKnown" not in r:
+                if mk == MISSING:
                     pre_v5_sessions.add(os.path.basename(f)[:-6])
                 fr, ca, o = r["freshInput"], r["cacheRead"], r["output"]
             else:
