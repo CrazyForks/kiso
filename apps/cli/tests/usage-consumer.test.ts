@@ -28,7 +28,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { Usage } from "@vincemakes/kiso-core";
-import { usageFromEvent } from "../src/chat.js";
+import { accumulateUsage, usageFromEvent } from "../src/chat.js";
 
 /** The canonical df2 fixture (E1's reconciliation probe): raw total 1978,
  *  cache 1920 → canonical fresh 58. */
@@ -112,6 +112,62 @@ describe("E2 R2a-1 — the CLI usage consumer is canonical (in is FRESH-ONLY)", 
 		// 70%-hit turn: total 50000, cache 35000 → miss 15000.
 		const d1 = usageFromEvent("openai-compat", event({ inputTokens: 50000, cacheRead: 35000, outputTokens: 100 }), 50000);
 		expect(d1.missed).toBe(15000);
+	});
+});
+
+describe("W22 (owner, 2026-09-14) — the TURN's usage is the SUM of its calls", () => {
+	it("nine calls: the row carries the turn's fresh and output, not the ninth call's", () => {
+		// The owner's own dogfood, verbatim (DeepSeek V4.1 Flash, 2026-09-14):
+		// a nine-call turn whose LAST call read 21,276 tokens (20,864 of them
+		// cached → 412 fresh) and wrote 924. The old scope reported exactly
+		// that — "in 412 out 924 · cache 98%" — for a turn that had spent
+		// 120,358 prompt tokens and 4,608 output tokens, and every reader
+		// (the owner included) read it as the turn's.
+		const calls: ReadonlyArray<readonly [number, number, number]> = [
+			[2857, 2688, 226],
+			[7856, 3072, 314],
+			[10722, 8064, 95],
+			[12544, 10752, 312],
+			[13600, 12800, 634],
+			[15146, 14208, 620],
+			[16371, 15744, 535],
+			[19986, 16896, 948],
+			[21276, 20864, 924],
+		];
+		let acc: import("@vincemakes/kiso-tui").RunUsage | null = null;
+		for (const [inputTokens, cacheRead, outputTokens] of calls) {
+			const d = usageFromEvent("openai-compat", event({ inputTokens, cacheRead, outputTokens }), null);
+			acc = acc === null ? d.usage : accumulateUsage(acc, d.usage);
+		}
+		// fresh 15,270 (the input the turn bought at full price), out 4,608,
+		// cache 105,088 — the recap renders the first two and the RATIO of the
+		// third (cache/(in+cache) = 87%), never the raw sum: a sum over calls
+		// counts the same prefix once per call.
+		expect(acc).toEqual({ in: 15270, out: 4608, cache: 105088, known: true });
+	});
+
+	it("a single call is the sum, not an addition to nothing (the first call is not double-counted)", () => {
+		const d = usageFromEvent("openai-compat", df2(), null);
+		expect(d.usage).toEqual({ in: 58, out: 111, cache: 1920, known: true });
+	});
+
+	it("an unmeasured term makes the sum unmeasured (OR-10's rule, applied to the sum)", () => {
+		// call 1 has no cache figure (a backend that does not report one), call
+		// 2 does: the turn's cache figure is UNKNOWN, never the 2,000 the sum
+		// of the known part would claim.
+		const d1 = usageFromEvent("openai-compat", event({ inputTokens: 1000, cacheRead: null, outputTokens: 10 }), null);
+		const d2 = usageFromEvent("openai-compat", event({ inputTokens: 3000, cacheRead: 2000, outputTokens: 10 }), null); // 3000 − 2000 = 1000 fresh
+		const acc = accumulateUsage(d1.usage, d2.usage);
+		expect(acc.cache).toBeNull();
+		expect(acc.in).toBe(2000); // fresh is measured on both calls — summed
+		expect(acc.out).toBe(20);
+		expect(acc.known).toBe(true);
+	});
+
+	it("one call without usage makes the whole turn unknown — never a lower bound read as a total", () => {
+		const known = usageFromEvent("openai-compat", df2(), null);
+		const unknown = usageFromEvent("openai-compat", event({ known: false, inputTokens: null, outputTokens: null, cacheRead: null, cacheWrite: null }), null);
+		expect(accumulateUsage(known.usage, unknown.usage).known).toBe(false);
 	});
 });
 

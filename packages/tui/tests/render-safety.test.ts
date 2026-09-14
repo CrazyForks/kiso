@@ -130,7 +130,7 @@ describe("B: tool summary lines and the status line", () => {
 	it("the status line formats known usage with k-units and ~ctx", () => {
 		const line = renderStatusLine(3, { in: 12345, out: 1800, cache: 9200, known: true }, 0.14);
 		expect(line).toContain("turn 3");
-		expect(line).toContain("in 12.3k");
+		expect(line).toContain("fresh 12.3k");
 		expect(line).toContain("out 1.8k");
 		expect(line).toContain("cache 9.2k");
 		expect(line).toContain("ctx ~14%");
@@ -138,8 +138,8 @@ describe("B: tool summary lines and the status line", () => {
 
 	it("v2a denoise: fully unknown usage → null (the whole line is omitted); partial fields are omitted, never ?", () => {
 		expect(renderStatusLine(1, { in: null, out: null, cache: null, known: false }, 0.05)).toBeNull();
-		expect(renderStatusLine(1, { in: 800, out: null, cache: null, known: true }, 0.05)).toBe("[turn 1 · in 800 · ctx ~5%]");
-		expect(renderStatusLine(1, { in: 800, out: 200, cache: null, known: true }, NaN)).toBe("[turn 1 · in 800 out 200]");
+		expect(renderStatusLine(1, { in: 800, out: null, cache: null, known: true }, 0.05)).toBe("[turn 1 · fresh 800 · ctx ~5%]");
+		expect(renderStatusLine(1, { in: 800, out: 200, cache: null, known: true }, NaN)).toBe("[turn 1 · fresh 800 out 200]");
 	});
 
 	it("v2a faux mode: [turn N · faux]", () => {

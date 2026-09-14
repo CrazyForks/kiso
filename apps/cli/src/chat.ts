@@ -223,6 +223,47 @@ export function usageFromEvent(
 	};
 }
 
+/** The accumulator's zero value — nothing measured yet. One shared
+ *  literal: RunUsage's fields are readonly, and the old code repeated this
+ *  object at every reset. */
+const UNKNOWN_USAGE: RunUsage = { in: null, out: null, cache: null, known: false };
+
+/** W22 (owner, 2026-09-14) — the TURN's usage, summed across its calls.
+ *
+ *  EXISTING-BEHAVIOR CHANGE — declared, never a silent side-fix:
+ *  the recap and the running row carried the LAST call's figures
+ *  (`usage = delta.usage`), and read as the turn's by everyone who saw
+ *  them: the owner's own dogfood, a nine-call turn that had spent 120,358
+ *  prompt tokens and 4,608 output tokens, reported `in 412 out 924 ·
+ *  cache 98%` — the ninth call's fresh input and the ninth call's output.
+ *  The variables are the same and the definitions are unchanged; the SCOPE
+ *  is the turn's.
+ *
+ *  Two rules, inherited rather than invented:
+ *  - `in` stays the canonical FRESH count (E2, R2a-1): the turn's sum is
+ *    the input the turn actually bought at full price. `cache` is summed
+ *    too, but only the recap's ratio reads it (cache/(in+cache)) — the raw
+ *    total is the ledger's business, never the row's, because a sum over
+ *    calls counts the same prefix once per call.
+ *  - an unmeasured term makes the sum unmeasured (OR-10's rule, applied to
+ *    the sum): `null` propagates, and one call with `known: false` makes
+ *    the turn's figure unknown rather than a lower bound dressed as a
+ *    total. The row then says nothing, as it always did for an unknown
+ *    call.
+ *
+ *  The miss estimate and the decode rate stay PER CALL: `missed` is the
+ *  overlap of consecutive prompts (a total-side quantity), and the rate is
+ *  the call that just settled timing itself. */
+export function accumulateUsage(prev: RunUsage, delta: RunUsage): RunUsage {
+	const sum = (a: number | null, b: number | null): number | null => (a === null || b === null ? null : a + b);
+	return {
+		in: sum(prev.in, delta.in),
+		out: sum(prev.out, delta.out),
+		cache: sum(prev.cache, delta.cache),
+		known: prev.known && delta.known,
+	};
+}
+
 /** v2b: the spinner merged into the STATUS BAR (the v2a standalone glyph
  *  is gone) — docked only, 200ms rotation between the request and the
  *  first event. */
@@ -653,7 +694,11 @@ export async function consumeRun(
 	submitTurn?: (line: string) => void,
 ): Promise<import("@vincemakes/kiso-core").Event | undefined> {
 	let last: import("@vincemakes/kiso-core").Event | undefined;
-	let usage: RunUsage = { in: null, out: null, cache: null, known: false };
+	// W22: the TURN's usage — null until a call settles, then the sum of
+	// every call in this turn (accumulateUsage). Null rather than an empty
+	// accumulator, so the first call is the sum rather than an addition to
+	// nothing.
+	let usage: RunUsage | null = null;
 	// TPS-1: the decode clock, armed by the FIRST streamed event of a call
 	// and read at that call's usage event. Per CALL, not per turn — a turn
 	// with three model calls reports the third, and each one times itself.
@@ -783,7 +828,9 @@ export async function consumeRun(
 				break;
 			case "usage": {
 				const delta = usageFromEvent(session.provider, ev, prevTotal, agentModel, session.baseUrl);
-				usage = delta.usage;
+				// W22: this call is ADDED to the turn, not substituted for it —
+				// the row and the recap below report the turn's figures.
+				usage = usage === null ? delta.usage : accumulateUsage(usage, delta.usage);
 				prevTotal = delta.total;
 				missed = delta.missed;
 				// TUI2-R1 (E): the request's canonical cost rides the same
@@ -901,7 +948,7 @@ export async function consumeRun(
 				// v3 §02: the run's recap line REPLACES the old "done" label
 				// + status line — one local line, derived from this run's
 				// events (zero tokens). The dock's status bar still paints.
-				statusCb?.(usage, displayCtxRatio(session));
+				statusCb?.(usage ?? UNKNOWN_USAGE, displayCtxRatio(session));
 				const ratio = displayCtxRatio(session);
 				// TV-1B: the settle verdict — the checklist stops lying. When
 				// every item is CLAIMED done, the settled block's tail says
@@ -960,7 +1007,7 @@ export async function consumeRun(
 						// the recap cut itself down to one character. A width
 						// that is not a positive number is not a width.
 						width: process.stdout.columns > 0 ? process.stdout.columns : 80,
-						usage,
+						usage: usage ?? UNKNOWN_USAGE,
 						// R-C item 4: only an above-floor miss is surfaced —
 						// the recap gains "· miss N" on the cache segment.
 						...(missed !== null ? { missed } : {}),
