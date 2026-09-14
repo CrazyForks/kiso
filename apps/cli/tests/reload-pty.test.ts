@@ -55,7 +55,25 @@ function writeSkillCmd(skillsDir: string, name: string, mark: string): string {
 	// feature. That is what the first run of this gate did.
 	const md = `---\nname: ${name}\ndescription: ${mark}\n---\n\nthe skill's instructions\n`;
 	const b64 = Buffer.from(md, "utf8").toString("base64");
-	return `!!mkdir -p ${skillsDir}/${name} && printf %s ${b64} | base64 -d > ${skillsDir}/${name}/SKILL.md\r`;
+	return `!!mkdir -p ${skillsDir}/${name} && printf %s ${b64} | base64 -d > ${skillsDir}/${name}/SKILL.md${doneEcho(SHELL_DONE)}\r`;
+}
+
+/** The completion marker for a `!!` line.
+ *
+ *  These gates used to wait on the CLOCK — `[9, "/reload\r"]` meant "nine
+ *  seconds ought to be enough for the shell command". Ten scenarios of
+ *  that is 277 of this file's 278 seconds, spent waiting for things that
+ *  had already happened.
+ *
+ *  A feed needs a needle, and the obvious one — the command's own text —
+ *  is wrong: the composer ECHOES what is typed, so the needle fires
+ *  before the command runs. Same trap the mark in `writeSkillCmd` was
+ *  built to dodge. So the marker travels base64-encoded and is decoded by
+ *  the command itself: the plaintext exists only in the shell block the
+ *  CLI prints AFTER the command finished. */
+const SHELL_DONE = "BANG-COMMAND-FINISHED";
+function doneEcho(mark: string): string {
+	return ` && printf %s ${Buffer.from(mark, "utf8").toString("base64")} | base64 -d`;
 }
 
 /** An extension contributing ONE tool that answers with a fixed word. */
@@ -103,11 +121,11 @@ describe("§2.5 — /reload", () => {
 			feeds: [
 				["/ commands · ↑ history", "go\r"],
 				["before.", writeSkillCmd(dirs.skills, "greet", "SKILL-ADDED-AFTER-START")],
-			],
-			delays: [
-				[9, "/reload\r"],
-				[15, "use it\r"],
-				[22, "exit\r"],
+				// each step waits for the PREVIOUS one to have happened,
+				// not for a number of seconds to pass
+				[SHELL_DONE, "/reload\r"],
+				["[reload]", "use it\r"],
+				["after.", "exit\r"],
 			],
 		});
 		const out = strip(raw);
@@ -130,12 +148,10 @@ describe("§2.5 — /reload", () => {
 		const raw = ptyRun(["--mode", "bypass", "reload-drop"], env as NodeJS.ProcessEnv, {
 			feeds: [
 				["/ commands · ↑ history", "call it\r"],
-				["first done.", `!!rm -f ${join(dirs.extensions, "probe.mjs")}\r`],
-			],
-			delays: [
-				[10, "/reload\r"],
-				[16, "call it again\r"],
-				[23, "exit\r"],
+				["first done.", `!!rm -f ${join(dirs.extensions, "probe.mjs")}${doneEcho(SHELL_DONE)}\r`],
+				[SHELL_DONE, "/reload\r"],
+				["[reload]", "call it again\r"],
+				["second done.", "exit\r"],
 			],
 		});
 		const out = strip(raw);
@@ -159,12 +175,10 @@ describe("§2.5 — /reload", () => {
 		const raw = ptyRun(["--mode", "bypass", "reload-broken"], env as NodeJS.ProcessEnv, {
 			feeds: [
 				["/ commands · ↑ history", "go\r"],
-				["before.", `!!printf 'throw new Error("deliberately broken");\\n' > ${join(dirs.extensions, "broken.mjs")}\r`],
-			],
-			delays: [
-				[9, "/reload\r"],
-				[15, "still there?\r"],
-				[22, "exit\r"],
+				["before.", `!!printf 'throw new Error("deliberately broken");\\n' > ${join(dirs.extensions, "broken.mjs")}${doneEcho(SHELL_DONE)}\r`],
+				[SHELL_DONE, "/reload\r"],
+				["[reload]", "still there?\r"],
+				["STILL ALIVE", "exit\r"],
 			],
 		});
 		const out = strip(raw);
@@ -190,10 +204,10 @@ describe("§2.5 — /reload", () => {
 			"utf8",
 		);
 		const raw = ptyRun(["chat", "reload-model"], { ...env, RELOAD_KEY: "fake" } as NodeJS.ProcessEnv, {
-			feeds: [["/ commands · ↑ history", "/model beta\r"]],
-			delays: [
-				[6, "/reload\r"],
-				[13, "exit\r"],
+			feeds: [
+				["/ commands · ↑ history", "/model beta\r"],
+				["model-beta", "/reload\r"],
+				["[reload]", "exit\r"],
 			],
 		});
 		const out = strip(raw);
@@ -228,14 +242,11 @@ describe("§2.5 — /reload", () => {
 			timeout: 110,
 			feeds: [
 				["trust this project's .kiso?", "y\r"],
-				["/ commands · ↑ history", `!!rm -rf ${join(dirs.skills, "doomed")}\r`],
-			],
-			delays: [
-				[9, "/reload\r"],
-				[16, "/reload\r"],
-				[23, "read kept\r"],
-				[32, "read doomed\r"],
-				[41, "exit\r"],
+				["/ commands · ↑ history", `!!rm -rf ${join(dirs.skills, "doomed")}${doneEcho(SHELL_DONE)}\r`],
+				[SHELL_DONE, "/reload\r"],
+				["[reload]", "/reload\rread kept\r"],
+				["kept read.", "read doomed\r"],
+				["doomed asked.", "exit\r"],
 			],
 		});
 		const out = strip(raw);
@@ -282,12 +293,15 @@ describe("§2.5 — /reload", () => {
 		const raw = ptyRun(["--mode", "bypass", "reload-mcp"], env as NodeJS.ProcessEnv, {
 			cwd: workdir,
 			timeout: 110,
-			feeds: [["trust this project's .kiso?", "y\r"]],
-			delays: [
-				[8, "/reload\r"],
-				[15, "/reload\r"],
-				[22, "/reload\r"],
-				[30, "exit\r"],
+			feeds: [
+				["trust this project's .kiso?", "y\r"],
+				["/ commands · ↑ history", "/reload\r"],
+				// `[reload]` cannot tell the three apart — each prints the
+				// same counts — so the remaining two and the exit ride the
+				// FIRST one's marker as queued lines. The reader takes them
+				// in order, which is what the clock was approximating; the
+				// assertion below still counts three successful reloads.
+				["[reload]", "/reload\r/reload\rexit\r"],
 			],
 		});
 		const out = strip(raw);
@@ -326,8 +340,8 @@ describe("§2.5 — /reload", () => {
 			feeds: [
 				["/ commands · ↑ history", "go\r"],
 				["don't ask again", "2"], // grant `shell` on top of the legacy `read_file`
+				["granted.", "exit\r"],
 			],
-			delays: [[20, "exit\r"]],
 		});
 		const after = readFileSync(join(dirs.extensions, "dont-ask-again.mjs"), "utf8");
 		expect(after, "the rule granted now is on disk").toContain("shell");
