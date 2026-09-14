@@ -164,6 +164,23 @@ case "$TOOL" in
   kiso)
     EXTDIR="$WORK/ext"; mkdir -p "$EXTDIR"; cp "$B/bench-allow.mjs" "$EXTDIR/"
     SKILLDIR="$WORK/skills"; mkdir -p "$SKILLDIR"
+    # A NAMED PROFILE, because `/model` only knows profiles.
+    #
+    # The arm's binding is otherwise the OPENAI_* environment, which gives
+    # kiso a working model and NO profile to name — so the effort line
+    # would have been refused on every leg and every one of them marked
+    # `effort_not_bound`. The gate would have been right and the round
+    # would have been wasted; the pre-flight check is what this replaces.
+    #
+    # Amendment 4b rule 2 names this mechanism itself ("for kiso that is a
+    # mode profile carrying an effort"), and the effort A/B round ran this
+    # exact shape. The env pairs stay: the profile carries the endpoint
+    # across the switch, which is CTX-1's lesson one field over.
+    mkdir -p "$WORK/kiso-home"
+    cat > "$WORK/kiso-home/config.json" <<CFG
+{ "models": { "ds": { "kind": "openai-compat", "model": "deepseek-v4-flash",
+  "baseUrl": "https://api.deepseek.com", "apiKeyEnv": "OPENAI_API_KEY" } } }
+CFG
     assert_bare kiso "$BARE_HOME" || exit 1
     # §3: KISO_SKILLS_DIR was missing entirely — an arm reading the operator's
     # skills is not the product as installed.
