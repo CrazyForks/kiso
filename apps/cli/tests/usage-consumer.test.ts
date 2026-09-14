@@ -28,7 +28,8 @@
 
 import { describe, expect, it } from "vitest";
 import type { Usage } from "@vincemakes/kiso-core";
-import { accumulateUsage, usageFromEvent } from "../src/chat.js";
+import type { RunUsage } from "@vincemakes/kiso-tui";
+import { accumulateUsage, turnUsageLedger, usageFromEvent } from "../src/chat.js";
 
 /** The canonical df2 fixture (E1's reconciliation probe): raw total 1978,
  *  cache 1920 → canonical fresh 58. */
@@ -199,5 +200,72 @@ describe("OR-10 (owner, 2026-09-09) — no cache meter where the backend's figur
 		const api = usageFromEvent("openai-responses", ev, 20_000, "gpt-6-astra", "https://api.openai.com/v1");
 		expect(api.usage.cache).toBe(0);
 		expect(api.missed).toBe(5_000);
+	});
+});
+
+describe("W22-R1 — one call reporting twice is one call", () => {
+	// Astra's counterexample: the openai-compat adapter yields a usage event
+	// from either of two stream shapes, and its `usageSent` flag only decides
+	// whether to append a trailing unknown — it does not stop both from
+	// firing. W22 substituted, so a second report silently replaced the first
+	// and no screen changed; summing turned the same stream into a WRONG
+	// NUMBER (ledger fresh 80 / out 10, displayed 160 / 15).
+	//
+	// This drives the REAL ledger the consume loop uses. The first version of
+	// this gate reimplemented the fold in the test body and asserted against
+	// its own copy — it passed on the unfixed source, which is the one thing
+	// a regression gate must never do (the same defect as F33-R8, one PR
+	// later).
+	const rep = (i: number, ca: number, o: number): RunUsage => ({ in: i, out: o, cache: ca, known: true });
+	const stop = { type: "stop" } as const;
+	const text = { type: "text" } as const;
+
+	it("two reports of ONE call count once — the later one", () => {
+		const l = turnUsageLedger();
+		l.observe(text);
+		l.report(rep(80, 0, 5)); // the first stream shape
+		l.report(rep(80, 0, 10)); // the second, SAME call
+		l.observe(stop);
+		expect(l.total()).toEqual({ in: 80, out: 10, cache: 0, known: true });
+	});
+
+	it("two CALLS still sum — the W22 behaviour the repair must not undo", () => {
+		const l = turnUsageLedger();
+		l.report(rep(80, 0, 10));
+		l.observe(stop);
+		l.report(rep(40, 20, 5));
+		l.observe(stop);
+		expect(l.total()).toEqual({ in: 120, out: 15, cache: 20, known: true });
+	});
+
+	it("the call in flight is already visible — the status line reads mid-call", () => {
+		const l = turnUsageLedger();
+		l.report(rep(80, 0, 10));
+		l.observe(stop);
+		l.report(rep(40, 20, 5)); // no stop yet
+		expect(l.total()).toEqual({ in: 120, out: 15, cache: 20, known: true });
+	});
+
+	it("nothing reported is null, not a zero", () => {
+		const l = turnUsageLedger();
+		l.observe(stop);
+		expect(l.total()).toBeNull();
+	});
+
+	it("a stop with nothing in flight settles nothing", () => {
+		const l = turnUsageLedger();
+		l.report(rep(80, 0, 10));
+		l.observe(stop);
+		l.observe(stop); // a second stop must not re-count the settled call
+		expect(l.total()).toEqual({ in: 80, out: 10, cache: 0, known: true });
+	});
+
+	it("an unknown report poisons the turn's known flag", () => {
+		const l = turnUsageLedger();
+		l.report(rep(80, 0, 10));
+		l.observe(stop);
+		l.report({ in: null, out: null, cache: null, known: false });
+		l.observe(stop);
+		expect(l.total()?.known).toBe(false);
 	});
 });

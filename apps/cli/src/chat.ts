@@ -264,6 +264,50 @@ export function accumulateUsage(prev: RunUsage, delta: RunUsage): RunUsage {
 	};
 }
 
+/**
+ * W22-R1 (Astra): the turn's usage ledger, as ONE definition.
+ *
+ * A TURN is the sum over its CALLS; a CALL is its LATEST report. Both
+ * halves are load-bearing: the openai-compat adapter yields a usage event
+ * from either of two stream shapes and its `usageSent` flag only decides
+ * whether to append a trailing unknown — it does not stop both from
+ * firing. W22 substituted, so a second report silently replaced the first
+ * and no screen changed; summing without the call boundary turned the same
+ * stream into a WRONG NUMBER (a ledger of fresh 80 / out 10 shown as
+ * 160 / 15).
+ *
+ * It is a function rather than three variables in the loop because the rule
+ * then has one place to be right — the same reason `microcompactThresholdFor`
+ * exists, and the drift `promptCacheKey` demonstrated when it did not.
+ */
+export function turnUsageLedger(): {
+	observe: (ev: { readonly type: string }) => void;
+	report: (u: RunUsage) => void;
+	total: () => RunUsage | null;
+} {
+	let settled: RunUsage | null = null;
+	let inFlight: RunUsage | null = null;
+	const fold = (a: RunUsage | null, b: RunUsage | null): RunUsage | null =>
+		a === null ? b : b === null ? a : accumulateUsage(a, b);
+	return {
+		// every event of the run passes through here: a stop ENDS a call, so
+		// the report in flight settles and the next call starts its own.
+		observe(ev) {
+			if (ev.type !== "stop") return;
+			settled = fold(settled, inFlight);
+			inFlight = null;
+		},
+		// this call's latest report REPLACES its earlier one.
+		report(u) {
+			inFlight = u;
+		},
+		// the turn so far: the settled calls plus the one in flight.
+		total() {
+			return fold(settled, inFlight);
+		},
+	};
+}
+
 /** v2b: the spinner merged into the STATUS BAR (the v2a standalone glyph
  *  is gone) — docked only, 200ms rotation between the request and the
  *  first event. */
@@ -698,7 +742,14 @@ export async function consumeRun(
 	// every call in this turn (accumulateUsage). Null rather than an empty
 	// accumulator, so the first call is the sum rather than an addition to
 	// nothing.
-	let usage: RunUsage | null = null;
+	//
+	// W22-R1 (Astra): one call can report TWICE, so the turn is a sum over
+	// CALLS and a call is its LATEST report — see `turnUsageLedger`, which
+	// holds that rule. Every event passes through `observe` (a stop ends a
+	// call); the usage case reports; the status line and the recap read
+	// `total()`.
+	const ledger = turnUsageLedger();
+	const turnUsage = (): RunUsage | null => ledger.total();
 	// TPS-1: the decode clock, armed by the FIRST streamed event of a call
 	// and read at that call's usage event. Per CALL, not per turn — a turn
 	// with three model calls reports the third, and each one times itself.
@@ -731,6 +782,8 @@ export async function consumeRun(
 		last = ev;
 		// LT-2b: a model turn ends with its stop; every CHECKPOINT_TURNS of them
 		// the human is asked before the run is pulled any further
+		// W22-R1: the ledger sees every event; a stop is what ends a call.
+		ledger.observe(ev);
 		if (ev.type === "stop" && dock.active) {
 			modelTurns += 1;
 			if (modelTurns % CHECKPOINT_TURNS === 0 && !(await checkpointAsk(input, modelTurns))) run.abort();
@@ -828,9 +881,9 @@ export async function consumeRun(
 				break;
 			case "usage": {
 				const delta = usageFromEvent(session.provider, ev, prevTotal, agentModel, session.baseUrl);
-				// W22: this call is ADDED to the turn, not substituted for it —
-				// the row and the recap below report the turn's figures.
-				usage = usage === null ? delta.usage : accumulateUsage(usage, delta.usage);
+				// W22-R1: this call's LATEST report replaces its earlier one;
+				// the turn's figure is the settled calls plus this one.
+				ledger.report(delta.usage);
 				prevTotal = delta.total;
 				missed = delta.missed;
 				// TUI2-R1 (E): the request's canonical cost rides the same
@@ -840,7 +893,7 @@ export async function consumeRun(
 				// second call is timed from ITS own first event.
 				const tokPerSec = callFirstEventAt === null ? null : decodeRate(ev.outputTokens, Date.now() - callFirstEventAt);
 				callFirstEventAt = null;
-				statusCb?.(usage, displayCtxRatio(session), delta.costUsd, tokPerSec);
+				statusCb?.(turnUsage() ?? UNKNOWN_USAGE, displayCtxRatio(session), delta.costUsd, tokPerSec);
 				break;
 			}
 			case "uncertain_pending":
@@ -948,7 +1001,7 @@ export async function consumeRun(
 				// v3 §02: the run's recap line REPLACES the old "done" label
 				// + status line — one local line, derived from this run's
 				// events (zero tokens). The dock's status bar still paints.
-				statusCb?.(usage ?? UNKNOWN_USAGE, displayCtxRatio(session));
+				statusCb?.(turnUsage() ?? UNKNOWN_USAGE, displayCtxRatio(session));
 				const ratio = displayCtxRatio(session);
 				// TV-1B: the settle verdict — the checklist stops lying. When
 				// every item is CLAIMED done, the settled block's tail says
@@ -1007,7 +1060,7 @@ export async function consumeRun(
 						// the recap cut itself down to one character. A width
 						// that is not a positive number is not a width.
 						width: process.stdout.columns > 0 ? process.stdout.columns : 80,
-						usage: usage ?? UNKNOWN_USAGE,
+						usage: turnUsage() ?? UNKNOWN_USAGE,
 						// R-C item 4: only an above-floor miss is surfaced —
 						// the recap gains "· miss N" on the cache segment.
 						...(missed !== null ? { missed } : {}),
