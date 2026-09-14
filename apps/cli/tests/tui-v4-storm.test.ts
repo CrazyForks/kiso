@@ -356,7 +356,20 @@ describe("TUI v4 #16 — the resize-storm gate (real PTY, 24×80)", () => {
 		// This gate's own property is unchanged and still asserted: the
 		// right-hand hint is cut before the status text, and the status is
 		// never truncated from the left.
-		expect(narrow).toContain("▸ default · faux · ctx left ~99%");
+		// The DIGITS are not this gate's property, and its own comment above
+		// says so: the short case was chosen at 44 columns precisely because
+		// "the expected string does not depend on the percentage's digits".
+		// The assertion pinned them anyway, so the gate went red the moment
+		// the fixed prompt grew — the system prompt and tool table crossed
+		// from ~1% of the window to ~2%, and the rounding moved 99 to 98.
+		// Nothing about the drop order changed.
+		//
+		// What IS the property: at 44 columns the teaching hint gives way and
+		// the context estimate survives WHOLE — segments present, in order,
+		// and the `%` still there, which is what proves the `…` did not cut a
+		// fact. That is what this now asserts, and it is how every other
+		// context assertion in the suite is already written.
+		expect(narrow).toMatch(/▸ default · faux · ctx left ~\d+%/);
 		expect(narrow, "the teaching hint survived a row with no room for it").not.toContain("/mode to switch · faux");
 		// DECLARED SUPERSESSION (REL-0152-R1): the status row is written
 		// by ROW NUMBER now, not by a CHA at the end of a bottom-up march.
