@@ -447,6 +447,24 @@ export interface Usage {
 	readonly cacheRead: number | null;
 	readonly cacheWrite: number | null;
 	readonly known: boolean;
+	/**
+	 * TRACE-F1: the model id the SERVER says it served, when it says one.
+	 *
+	 * Every adapter until now spoke only of `options.model` — the id we
+	 * ASKED for. A vendor is free to serve something else: a retired name
+	 * that is now an alias, a migration id, a silently upgraded tier. The
+	 * bench read `deepseek-v4-flash` off its own config for four days while
+	 * the server served `deepseek-flash`, and the specified-vs-observed
+	 * reconciliation built exactly to catch that never fired, because
+	 * nothing produced the observed half.
+	 *
+	 * Optional because it is the SERVER's statement, not ours: a provider
+	 * that reports no model leaves this undefined, and undefined means
+	 * "not stated", never "same as requested" (Area 6 — unknown is not a
+	 * default). It rides the usage event because that is emitted exactly
+	 * once per call, at the point where the adapter holds the response.
+	 */
+	readonly servedModel?: string;
 }
 
 /** MG-1 (ADR-0051 Amendment 5): the continuation envelope's scope — WHO
@@ -755,6 +773,10 @@ function isContinuation(v: unknown): boolean {
 
 function isUsage(v: Record<string, unknown>): boolean {
 	if (typeof v.known !== "boolean") return false;
+	// TRACE-F1: a stated served model is a NON-EMPTY string. An empty one is
+	// a provider field we failed to read, and it would reconcile as a
+	// contradiction against every requested id — absent says "not stated".
+	if (v.servedModel !== undefined && (typeof v.servedModel !== "string" || v.servedModel === "")) return false;
 	const tokens = [v.inputTokens, v.outputTokens, v.cacheRead, v.cacheWrite];
 	if (v.known === false) return tokens.every((t) => t === null);
 	return tokens.some((t) => isNonNegativeInt(t)) && tokens.every((t) => t === null || isNonNegativeInt(t));

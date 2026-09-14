@@ -26,7 +26,11 @@ const fixture = (name: string): unknown =>
 
 describe("F33-R1: every generation ever written stays readable", () => {
 	it("the accepted set names every version explicitly, and includes the current one", () => {
-		expect([...TRACE_SCHEMA_VERSIONS].sort()).toEqual([1, 2, 3, 4, 5]);
+		// DECLARED SUPERSESSION (TRACE-F1): 6 joins the set. What this case
+		// pins is that the set NAMES every generation explicitly — F33-R1
+		// found it spelled `[1, 2, 3, TRACE_SCHEMA_VERSION]`, where the
+		// moving member silently dropped the generation it stood on.
+		expect([...TRACE_SCHEMA_VERSIONS].sort()).toEqual([1, 2, 3, 4, 5, 6]);
 		expect(TRACE_SCHEMA_VERSIONS.has(TRACE_SCHEMA_VERSION)).toBe(true);
 	});
 

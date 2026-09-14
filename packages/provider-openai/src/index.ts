@@ -148,9 +148,21 @@ export function createOpenAICompatAdapter(client: OpenAI, adapterOpts: OpenAICom
 			// usage chunk is still accepted after the finish: some compat
 			// providers send it late.
 			let finishSeen = false;
+			// TRACE-F1: the model the SERVER says it served. Every chunk of an
+			// OpenAI-shaped stream carries `model`; we never read it, so an id
+			// the vendor silently aliases (a retired name, a migration id)
+			// looked identical to the one we asked for. ONE variable, read by
+			// every usage exit below — this adapter has three of them, and two
+			// places computing the same thing is what W22-R1 was.
+			let served: string | null = null;
 
 			try {
 				for await (const chunk of stream) {
+					// before the finishSeen branch below, which continues early.
+					// FIRST statement wins: a provider that changes the id
+					// mid-stream is telling us something is wrong, and the first
+					// answer is the one the request was routed by.
+					if (served === null && typeof chunk.model === "string" && chunk.model !== "") served = chunk.model;
 					if (finishSeen) {
 						if (chunk.usage) {
 							usageSent = true;
@@ -165,6 +177,7 @@ export function createOpenAICompatAdapter(client: OpenAI, adapterOpts: OpenAICom
 								cacheRead: details?.cached_tokens ?? null,
 								cacheWrite: null,
 								known: true,
+							...(served !== null ? { servedModel: served } : {}),
 							};
 						}
 						continue; // content and finish reasons after the first finish: ignored
@@ -273,6 +286,7 @@ export function createOpenAICompatAdapter(client: OpenAI, adapterOpts: OpenAICom
 							cacheRead: details?.cached_tokens ?? null,
 							cacheWrite: null,
 							known: true,
+						...(served !== null ? { servedModel: served } : {}),
 						};
 					}
 
@@ -311,7 +325,9 @@ export function createOpenAICompatAdapter(client: OpenAI, adapterOpts: OpenAICom
 			if (!usageSent) {
 				// Area 6: no usage reported is expressed as UNKNOWN — nulls
 				// and known:false — never faked as a zero-cost turn.
-				yield { seq: 0, type: "usage", inputTokens: null, outputTokens: null, cacheRead: null, cacheWrite: null, known: false };
+				// known:false and a served model are not in tension: the server
+				// stated what it ran, it just never reported what it cost.
+				yield { seq: 0, type: "usage", inputTokens: null, outputTokens: null, cacheRead: null, cacheWrite: null, known: false, ...(served !== null ? { servedModel: served } : {}) };
 			}
 			// Area 6 hardening (review finding 4): a stream that ended with
 			// NO finish_reason is a TRUNCATED turn — the stop is an explicit

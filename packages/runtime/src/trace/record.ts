@@ -52,13 +52,30 @@
  * as OPTIONAL so that v1-v4 sidecars stay readable — their absence means
  * "this generation could not say", which a consumer must treat as unknown
  * rather than as complete.
+ *
+ * TRACE-F1 (0.36.x) — schemaVersion 6: the record gains `servedModel`, the
+ * id the SERVER says it served. Every generation before this one recorded
+ * only `model`, the id we asked for, and the two were assumed identical
+ * because nothing ever checked. A vendor is free to disagree: a retired
+ * name becomes an alias, a migration id resolves elsewhere, a tier is
+ * silently upgraded. The bench asked for `deepseek-v4-flash` on every leg
+ * for four days while the server answered as `deepseek-flash`, and the
+ * specified-vs-observed reconciliation built to catch precisely that
+ * reported nothing — it had no observed half to compare, so it compared
+ * the specification against itself.
+ *
+ * OPTIONAL, and absent means "the server stated nothing" — NEVER "the same
+ * as requested". That default is the whole defect: a field filled in with
+ * the request manufactures the agreement the reconciliation exists to
+ * test.
  */
 
-/** schemaVersion: 5 for the `usageKnown` marker (F33-1). Version
+/** schemaVersion: 6 for the `servedModel` statement (TRACE-F1);
+ *  5 was the `usageKnown` marker (F33-1). Version
  *  1 = the 1.2.0 shape, 2 = the 1.3.0 shape, 3 = the 0.2.1 shape; all
  *  kept for generation-compat reads (R1d-1, R2-1). Algorithm and shape
  *  changes bump it (ADR-0051 §6 OUT-side versioning). */
-export const TRACE_SCHEMA_VERSION = 5;
+export const TRACE_SCHEMA_VERSION = 6;
 
 /** The versions a reader may meet in a ledger. v1 and v2 records are
  *  accepted (generation-compat) and read as defaults — no canonical
@@ -78,7 +95,7 @@ export const TRACE_SCHEMA_VERSION = 5;
  * spec. Three lists to extend is the point: a bump that forgets one is a
  * bump that fails loudly rather than a reader that quietly narrows.
  */
-export const TRACE_SCHEMA_VERSIONS: Readonly<Set<number>> = new Set([1, 2, 3, 4, 5]);
+export const TRACE_SCHEMA_VERSIONS: Readonly<Set<number>> = new Set([1, 2, 3, 4, 5, 6]);
 
 import { PRICING_TABLE_V1, priceFor, pricingTableFor, validateCanonicalUsage } from "../usage/canonical.js";
 import type { CanonicalUsage } from "../usage/canonical.js";
@@ -102,7 +119,7 @@ export interface TraceSegment {
 /** That is the complete set for 1.2.0. */
 
 export interface TraceRecord {
-	schemaVersion: 5;
+	schemaVersion: 6;
 	kind: "request";
 	requestId: string; // crypto.randomUUID() per adapter call — W2's reverse-reference anchor
 	runId: string;
@@ -163,6 +180,12 @@ export interface TraceRecord {
 	 *  its purpose: "safer-options". A consumer separating on-demand rent
 	 *  from run rent reads this field and needs no heuristic. */
 	purpose?: string;
+	/** TRACE-F1 (v6) — the model id the SERVER said it served, when it said
+	 *  one. ABSENT means the server stated nothing, NEVER "the same as
+	 *  requested": that default is what let a retired id read as live for
+	 *  four days. The requested id stays in `model`; these are two facts,
+	 *  never merged. */
+	servedModel?: string;
 	ts: number; // Date.now() at settle — added to the work-order field list (justification §1.5)
 }
 /** That is the complete set for 1.2.0. */
@@ -174,7 +197,7 @@ export interface TraceRecord {
 // checkable.
 
 export interface HeaderLine {
-	schemaVersion: 5;
+	schemaVersion: 6;
 	kind: "header";
 	sessionId: string;
 	kisoVersion: string;
@@ -182,7 +205,7 @@ export interface HeaderLine {
 }
 
 export interface RunEndLine {
-	schemaVersion: 5;
+	schemaVersion: 6;
 	kind: "run_end";
 	runId: string;
 	ts: number;
@@ -190,7 +213,7 @@ export interface RunEndLine {
 }
 
 export interface CrashLine {
-	schemaVersion: 5;
+	schemaVersion: 6;
 	kind: "crash";
 	ts: number;
 	note: string;
@@ -213,6 +236,7 @@ export const HASH_SPEC_BY_VERSION: Readonly<Record<number, HashSpec>> = {
 	3: { algorithm: "sha-256", output: "full-hex" }, // E3 — same algorithms, re-pinned (the E2 ritual)
 	4: { algorithm: "sha-256", output: "full-hex" }, // TUI2-R3v2 — `purpose` is a marker, not an input to any hash; re-pinned by the same ritual
 	5: { algorithm: "sha-256", output: "full-hex" }, // F33-1 — `usageKnown` is a marker, not an input to any hash; re-pinned by the same ritual
+	6: { algorithm: "sha-256", output: "full-hex" }, // TRACE-F1 — `servedModel` is the server's statement, not an input to any hash; re-pinned by the same ritual
 };
 
 export function hashSpecFor(version: number): HashSpec {
@@ -272,10 +296,15 @@ export const TRACE_RECORD_FIELDS_V4 = [...TRACE_RECORD_FIELDS_V3, "purpose"] as 
  *  Optional for the same reason `purpose` is: requiring it would invalidate
  *  every v4 record ever written, and reading old generations is the whole
  *  point of the discipline. Absent means the generation could not say. */
-export const TRACE_RECORD_FIELDS = [...TRACE_RECORD_FIELDS_V4, "usageKnown"] as const;
+export const TRACE_RECORD_FIELDS_V5 = [...TRACE_RECORD_FIELDS_V4, "usageKnown"] as const;
+
+/** TRACE-F1 (v6): the model the SERVER said it served. A v5 ledger has none
+ *  on any record, which reads as "nobody asked the server" — the true
+ *  statement about a ledger written before the adapters read the field. */
+export const TRACE_RECORD_FIELDS = [...TRACE_RECORD_FIELDS_V5, "servedModel"] as const;
 
 /** The fields the closed-set check does not require to be present. */
-export const TRACE_RECORD_OPTIONAL = ["purpose", "usageKnown"] as const;
+export const TRACE_RECORD_OPTIONAL = ["purpose", "usageKnown", "servedModel"] as const;
 
 export const TRACE_SEGMENT_FIELDS = ["role", "seqRange", "estTokens", "freshness"] as const;
 
@@ -347,7 +376,9 @@ export function validateTraceRecord(v: unknown): v is TraceRecord {
 					? TRACE_RECORD_FIELDS_V3
 					: version === 4
 						? TRACE_RECORD_FIELDS_V4
-						: TRACE_RECORD_FIELDS;
+						: version === 5
+							? TRACE_RECORD_FIELDS_V5
+							: TRACE_RECORD_FIELDS;
 	if (!hasClosedKeys(v, fields, ["lineageLink", ...TRACE_RECORD_OPTIONAL])) return false;
 	if (v.purpose !== undefined && (typeof v.purpose !== "string" || v.purpose === "")) return false;
 	// F33-R8: the completeness marker is a BOOLEAN. It was accepted as
@@ -355,6 +386,10 @@ export function validateTraceRecord(v: unknown): v is TraceRecord {
 	// every consumer that branches on it read truthy — a marker a reader acts
 	// on has to be the type it claims to be.
 	if (v.usageKnown !== undefined && typeof v.usageKnown !== "boolean") return false;
+	// TRACE-F1: the served id is a NON-EMPTY string when stated. Empty would
+	// reconcile as a contradiction against every requested id; absent is the
+	// honest "the server said nothing".
+	if (v.servedModel !== undefined && (typeof v.servedModel !== "string" || v.servedModel === "")) return false;
 	if (v.kind !== "request") return false;
 	if (typeof v.requestId !== "string" || typeof v.runId !== "string") return false;
 	if (!isNonNegInt(v.requestIndex) || !isNonNegInt(v.retryAttempt)) return false;
