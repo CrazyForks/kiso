@@ -88,28 +88,38 @@ CFG
   echo "$((E-S))" > "$W/wall_seconds"
   printf '%s\n' "$rc" > "$W/exit_code"
 
-  node "$B/classify-leg.mjs" "$W" "$rc" $((NTURNS + 1)) > "$W/classification.json"
+  # NTURNS, not NTURNS+1: `/model` is a dispatch COMMAND, not a model turn,
+  # so it never produces a terminal. Counting it as one marked both legs of
+  # the first pair `truncated` when each had reached all eight.
+  node "$B/classify-leg.mjs" "$W" "$rc" "$NTURNS" > "$W/classification.json"
   cls=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).status)' "$W/classification.json")
   "$B/t5-verify.sh" "$W/repo" > "$W/verify"
   reqs=$(requests_so_far "$W" kiso)
 
-  # THE EFFORT MUST BE ON THE WIRE, not merely typed. A leg whose switch was
-  # refused would run the default and be scored as the other arm.
+  # THE EFFORT MUST BE BOUND, not merely typed — a refused switch would run
+  # the default and be scored as the other arm. The evidence is the DURABLE
+  # PROFILE sidecar, which records the binding as a typed field.
+  #
+  # The first version of this check read the trace record, looking for a
+  # `reasoning` key. The trace has never carried one — not on any of the 715
+  # real requests either — so it reported 0 of 42 on a leg whose status row
+  # said `ds (deepseek-v4-flash · low)` and whose thinking was 59% below the
+  # other arm's. The gate fired correctly on its own terms; the terms were
+  # looking at a field nothing writes.
   node -e '
   const fs=require("fs"),p=require("path");
-  const d=process.argv[1]+"/kiso-home/sessions/traces";
-  let withEffort=0,total=0,levels={};
-  try{for(const f of fs.readdirSync(d)){
-    for(const l of fs.readFileSync(p.join(d,f),"utf8").split("\n")){
-      if(!l.trim())continue; let e; try{e=JSON.parse(l)}catch{continue}
-      if(e.kind!=="request")continue; total++;
-      const lv=e.reasoning&&e.reasoning.effort;
-      if(lv!==undefined&&lv!==null){withEffort++;levels[lv]=(levels[lv]||0)+1;}
-    }}}catch{}
-  fs.writeFileSync(process.argv[1]+"/effort_on_wire.json",
-    JSON.stringify({requests:total,withEffort,levels},null,1)+"\n");
-  ' "$W"
-  onwire=$(node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1]+"/effort_on_wire.json","utf8"));console.log(j.withEffort+"/"+j.requests+" "+JSON.stringify(j.levels))' "$W")
+  const d=process.argv[1]+"/kiso-home/sessions";
+  let bound=null, revision=null;
+  try{
+    const meta=fs.readdirSync(d).filter(x=>x.endsWith(".meta.json"))[0];
+    const j=JSON.parse(fs.readFileSync(p.join(d,meta),"utf8"));
+    bound=j.profile && j.profile.reasoning && j.profile.reasoning.effort;
+    revision=j.profile && j.profile.revision;
+  }catch{}
+  fs.writeFileSync(process.argv[1]+"/effort_bound.json",
+    JSON.stringify({bound,revision,wanted:process.argv[2]},null,1)+"\n");
+  ' "$W" "$eff"
+  onwire=$(node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1]+"/effort_bound.json","utf8"));console.log((j.bound===null?"<none>":j.bound)+" (rev "+j.revision+", wanted "+j.wanted+")")' "$W")
 
   if [ "$cls" != "completed" ]; then
     mark_incomplete "$W" "$cls" "$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).reason)' "$W/classification.json")"
@@ -151,11 +161,11 @@ while [ "$p" -le "$PAIRS_N" ]; do
     leg high "$HIGH" "$p"; leg low "$LOW" "$p"
   fi
   if [ "$p" -eq "$FROM" ]; then
-    lo=$(node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));console.log(j.withEffort)' "$(legdir low "$p")/effort_on_wire.json")
-    hi=$(node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));console.log(j.withEffort)' "$(legdir high "$p")/effort_on_wire.json")
-    echo "resolution check: requests carrying an effort field — low=$lo high=$hi"
-    if [ "$lo" -lt 1 ] || [ "$hi" -lt 1 ]; then
-      echo "STOP — the effort never reached the wire. Both arms ran the provider default." >&2
+    lo=$(node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));console.log(j.bound===j.wanted?"ok":"MISMATCH:"+j.bound)' "$(legdir low "$p")/effort_bound.json")
+    hi=$(node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));console.log(j.bound===j.wanted?"ok":"MISMATCH:"+j.bound)' "$(legdir high "$p")/effort_bound.json")
+    echo "resolution check: the durable profile's bound effort — low=$lo high=$hi"
+    if [ "$lo" != "ok" ] || [ "$hi" != "ok" ]; then
+      echo "STOP — an arm did not bind the level it was told to. Nothing further runs." >&2
       exit 3
     fi
   fi
