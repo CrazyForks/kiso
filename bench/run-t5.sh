@@ -37,10 +37,28 @@ if [ "$TOOL" = "kiso" ] && [ -z "${KISO_VERSION:-}" ]; then
   # The EXIT STATUS is kept: a bin that fails while printing to stdout used to
   # have its error message recorded as the version — "error: unknown flag
   # --version" went into meta.json as if it were 0.34.0.
-  if PROBE=$($KISO_BIN --version 2>/dev/null); then
+  # THE PROBE IS A PROCESS LIKE ANY OTHER, AND NOTHING WAS WATCHING IT.
+  #
+  # The per-leg limits live in bare-env.sh, sourced thirty lines below this,
+  # and they bound the leg's WORK. This runs before any of that exists: a
+  # bin that hangs here — reading a stdin nobody closes, waiting on a
+  # network, blocked on a lock — stalls the leg BEFORE its clock starts,
+  # and no deadline, no budget and no classifier ever sees it. Found by an
+  # offline smoke whose substitute read stdin: three legs hung indefinitely
+  # with LEG_DEADLINE_S set to twenty seconds.
+  #
+  # So: a wall of its own (perl's alarm, the same mechanism the legs use),
+  # and stdin CLOSED, because a probe has nothing to read.
+  PROBE_DEADLINE_S=${PROBE_DEADLINE_S:-20}
+  PROBE=$(perl -e 'alarm shift; exec @ARGV or exit 127' "$PROBE_DEADLINE_S" $KISO_BIN --version 2>/dev/null </dev/null)
+  PROBE_RC=$?
+  if [ "$PROBE_RC" -eq 0 ]; then
     KISO_VERSION=$(printf '%s' "$PROBE" | tr -d '\r' | tail -1)
   else
     KISO_VERSION=""
+    # a TIMEOUT and a wrong answer call for different actions, so they are
+    # not reported as the same thing
+    [ "$PROBE_RC" -eq 142 ] && echo "FAIL: KISO_BIN ($KISO_BIN) did not answer --version within ${PROBE_DEADLINE_S}s." >&2
   fi
   # And it must LOOK like a version. Anything else is a bin that answered
   # something other than the question.
@@ -107,6 +125,20 @@ over_budget() {
 }
 
 cd "$WORK/repo"
+# THE ROUND'S REASONING LEVEL, pinned for every arm that has the knob.
+#
+# Amendment 4b: a comparison of products at different reasoning levels
+# compares SETTINGS, not products. Left alone the arms disagree — kiso sends
+# NOTHING and takes whatever the server defaults to, while the reference
+# implementation sends its own `medium`, which this vendor maps to `high`.
+# The cost difference between those two is the most expensive variable in
+# the whole comparison: thinking was 73% of output in the PR-1c round.
+#
+# So both sides say it OUT LOUD. Pinning only the comparator would align it
+# to a value we BELIEVE ours takes — the server's unstated default, which we
+# have never measured and do not control. The same shape as reading a
+# fallback as a measurement, which is the defect this whole round began with.
+BENCH_EFFORT=${BENCH_EFFORT:-high}
 TURN() { node -e "console.log(JSON.parse(require('fs').readFileSync('$B/tasks-t5.json','utf8'))[$1-1])"; }
 
 # F33-R6: declared for EVERY arm, not inside one. It lived in the kiso
@@ -167,7 +199,10 @@ case "$TOOL" in
       printf '%s\n' "$_rc" > "$WORK/exit-$_n"
       note_exit "segment $_n" "$_rc" "$_left"
     }
-    seg 1 printf '%s\n' "$(TURN 1)" "$(TURN 2)" "$(TURN 3)" "$(TURN 4)" "$(TURN 5)"
+    # the effort switch rides the FIRST segment as its opening line, which
+    # is how a human sets it: there is no config field and no flag, only the
+    # per-session `/model` command.
+    seg 1 printf '%s\n' "/model ds $BENCH_EFFORT" "$(TURN 1)" "$(TURN 2)" "$(TURN 3)" "$(TURN 4)" "$(TURN 5)"
     seg 2 printf '/compact\n'
     seg 3 printf '%s\n' "$(TURN 6)" "$(TURN 7)" "$(TURN 8)"
     node -e "
@@ -191,7 +226,7 @@ fs.writeFileSync('$WORK/meta.json', JSON.stringify(meta, null, 1) + '\n');
       set +e
       bare_bounded "$BARE_HOME" "$_left" "$WORK/stdout-$i.log" \
         "DEEPSEEK_API_KEY=$DEEPSEEK_API_KEY" -- \
-        pi --provider deepseek --model deepseek-v4-flash -p --mode json \
+        pi --provider deepseek --model deepseek-v4-flash --thinking "$BENCH_EFFORT" -p --mode json \
         --session "$WORK/pi-session" "$(TURN $i)" < /dev/null
       _rc=$?
       set -e
@@ -221,7 +256,7 @@ fs.writeFileSync('$WORK/meta.json', JSON.stringify(meta, null, 1) + '\n');
         set +e
         bare_bounded "$BARE_HOME" "$_left" "$WORK/stdout-$i.log" \
           $CLAUDE_ENV_PAIRS -- \
-          claude -p "$(TURN $i)" --output-format json --strict-mcp-config --mcp-config '{"mcpServers":{}}' --dangerously-skip-permissions < /dev/null
+          claude -p "$(TURN $i)" --effort "$BENCH_EFFORT" --output-format json --strict-mcp-config --mcp-config '{"mcpServers":{}}' --dangerously-skip-permissions < /dev/null
         _rc=$?; set -e
         printf '%s\n' "$_rc" > "$WORK/exit-$i"
         note_exit "turn $i" "$_rc" "$_left"
@@ -250,7 +285,7 @@ for line in open('$WORK/stdout-$i.log', errors='ignore'):
         set +e
         bare_bounded "$BARE_HOME" "$_left" "$WORK/stdout-$i.log" \
           $CLAUDE_ENV_PAIRS -- \
-          claude -p "$(TURN $i)" --resume "$SID" --output-format json --strict-mcp-config --mcp-config '{"mcpServers":{}}' --dangerously-skip-permissions < /dev/null
+          claude -p "$(TURN $i)" --resume "$SID" --effort "$BENCH_EFFORT" --output-format json --strict-mcp-config --mcp-config '{"mcpServers":{}}' --dangerously-skip-permissions < /dev/null
         _rc=$?; set -e
         printf '%s\n' "$_rc" > "$WORK/exit-$i"
         note_exit "turn $i" "$_rc" "$_left"
@@ -278,6 +313,16 @@ case "$TOOL" in
   pi)     ARM_CMD="pi";        ARM_MODEL="deepseek-v4-flash"; ARM_ENDPOINT="https://api.deepseek.com"; ARM_ENV="DEEPSEEK_API_KEY" ;;
   claude) ARM_CMD="claude";    ARM_MODEL="deepseek-v4-flash"; ARM_ENDPOINT="https://api.deepseek.com/anthropic"; ARM_ENV="ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_MODEL" ;;
 esac
+case "$TOOL" in
+  # Amendment 4b: the level is STATED per arm. An arm with no knob states
+  # the empty string, which reads as "vendor default" in the manifest —
+  # different from an arm that simply forgot to say.
+  # all three have the knob: kiso's per-session `/model`, the reference
+  # implementation's `--thinking`, Claude Code's `--effort`. Measured on the
+  # installed binaries, not read off documentation.
+  kiso|pi|claude) ARM_REASONING="$BENCH_EFFORT" ;;
+  *)              ARM_REASONING="" ;;
+esac
 # TRACE-F1-R1: the WHOLE-leg aggregate, not the first answer. A scalar
 # could not say "two different models answered this leg", and the manifest
 # read that as agreement.
@@ -299,6 +344,7 @@ const cfg = captureArm({
   model: '$ARM_MODEL',
   endpoint: '$ARM_ENDPOINT',
   envNames: '$ARM_ENV'.split(' ').filter(Boolean),
+  reasoning: '$ARM_REASONING' === '' ? null : { effort: '$ARM_REASONING' },
   observed,
 });
 cfg.task = 'T5'; cfg.run = '$RUN'; cfg.round = process.env.KISO_ROUND || null;
@@ -307,10 +353,45 @@ writeFileSync('$WORK/config.json', JSON.stringify(cfg, null, 1) + '\n');
 " 2>/dev/null || echo "WARN: configuration capture failed for $TOOL" >&2
 # F33-R4: execution validity is decided BEFORE the task verdict, and the
 # two are kept apart. A leg whose process never ran did not fail the task.
+# THE EFFORT MUST BE BOUND, NOT MERELY TYPED. A refused switch runs the
+# default and would be scored as this arm's level — the arm would carry a
+# label its requests never had. The evidence is the DURABLE PROFILE
+# sidecar, which records the binding as a typed field; the screen is not
+# evidence, and neither is the trace, which has never carried a `reasoning`
+# key on any of the 715 real requests.
+EFFORT_BOUND=""
+if [ "$TOOL" = "kiso" ]; then
+  EFFORT_BOUND=$(node -e '
+  const fs=require("fs"),p=require("path");
+  const d=process.argv[1]+"/kiso-home/sessions";
+  let bound=null;
+  try{
+    const meta=fs.readdirSync(d).filter(x=>x.endsWith(".meta.json"))[0];
+    const j=JSON.parse(fs.readFileSync(p.join(d,meta),"utf8"));
+    bound=(j.profile && j.profile.reasoning && j.profile.reasoning.effort) || null;
+  }catch{}
+  process.stdout.write(bound === null ? "" : String(bound));
+  ' "$WORK" 2>/dev/null || echo "")
+  printf '%s\n' "${EFFORT_BOUND:-<none>}" > "$WORK/effort_bound"
+fi
+
 if [ -f "$WORK/status" ]; then
   : # a budget limit already classified this leg
 elif [ -n "$SEG_FAILURE" ]; then
   mark_incomplete "$WORK" "${SEG_FAILURE%%:*}" "${SEG_FAILURE#*:}"
+elif [ "$TOOL" = "claude" ] && grep -qi "Unknown --effort value" "$WORK"/stdout-*.log 2>/dev/null; then
+  # It warns and then runs the DEFAULT. Unread, that is an arm labelled
+  # `high` whose requests were never high — the same silent substitution the
+  # kiso check below exists for, except this one announces itself.
+  mark_incomplete "$WORK" "effort_not_bound" "the tool rejected --effort $BENCH_EFFORT and used its default"
+elif [ "$TOOL" = "kiso" ] && [ "$EFFORT_BOUND" != "$BENCH_EFFORT" ]; then
+  # BEFORE the task verdict, like every other execution-validity question:
+  # a leg that ran at the wrong level did not fail the task, it failed to
+  # be the arm it claims to be.
+  # AFTER the run-failure branch above, on purpose: a leg that never ran is
+  # not a leg that ran at the wrong level. Reporting the consequence in
+  # place of the cause sends the next reader to the wrong question.
+  mark_incomplete "$WORK" "effort_not_bound" "wanted $BENCH_EFFORT, the durable profile says ${EFFORT_BOUND:-<none>}"
 else
   mark_complete "$WORK"
 fi
