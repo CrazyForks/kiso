@@ -191,6 +191,10 @@ export class RequestTracer {
 			// turn (freshness fresh) is never part of it (slice 4)
 			segmentHashes: hashes,
 			stablePrefixFingerprint: stablePrefixFingerprint(cacheableHashes(manifest, hashes)),
+			// F33-1: the convention below writes unknown as zero, so the
+			// record says out loud which of the two it is. False until a
+			// usage event settles it.
+			usageKnown: false,
 			freshInput: 0, // unknown until the usage event — "0 = unknown"
 			cacheRead: 0,
 			cacheWrite: null,
@@ -234,6 +238,10 @@ export class RequestTracer {
 		record.latencyMs = performance.now() - p.t0;
 		record.ttftMs = p.ttftMs ?? 0; // null = no event ever — the "0 = unknown" marker
 		record.toolCalls = p.toolCalls;
+		// F33-1: the settle path has always been TOLD whether the provider
+		// reported usage; it just never wrote it down, and every consumer
+		// downstream then had to guess from four zeros.
+		record.usageKnown = p.usageKnown;
 		if (p.usageKnown) {
 			record.freshInput =
 				this.#provider === "anthropic"

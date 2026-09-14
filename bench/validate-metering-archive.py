@@ -40,9 +40,33 @@ def old_and_new(path):
     return dict(old_cost=ce(o_fresh, o_cache, o_out), new_cost=ce(n_fresh, n_cache, n_out),
                 reqs=o_reqs, unknown=n_unk)
 
-legs = sorted(glob.glob(os.path.join(ARCHIVE, "**", "kiso-home", "sessions", "*.jsonl"), recursive=True))
+# F33-3: BOTH surfaces. The first version globbed only the plain session
+# logs, so it could not reproduce on its own the claim that "both paths are
+# complete" — the sidecar path, which is the one the extractors read first,
+# was never opened.
+logs = sorted(glob.glob(os.path.join(ARCHIVE, "**", "kiso-home", "sessions", "*.jsonl"), recursive=True))
+traces = sorted(glob.glob(os.path.join(ARCHIVE, "**", "kiso-home", "sessions", "traces", "*.jsonl"), recursive=True))
+logs = [p for p in logs if p not in set(traces)]
+
+trace_reqs = trace_unknown = trace_undecidable = 0
+for p in traces:
+    for line in open(p):
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        if r.get("kind") != "request":
+            continue
+        trace_reqs += 1
+        # F33-1 again, from the other side: a v5 record says; an older one
+        # cannot, and "cannot say" is not "complete".
+        if r.get("usageKnown") is False:
+            trace_unknown += 1
+        elif "usageKnown" not in r:
+            trace_undecidable += 1
+
 changed, with_unknown, total_reqs, total_unknown = [], [], 0, 0
-for p in legs:
+for p in logs:
     m = old_and_new(p)
     total_reqs += m["reqs"]; total_unknown += m["unknown"]
     if m["unknown"]:
@@ -50,12 +74,31 @@ for p in legs:
     if abs(m["old_cost"] - m["new_cost"]) > 1e-9:
         changed.append((p, m))
 
-print(f"legs scanned            : {len(legs)}")
-print(f"usage records           : {total_reqs}")
-print(f"records with UNKNOWN    : {total_unknown}")
-print(f"legs containing unknown : {len(with_unknown)}")
-print(f"legs whose cost CHANGES : {len(changed)}")
+print(f"plain session logs      : {len(logs)}")
+print(f"  usage records         : {total_reqs}")
+print(f"  records with UNKNOWN  : {total_unknown}")
+print(f"  logs containing one   : {len(with_unknown)}")
+print(f"trace sidecars          : {len(traces)}")
+print(f"  request records       : {trace_reqs}")
+print(f"  usageKnown = false    : {trace_unknown}")
+print(f"  no usageKnown (pre-v5): {trace_undecidable}")
 print()
+
+# THE TWO VERDICTS ARE SEPARATE. The first version printed "every leg has
+# complete usage" whenever no cost moved — but a record that is all null
+# under `known: false` contributes zero to BOTH the old algorithm and the
+# new one, so an archive full of unknowns moves no cost at all. "Nothing
+# was restated" and "nothing was missing" are different questions and the
+# report now answers them one at a time.
+complete = total_unknown == 0 and trace_unknown == 0 and trace_undecidable == 0
+print("VERDICT 1 — completeness (is any usage unknown or undecidable?)")
+if complete:
+    print("  COMPLETE: every record in this archive states its usage.")
+else:
+    print(f"  NOT COMPLETE: {total_unknown} unknown in plain logs, "
+          f"{trace_unknown} unknown and {trace_undecidable} undecidable in sidecars.")
+print()
+print("VERDICT 2 — historical compatibility (does the fix move a published number?)")
 if changed:
     print("Every changed leg must be one that contains unknown usage:")
     bad = [p for p, m in changed if m["unknown"] == 0]
@@ -64,8 +107,9 @@ if changed:
         print(f"  {os.path.basename(os.path.dirname(os.path.dirname(os.path.dirname(p))))}: "
               f"old={m['old_cost']:.0f} new={m['new_cost']:.0f} unknown={m['unknown']}/{m['reqs']}")
 else:
-    print("No historical number moves: every leg IN THIS ARCHIVE has complete")
-    print("usage, so the fix restates nothing already published.")
+    print("  NO NUMBER MOVES: the old and new algorithms agree on every leg")
+    print("  in this archive, so the fix restates nothing already published.")
+    print("  This says NOTHING about completeness — see verdict 1 above.")
     print()
     print("WHAT THIS DOES NOT SHOW. It is a compatibility result over one")
     print("archive, not a statement about the world: it does not establish")
