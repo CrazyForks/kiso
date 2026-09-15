@@ -134,9 +134,20 @@ def pi(work):
                 u["input"] += iv
                 u["cache"] += cv or 0
                 u["output"] += ov
+                # THIS ARM REPORTS ITS REASONING TOO, under the field name
+                # `reasoning`. Reading only our own spelling made it look
+                # like the other product reported none at all, which is the
+                # shape of a false comparative claim: "we measure our
+                # thinking and they do not". They do — on every assistant
+                # message. Summed only where STATED; absent is not zero.
+                rv = u2.get("reasoning")
+                if isinstance(rv, int):
+                    u["reasoning"] = u.get("reasoning", 0) + rv
+                    u["reasoning_reported"] = u.get("reasoning_reported", 0) + 1
         b = dict(fresh=u["input"], cache_read=u["cache"], output=u["output"],
                  requests=u["requests"], unknown_requests=u["unknown"],
-                 reasoning=0, reasoning_reported=0)
+                 reasoning=u.get("reasoning", 0),
+                 reasoning_reported=u.get("reasoning_reported", 0))
         b["total"] = u["input"] + u["cache"]
         b["cost_weighted"] = u["input"] + 0.1 * u["cache"]
         b["wall"] = int(open(f"{work}/wall_{p + 1}").read().strip())
