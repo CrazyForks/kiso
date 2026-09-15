@@ -117,6 +117,26 @@ WORK="$B/runs/${KISO_ROUND:+$KISO_ROUND/}$TOOL-T5-$RUN"
 rm -rf "$WORK"; mkdir -p "$WORK"
 cp -R "$B/fixture-t5/" "$WORK/repo/"
 rm -rf "$WORK/repo/.git"
+# ISOLATION: the leg's repo gets its OWN git, and it is not optional.
+#
+# Deleting .git and stopping there leaves the fixture inside whatever
+# repository the runs directory happens to live in, and git WALKS UP. A T6
+# leg ran `git stash && ... ; git stash pop` to compare against HEAD; with
+# no repository of its own it reached the HOST worktree, found it clean so
+# stashed nothing, and popped the operator's PARKED stash instead — which
+# conflicted, left a file behind, and sent the agent into recovering a mess
+# that had nothing to do with its task. 7,663 of that leg's 7,961 thinking
+# tokens came AFTER the conflict, and the leg was read as the expensive one
+# for reasons that were ours.
+#
+# An empty repo with one commit gives `git stash`, `git diff` and `git log`
+# somewhere to land that is the leg's own. Identity is set locally so the
+# operator's name is not attached to bench commits.
+git -C "$WORK/repo" init -q
+git -C "$WORK/repo" config user.email bench@localhost
+git -C "$WORK/repo" config user.name bench
+git -C "$WORK/repo" add -A
+git -C "$WORK/repo" -c commit.gpgsign=false commit -q -m "fixture baseline" || true
 . "${XDG_CONFIG_HOME:-$HOME/.config}/claude-deepseek/credentials.env"
 TOT=0
 # PER-LEG HARD LIMITS. A leg had none: a hung arm ran until someone noticed,

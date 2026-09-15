@@ -153,6 +153,33 @@ for tool in kiso pi claude; do
 		|| note RED "$tool T6: exit 3 not classified ($(cat "$W/status" 2>/dev/null || echo none))"
 done
 
+echo "  --- a leg's git cannot reach the host ---"
+# A T6 leg ran `git stash ... ; git stash pop` against HEAD. With no
+# repository of its own the fixture sat inside the HOST worktree, git
+# walked up, and the pop landed on the operator's parked stash. The leg
+# then spent most of its thinking recovering a mess that was ours.
+#
+# The check is not "does .git exist" — it is whether git RESOLVES to the
+# leg, which is the question the failure actually turned on.
+for fam in t5 t6; do
+	W="$B/runs/offline-smoke/kiso-$(echo $fam | tr a-z A-Z)-s1"
+	if [ -d "$W/repo" ]; then
+		top=$(git -C "$W/repo" rev-parse --show-toplevel 2>/dev/null || echo "")
+		case "$top" in
+			"$W/repo"|"$(cd "$W/repo" 2>/dev/null && pwd -P)")
+				note ok "$fam: git inside the leg resolves to the leg" ;;
+			"")
+				note RED "$fam: git resolves to NOTHING — commands will error, not isolate" ;;
+			*)
+				note RED "$fam: git inside the leg resolves to $top — it can reach the host" ;;
+		esac
+		# and the leg has a commit, so `git stash`/`git diff` have a base
+		git -C "$W/repo" rev-parse HEAD >/dev/null 2>&1 \
+			&& note ok "$fam: the leg's repo has a baseline commit" \
+			|| note RED "$fam: the leg's repo has no commit — git stash has nothing to compare"
+	fi
+done
+
 rm -rf "$B/runs/offline-smoke"
 [ "$FAILED" -eq 0 ] && echo "[offline-runner-smoke] the lifecycle holds on all three arms" || echo "[offline-runner-smoke] RED"
 exit "$FAILED"
