@@ -43,10 +43,20 @@ function summarise(calls) {
 	}
 	// Reads of a file this leg had already edited, and reads that OPEN a
 	// turn: the two shapes the paired round distinguishes.
-	const edited = new Set();
+	// A FAILED EDIT IS NOT THE BEHAVIOUR UNDER TEST. Reading a file after
+	// an edit was REFUSED is the correct response to a refusal; reading it
+	// after one SUCCEEDED is the thing a result that carried the file
+	// would have made unnecessary. The first version counted both, and the
+	// rate it produced showed a clean separation between two arms that
+	// vanished the moment the refusals were taken out — a whole claim,
+	// withdrawn, because the instrument conflated the behaviour with its
+	// opposite.
+	const editedOk = new Set();
 	const firstOfTurn = new Map();
 	let readsAfterOwnEdit = 0;
 	let readsImmediatelyAfterOwnEdit = 0;
+	let readsImmediatelyAfterFailedEdit = 0;
+	let successfulMutations = 0;
 	let turnOpeningReads = 0;
 	for (let i = 0; i < calls.length; i += 1) {
 		const c = calls[i];
@@ -54,14 +64,20 @@ function summarise(calls) {
 			firstOfTurn.set(c.turn, c.family);
 			if (c.family === "read") turnOpeningReads += 1;
 		}
-		if (MUTATES.has(c.family) && c.path) {
-			edited.add(c.path);
+		if (MUTATES.has(c.family)) {
+			if (!c.failed) {
+				successfulMutations += 1;
+				if (c.path) editedOk.add(c.path);
+			}
 			continue;
 		}
 		if (c.family !== "read" || !c.path) continue;
-		if (edited.has(c.path)) readsAfterOwnEdit += 1;
+		if (editedOk.has(c.path)) readsAfterOwnEdit += 1;
 		const prev = calls[i - 1];
-		if (prev && MUTATES.has(prev.family) && prev.path === c.path) readsImmediatelyAfterOwnEdit += 1;
+		if (prev && MUTATES.has(prev.family) && prev.path === c.path) {
+			if (prev.failed) readsImmediatelyAfterFailedEdit += 1;
+			else readsImmediatelyAfterOwnEdit += 1;
+		}
 	}
 	return {
 		total: calls.length,
@@ -78,6 +94,9 @@ function summarise(calls) {
 		turnOpeningReads,
 		readsAfterOwnEdit,
 		readsImmediatelyAfterOwnEdit,
+		// the rework signal, kept apart from the one above
+		readsImmediatelyAfterFailedEdit,
+		successfulMutations,
 	};
 }
 
