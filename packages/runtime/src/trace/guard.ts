@@ -104,6 +104,14 @@ export class RequestTracer {
 		let cacheWrite: number | null = null;
 		let outputTokens: number | null = null;
 		let usageKnown = false;
+		// TRACE-F1: the server's own statement of what it ran. Null until a
+		// usage event carries one; it stays null when the provider says
+		// nothing, which is a different fact from "it matched".
+		let servedModel: string | null = null;
+		// RSN-1: the reported thinking split. Undefined until a usage event
+		// carries one; it stays undefined when the provider reports none,
+		// which is a different fact from a measured zero.
+		let reasoningTokens: number | undefined;
 		const toolCalls: string[] = [];
 		let outcome: Outcome = "ok";
 
@@ -119,6 +127,8 @@ export class RequestTracer {
 					if (ev.cacheRead !== null) cacheRead = ev.cacheRead;
 					if (ev.cacheWrite !== null) cacheWrite = ev.cacheWrite;
 					if (ev.outputTokens !== null) outputTokens = ev.outputTokens;
+					if (ev.servedModel !== undefined) servedModel = ev.servedModel;
+					if (ev.reasoningTokens !== undefined) reasoningTokens = ev.reasoningTokens;
 				}
 				yield ev;
 			}
@@ -137,6 +147,8 @@ export class RequestTracer {
 					cacheWrite,
 					outputTokens,
 					usageKnown,
+					servedModel,
+					reasoningTokens,
 				});
 			}
 		}
@@ -232,6 +244,8 @@ export class RequestTracer {
 			cacheWrite: number | null;
 			outputTokens: number | null;
 			usageKnown: boolean;
+			servedModel: string | null;
+			reasoningTokens: number | undefined;
 		},
 	): void {
 		record.outcome = p.outcome;
@@ -262,6 +276,10 @@ export class RequestTracer {
 			p.inputTokens !== null &&
 			p.cacheRead !== null &&
 			p.outputTokens !== null;
+		// TRACE-F1: written ONLY when the server stated one. The field is
+		// absent otherwise — writing the requested id here would manufacture
+		// the agreement the reconciliation exists to test.
+		if (p.servedModel !== null) record.servedModel = p.servedModel;
 		if (p.usageKnown) {
 			record.freshInput =
 				this.#provider === "anthropic"
@@ -288,6 +306,7 @@ export class RequestTracer {
 			outputTokens: p.outputTokens,
 			cacheRead: p.cacheRead,
 			cacheWrite: p.cacheWrite,
+			...(p.reasoningTokens !== undefined ? { reasoningTokens: p.reasoningTokens } : {}),
 		});
 		this.#writer.enqueue(record);
 	}

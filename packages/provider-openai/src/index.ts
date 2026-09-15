@@ -148,15 +148,30 @@ export function createOpenAICompatAdapter(client: OpenAI, adapterOpts: OpenAICom
 			// usage chunk is still accepted after the finish: some compat
 			// providers send it late.
 			let finishSeen = false;
+			// TRACE-F1: the model the SERVER says it served. Every chunk of an
+			// OpenAI-shaped stream carries `model`; we never read it, so an id
+			// the vendor silently aliases (a retired name, a migration id)
+			// looked identical to the one we asked for. ONE variable, read by
+			// every usage exit below — this adapter has three of them, and two
+			// places computing the same thing is what W22-R1 was.
+			let served: string | null = null;
 
 			try {
 				for await (const chunk of stream) {
+					// before the finishSeen branch below, which continues early.
+					// FIRST statement wins: a provider that changes the id
+					// mid-stream is telling us something is wrong, and the first
+					// answer is the one the request was routed by.
+					if (served === null && typeof chunk.model === "string" && chunk.model !== "") served = chunk.model;
 					if (finishSeen) {
 						if (chunk.usage) {
 							usageSent = true;
-							const details = (chunk.usage as {
+							const u = chunk.usage as {
 								prompt_tokens_details?: { cached_tokens?: number };
-							}).prompt_tokens_details;
+								completion_tokens_details?: { reasoning_tokens?: number };
+							};
+							const details = u.prompt_tokens_details;
+							const reasoning = u.completion_tokens_details?.reasoning_tokens;
 							yield {
 								seq: 0,
 								type: "usage",
@@ -165,6 +180,8 @@ export function createOpenAICompatAdapter(client: OpenAI, adapterOpts: OpenAICom
 								cacheRead: details?.cached_tokens ?? null,
 								cacheWrite: null,
 								known: true,
+								...(typeof reasoning === "number" ? { reasoningTokens: reasoning } : {}),
+								...(served !== null ? { servedModel: served } : {}),
 							};
 						}
 						continue; // content and finish reasons after the first finish: ignored
@@ -262,9 +279,17 @@ export function createOpenAICompatAdapter(client: OpenAI, adapterOpts: OpenAICom
 						// prompt_tokens_details — an absent value is null, NEVER
 						// faked as a zero-cache turn. OpenAI does not report a
 						// cache write; null is the honest answer.
-						const details = (chunk.usage as {
+						const u = chunk.usage as {
 							prompt_tokens_details?: { cached_tokens?: number };
-						}).prompt_tokens_details;
+							completion_tokens_details?: { reasoning_tokens?: number };
+						};
+						const details = u.prompt_tokens_details;
+						// RSN-1: the completion side of the SAME object. We have
+						// always read the prompt side for cache and never looked
+						// here, so `canonical.reasoning` sat hardcoded null under a
+						// comment saying no provider reports a split — true when
+						// written, false since this vendor shipped one.
+						const reasoning = u.completion_tokens_details?.reasoning_tokens;
 						yield {
 							seq: 0,
 							type: "usage",
@@ -273,6 +298,8 @@ export function createOpenAICompatAdapter(client: OpenAI, adapterOpts: OpenAICom
 							cacheRead: details?.cached_tokens ?? null,
 							cacheWrite: null,
 							known: true,
+							...(typeof reasoning === "number" ? { reasoningTokens: reasoning } : {}),
+							...(served !== null ? { servedModel: served } : {}),
 						};
 					}
 
@@ -311,7 +338,9 @@ export function createOpenAICompatAdapter(client: OpenAI, adapterOpts: OpenAICom
 			if (!usageSent) {
 				// Area 6: no usage reported is expressed as UNKNOWN — nulls
 				// and known:false — never faked as a zero-cost turn.
-				yield { seq: 0, type: "usage", inputTokens: null, outputTokens: null, cacheRead: null, cacheWrite: null, known: false };
+				// known:false and a served model are not in tension: the server
+				// stated what it ran, it just never reported what it cost.
+				yield { seq: 0, type: "usage", inputTokens: null, outputTokens: null, cacheRead: null, cacheWrite: null, known: false, ...(served !== null ? { servedModel: served } : {}) };
 			}
 			// Area 6 hardening (review finding 4): a stream that ended with
 			// NO finish_reason is a TRUNCATED turn — the stop is an explicit

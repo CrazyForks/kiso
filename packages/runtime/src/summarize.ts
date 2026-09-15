@@ -277,7 +277,19 @@ export async function summarizeConversation(options: SummarizeConversationOption
 		}
 		// The LAST usage event is the call's (a turn reports usage once).
 		if (ev.type === "usage" && ev.known) {
-			usage = { inputTokens: ev.inputTokens, outputTokens: ev.outputTokens, cacheRead: ev.cacheRead, cacheWrite: ev.cacheWrite };
+			// RSN-1, and the summary path was missed on the first wiring:
+			// the quartet was copied field by field, so a fifth field added
+			// later is silently dropped. The summary IS a billed call whose
+			// cost the ledger records; leaving its split behind made that
+			// one call's thinking unknown while every other call's was
+			// measured. The output total was never wrong — the split was.
+			usage = {
+				inputTokens: ev.inputTokens,
+				outputTokens: ev.outputTokens,
+				cacheRead: ev.cacheRead,
+				cacheWrite: ev.cacheWrite,
+				...(ev.reasoningTokens !== undefined ? { reasoningTokens: ev.reasoningTokens } : {}),
+			};
 		}
 	}
 	if (stops === 0) throw new Error("the summary turn never stopped — not a complete turn");

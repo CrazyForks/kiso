@@ -17,6 +17,18 @@ import { isMain } from "../scripts/is-main.mjs";
 
 const linesOf = (p) => (existsSync(p) ? readFileSync(p, "utf8").split("\n") : []);
 
+/** F33-R7, TRACE-F1-R3: ONE definition of "this record is an assistant
+ *  completion", now wanted in a third place. Role first, usage after: the
+ *  reference implementation emits message_end for user messages and tool
+ *  results too, and a MISSING role counts — an event we cannot classify
+ *  must never be the one that silently frees up budget or, in the
+ *  observer's case, silently leaves the coverage denominator. */
+export function isReferenceCompletion(o) {
+	if (o?.type !== "message_end") return false;
+	const role = o?.message?.role;
+	return !(typeof role === "string" && role !== "" && role !== "assistant");
+}
+
 export function requestsSoFar(work, tool) {
 	let n = 0;
 	if (tool === "kiso") {

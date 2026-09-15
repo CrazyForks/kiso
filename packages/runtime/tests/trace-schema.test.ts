@@ -85,6 +85,7 @@ const canonicalRecord: TraceRecord = {
 	outcome: "ok",
 	purpose: "safer-options",
 	usageKnown: true,
+	servedModel: "deepseek-flash",
 	lineageLink: {
 		parentSessionId: "session-0142",
 		parentRunId: "run-0142",
@@ -114,8 +115,11 @@ describe("E1 slice 1 — the record schema gate (proposal §1.1)", () => {
 		// absent on every run request, present on a side query. F33-1 adds
 		// `usageKnown` on the same terms: v5 writers record it, and v1-v4
 		// sidecars have none, which a consumer must read as unknown.
+		// DECLARED SUPERSESSION (TRACE-F1): `servedModel` joins them at v6.
+		// It is the SERVER's statement, so a provider that says nothing
+		// leaves it absent — that absence is a fact, not a missing field.
 		for (const key of TRACE_RECORD_FIELDS) {
-			if (key === "lineageLink" || key === "purpose" || key === "usageKnown") continue;
+			if (key === "lineageLink" || key === "purpose" || key === "usageKnown" || key === "servedModel") continue;
 			const broken = looseCopy(canonicalRecord);
 			delete broken[key];
 			expect(validateTraceRecord(broken), `missing ${key}`).toBe(false);
@@ -165,8 +169,10 @@ describe("E1 slice 1 — the record schema gate (proposal §1.1)", () => {
 
 	it("schemaVersion is pinned to the current version", () => {
 		// the probe is always ONE PAST the current version — it moved 4 -> 5
-		// for `purpose`, and 5 -> 6 when F33-1 took 5 for `usageKnown`.
-		expect(validateTraceRecord({ ...canonicalRecord, schemaVersion: 6 })).toBe(false);
+		// for `purpose`, 5 -> 6 when F33-1 took 5 for `usageKnown`, and
+		// DECLARED SUPERSESSION (TRACE-F1): 6 -> 7 now that v6 is written.
+		// What it pins is unchanged: a version no writer produces is refused.
+		expect(validateTraceRecord({ ...canonicalRecord, schemaVersion: 7 })).toBe(false);
 		const noVersion = looseCopy(canonicalRecord);
 		delete noVersion.schemaVersion;
 		expect(validateTraceRecord(noVersion)).toBe(false);
@@ -195,8 +201,10 @@ describe("E1 slice 1 — the record schema gate (proposal §1.1)", () => {
 		expect(hashSpecFor(TRACE_SCHEMA_VERSION)).toEqual({ algorithm: "sha-256", output: "full-hex" });
 		// a version with no pinned algorithm cannot be used — the probe is
 		// ONE PAST the current version (4 -> 5 for `purpose`, 5 -> 6 when
-		// F33-1 pinned v5 for `usageKnown`)
-		expect(() => hashSpecFor(6)).toThrow(/no hash spec pinned/i);
+		// F33-1 pinned v5 for `usageKnown`; DECLARED SUPERSESSION, TRACE-F1:
+		// 6 -> 7 now that v6 is pinned). The rule it pins is unchanged: a
+		// version with no pinned algorithm cannot be written.
+		expect(() => hashSpecFor(7)).toThrow(/no hash spec pinned/i);
 		// and the record's hashes are sha-256 full-hex by construction
 		const HEX_64 = /^[0-9a-f]{64}$/;
 		for (const key of ["systemPromptHash", "toolSchemaHash", "contextHash", "stablePrefixFingerprint"] as const) {
@@ -280,6 +288,11 @@ describe("E1 slice 1 — the record schema gate (proposal §1.1)", () => {
 		// that silence is exactly what a consumer must read as unknown.
 		delete v1.purpose;
 		delete v1.usageKnown;
+		// TRACE-F1: nor servedModel — a v1 writer never read the server's id
+		// off the wire. The closed set bites on MEMBERSHIP, not just
+		// presence: a field from a later generation in an older record is a
+		// record that could not have been written.
+		delete v1.servedModel;
 		v1.schemaVersion = 1;
 		expect(validateTraceRecord(v1)).toBe(true); // accepted — readers derive defaults
 		expect(validateTraceLine(v1)).toBe(true);
@@ -299,6 +312,7 @@ describe("E1 slice 1 — the record schema gate (proposal §1.1)", () => {
 		delete v2.rent;
 		delete v2.purpose; // TUI2-R3v2 ③: predates side queries
 		delete v2.usageKnown; // F33-1: predates the marker; silence = unknown
+		delete v2.servedModel; // TRACE-F1: predates reading the served id
 		v2.schemaVersion = 2;
 		expect(validateTraceRecord(v2)).toBe(true); // accepted — readers derive defaults
 		expect(validateTraceLine(v2)).toBe(true);
@@ -329,13 +343,14 @@ describe("E1 slice 1 — the record schema gate (proposal §1.1)", () => {
 		expect(validateTraceRecord({ ...canonicalRecord, canonical: { ...c, costUsd: exact + 1e-7 } })).toBe(true); // within epsilon
 	});
 
-	it("the closed-field-set gate spans all FIVE generations (R1d-1, R2-1)", () => {
+	it("the closed-field-set gate spans all SIX generations (R1d-1, R2-1)", () => {
 		// MOVED (TUI2-R3v2 ③, the safer-options seam adjudicated 2026-08-18):
 		// the v4 generation adds `purpose`. MOVED again (F33-1): v5 adds
-		// `usageKnown`. The additive discipline is the property this case
-		// exists for and it is unchanged — each generation is the previous
-		// one plus its new field, in order.
-		expect(TRACE_RECORD_FIELDS).toEqual([...TRACE_RECORD_FIELDS_V1, "canonical", "rent", "purpose", "usageKnown"]);
+		// `usageKnown`. MOVED again (TRACE-F1): v6 adds `servedModel`. The
+		// additive discipline is the property this case exists for and it is
+		// unchanged — each generation is the previous one plus its new
+		// field, in order.
+		expect(TRACE_RECORD_FIELDS).toEqual([...TRACE_RECORD_FIELDS_V1, "canonical", "rent", "purpose", "usageKnown", "servedModel"]);
 		expect(TRACE_RECORD_FIELDS_V3).toEqual([...TRACE_RECORD_FIELDS_V1, "canonical", "rent"]);
 		expect(new Set(TRACE_RECORD_FIELDS_V1).size).toBe(TRACE_RECORD_FIELDS_V1.length);
 	});

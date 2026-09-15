@@ -26,6 +26,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, resolve as resolvePath } from "node:path";
 import { isMain } from "../scripts/is-main.mjs";
+import { reconcileServedModel } from "./observed-model.mjs";
 
 /** Run a command and return its trimmed stdout, or null — with the reason.
  *  A non-zero exit NEVER yields a value: a failing probe that printed to
@@ -90,6 +91,30 @@ export function packageOf(binPath) {
  * one is kept beside it rather than overwriting it: the disagreement is the
  * finding.
  */
+/** TRACE-F1-R1: an aggregate is `{ids, requests, observed}` from
+ *  `observedModels`; anything else is the legacy scalar.
+ *
+ *  TRACE-F1-R4 (Astra): `requests` is `number | null`. R3 introduced the
+ *  null — an arm whose native record cannot establish per-request coverage
+ *  says so — and this test still demanded a number, so the aggregate fell
+ *  through to the SCALAR path and the whole object was compared against a
+ *  model name. The manifest then recorded `agrees: false` for a leg whose
+ *  every observation agreed, which is the third shape of the same defect:
+ *  a verdict manufactured where the honest answer was "unknown".
+ *
+ *  It reproduced on the archived calibration: the observer returned null
+ *  and the config file said false. The R3 cases missed it because they
+ *  called the verdict function DIRECTLY — the bug lives in the path that
+ *  chooses which verdict function to call. */
+function isServedAggregate(v) {
+	return (
+		v !== null &&
+		typeof v === "object" &&
+		Array.isArray(v.ids) &&
+		(typeof v.requests === "number" || v.requests === null)
+	);
+}
+
 export function reconcile(specified, observed) {
 	const out = { specified, observed: observed ?? null, agrees: null };
 	if (observed === null || observed === undefined) {
@@ -130,7 +155,13 @@ export function captureArm({ tool, command, cwd = process.cwd(), envNames = [], 
 		version,
 		versionWhy: version === null ? (versionProbe.why ?? `did not report a version (got ${JSON.stringify(versionProbe.value)})`) : null,
 		// Specified vs observed, never merged.
-		model: reconcile(model, observed.model ?? null),
+		// TRACE-F1-R1: when the caller hands the whole-leg aggregate, the
+		// verdict is computed over EVERY request — a scalar cannot say "two
+		// different models answered" or "one of three requests was observed",
+		// and both of those read as agreement before.
+		model: isServedAggregate(observed.model)
+			? reconcileServedModel(model, observed.model)
+			: reconcile(model, observed.model ?? null),
 		endpoint: reconcile(endpoint, observed.endpoint ?? null),
 		// Amendment 4b: the effort key is part of the inference configuration
 		// and must be stated per arm — a comparison of products at different
