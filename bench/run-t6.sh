@@ -412,6 +412,9 @@ elif [ "$TOOL" = "kiso" ] && [ "$EFFORT_BOUND" != "$BENCH_EFFORT" ]; then
 else
   mark_complete "$WORK"
 fi
-VERIFY=$("$B/t6-verify.sh" "$WORK/repo")
+# The second argument is the sidecar directory: t6-verify.sh writes the
+# per-check detail to $WORK/verify.json while `verify` stays one word, which
+# is what every consumer of it reads (extract-t6.py, run-e6hard.sh, ...).
+VERIFY=$("$B/t6-verify.sh" "$WORK/repo" "$WORK")
 echo "$VERIFY" > "$WORK/verify"
 echo "DONE T6 $TOOL run=$RUN verify=$VERIFY"

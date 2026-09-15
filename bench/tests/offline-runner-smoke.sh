@@ -180,6 +180,152 @@ for fam in t5 t6; do
 	fi
 done
 
+
+# ---- the verifier: the bar an arm cannot move, and the one it can -----
+#
+# Three properties, each proved by making it fail first.
+#
+#   ARENA    a leg that rewrites its own tests must still be judged on its
+#            src. t5-verify.sh had this; t6-verify.sh did not until today.
+#   BOUNDARY the held-out checks must FIRE on the defect that motivated
+#            them and must be REACHABLE by a correct implementation. A bar
+#            nothing can clear fails every arm and measures nothing.
+#   SCOPE    out-of-scope edits must be REPORTED and must NOT change the
+#            verdict. A wasted-work measure that punishes is a gate in
+#            disguise, and arms would be failed for harmless refactors.
+V="$TMP/verify-gates"; mkdir -p "$V"
+sidecar() { # $1=dir with verify.json  $2=node expression over `r`
+	node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));console.log(eval(process.argv[2]))' "$1/verify.json" "$2" 2>/dev/null
+}
+
+for fam in t5 t6; do
+	# A leg that never touched src but emptied every test it was given.
+	C="$V/$fam-cheat"; rm -rf "$C"; cp -R "$B/fixture-$fam" "$C"
+	for f in "$C"/tests/*.test.js; do echo 'console.log("ok"); process.exit(0);' > "$f"; done
+	# red side, stated out loud: the workspace's own tests all pass now
+	if (cd "$C" && for t in tests/*.test.js; do node "$t" >/dev/null 2>&1 || exit 1; done); then
+		O="$V/$fam-cheat-out"; mkdir -p "$O"
+		verdict=$("$B/$fam-verify.sh" "$C" "$O" 2>/dev/null)
+		[ "$verdict" = fail ] \
+			&& note ok "$fam: the leg's own tests all pass and the verdict is still fail" \
+			|| note RED "$fam: a leg that emptied its tests scored $verdict — the bar moved with it"
+	else
+		note RED "$fam: could not set up the cheat case (its emptied tests did not pass)"
+	fi
+done
+
+# The defect three legs of three different tools shipped: Number('') is 0,
+# so '' survives a finite-check and becomes the range 0-0. Everything
+# downstream of parseRangeList inherits it.
+mk_src() { # $1=dir  $2=empty|guarded  — starts from the FIXTURE
+	# Starting from the fixture, not from hand-written files: a hand-written
+	# user.js that only LOOKED like the fixture's differed by whitespace, so
+	# the clean control already carried an out-of-scope entry and the scope
+	# gate reported a leak that was mine. The control has to be the world.
+	rm -rf "$1"; cp -R "$B/fixture-$FAM" "$1"
+	if [ "$2" = guarded ]; then GUARD='if (!/^-?\d+(--?\d+)?$/.test(String(str).trim())) return null;'; else GUARD=''; fi
+	cat > "$1/src/range.js" <<RG
+export function parseRange(str) {
+	$GUARD
+	const [a, b = a] = String(str).split("-").map(Number);
+	return a <= b ? { start: a, end: b } : { start: b, end: a };
+}
+export function parseRangeList(text) {
+	return String(text).split(",").map(parseRange)
+		.filter((r) => r !== null && Number.isFinite(r.start) && Number.isFinite(r.end));
+}
+export function clamp(n, min, max) { return n < min ? min : n > max ? max : n; }
+export function isBetween(n, lo, hi) { return lo <= n && n <= hi; }
+export function maxOf(v) { return v.length ? Math.max(...v) : null; }
+export function minOf(v) { return v.length ? Math.min(...v) : null; }
+export function sumOf(v) { return v.reduce((a, b) => a + b, 0); }
+export function formatRange(a, b) { return a <= b ? \`\${a}-\${b}\` : \`\${b}-\${a}\`; }
+export function startsOf(t) { return parseRangeList(t).map((r) => r.start); }
+export function overlaps(a, b) { return a.start <= b.end && b.start <= a.end; }
+export function mergeOverlaps(rs) {
+	const out = [];
+	for (const r of [...rs].sort((x, y) => x.start - y.start)) {
+		const l = out[out.length - 1];
+		if (l && r.start <= l.end + 1) l.end = Math.max(l.end, r.end);
+		else out.push({ start: r.start, end: r.end });
+	}
+	return out;
+}
+export function everyNth(t, n) { return parseRangeList(t).filter((_, i) => i % n === 0); }
+export function hasOverlap(t) {
+	const r = parseRangeList(t);
+	for (let i = 0; i < r.length; i++) for (let j = i + 1; j < r.length; j++) if (overlaps(r[i], r[j])) return true;
+	return false;
+}
+export function countDistinct(t) {
+	const s = new Set();
+	for (const r of parseRangeList(t)) for (let i = r.start; i <= r.end; i++) s.add(i);
+	return s.size;
+}
+export function longestRun(t) {
+	return mergeOverlaps(parseRangeList(t)).reduce((m, r) => Math.max(m, r.end - r.start + 1), 0);
+}
+RG
+	cat > "$1/src/report.js" <<'RP'
+import { formatUser } from "./user.js";
+import { parseRangeList, mergeOverlaps } from "./range.js";
+export function reportLine(u, c) { return `${formatUser(u)}: ${c} commits`; }
+export function summarize(t) { return parseRangeList(t).length; }
+export function totalSpan(t) { return parseRangeList(t).reduce((a, r) => a + (r.end - r.start + 1), 0); }
+export function widest(t) {
+	const r = parseRangeList(t); if (!r.length) return "";
+	let b = r[0]; for (const x of r) if (x.end - x.start > b.end - b.start) b = x;
+	return `${b.start}-${b.end}`;
+}
+export function mergedText(t) { return mergeOverlaps(parseRangeList(t)).map((r) => `${r.start}-${r.end}`).join(","); }
+RP
+}
+
+for fam in t5 t6; do
+	for variant in empty guarded; do
+		D="$V/$fam-$variant"; FAM=$fam mk_src "$D" "$variant"
+		O="$D-out"; mkdir -p "$O"
+		"$B/$fam-verify.sh" "$D" "$O" >/dev/null 2>&1
+		missed=$(sidecar "$O" 'r.boundary.missed.length')
+		ran=$(sidecar "$O" 'r.boundary.ran')
+		if [ "$variant" = empty ]; then
+			{ [ "$ran" = true ] && [ -n "$missed" ] && [ "$missed" -gt 0 ]; } \
+				&& note ok "$fam: the holdout names $missed boundary miss(es) on the Number('') defect" \
+				|| note RED "$fam: the holdout did not fire on the defect it exists for (ran=$ran missed=$missed)"
+		else
+			{ [ "$ran" = true ] && [ "$missed" = 0 ]; } \
+				&& note ok "$fam: a guarded implementation clears every boundary check" \
+				|| note RED "$fam: the boundary bar is unreachable — a correct src missed $missed (ran=$ran)"
+		fi
+	done
+done
+
+# Scope: measured, never gated. Stated as a DIFFERENTIAL — the same src
+# scored twice, once clean and once after wandering — rather than as
+# "the wandering leg passes". The absolute form made this gate depend on
+# mk_src being a COMPLETE solution to the chain, and it is not one: it has
+# no cli.js, so every flag check failed and the gate reported scope gating
+# a verdict that the missing file had already decided. A differential
+# cannot be fooled that way, and it is the property actually claimed.
+for fam in t5 t6; do
+	D="$V/$fam-clean"; FAM=$fam mk_src "$D" guarded
+	W="$V/$fam-wander"; rm -rf "$W"; cp -R "$D" "$W"
+	printf '\n// tidied up while I was here\n' >> "$W/src/user.js"
+	echo notes > "$W/NOTES.md"
+	OD="$D-out"; OW="$W-out"; mkdir -p "$OD" "$OW"
+	vd=$("$B/$fam-verify.sh" "$D" "$OD" 2>/dev/null)
+	vw=$("$B/$fam-verify.sh" "$W" "$OW" 2>/dev/null)
+	[ "$vd" = "$vw" ] \
+		&& note ok "$fam: wandering outside the turns' files leaves the verdict at $vw" \
+		|| note RED "$fam: the same src scored $vd clean and $vw after an out-of-scope edit — scope is gating"
+	out=$(sidecar "$OW" 'r.scope.outOfScope.join(",")')
+	added=$(sidecar "$OW" 'r.scope.added.join(",")')
+	clean_out=$(sidecar "$OD" 'r.scope.outOfScope.length + r.scope.added.length')
+	{ [ "$out" = "src/user.js" ] && [ "$added" = "NOTES.md" ] && [ "$clean_out" = 0 ]; } \
+		&& note ok "$fam: the sidecar names the out-of-scope edit, and names nothing when there is none" \
+		|| note RED "$fam: scope reported outOfScope=[$out] added=[$added] (clean leg: $clean_out entries)"
+done
+
 rm -rf "$B/runs/offline-smoke"
 [ "$FAILED" -eq 0 ] && echo "[offline-runner-smoke] the lifecycle holds on all three arms" || echo "[offline-runner-smoke] RED"
 exit "$FAILED"
