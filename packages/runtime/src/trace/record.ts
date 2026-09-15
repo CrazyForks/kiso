@@ -35,18 +35,50 @@
  * FOR ("safer-options"). Optional by construction: adding a required
  * field would have invalidated every v3 record ever written, and the
  * whole generation-compat discipline exists to prevent exactly that.
+ *
+ * Astra F33-1 (0.36.x) — schemaVersion 5: the record gains `usageKnown`.
+ * The writer has always initialised the quartet to zero under an explicit
+ * "0 = unknown" convention, and settled it only when the provider actually
+ * reported usage — so a request nobody measured was written as a request
+ * that cost nothing, indistinguishable from a genuine zero. Every consumer
+ * reading the sidecar inherited that: the bench extractors' "unknown is not
+ * zero" fix ran only on the plain-log branch, and adding a conforming
+ * sidecar to a session with one unmeasured request flipped
+ * usage_incomplete from true to false.
+ *
+ * The settle path already receives `usageKnown`; it simply never wrote it
+ * down. Recording it makes the ledger self-describing, which is the only
+ * form in which a later reader can tell the two zeros apart. It is listed
+ * as OPTIONAL so that v1-v4 sidecars stay readable — their absence means
+ * "this generation could not say", which a consumer must treat as unknown
+ * rather than as complete.
  */
 
-/** schemaVersion: 4 for 0.12.0 (the optional `purpose` marker). Version
+/** schemaVersion: 5 for the `usageKnown` marker (F33-1). Version
  *  1 = the 1.2.0 shape, 2 = the 1.3.0 shape, 3 = the 0.2.1 shape; all
  *  kept for generation-compat reads (R1d-1, R2-1). Algorithm and shape
  *  changes bump it (ADR-0051 §6 OUT-side versioning). */
-export const TRACE_SCHEMA_VERSION = 4;
+export const TRACE_SCHEMA_VERSION = 5;
 
 /** The versions a reader may meet in a ledger. v1 and v2 records are
  *  accepted (generation-compat) and read as defaults — no canonical
  *  block (v1), no rent block (v1, v2). */
-export const TRACE_SCHEMA_VERSIONS: Readonly<Set<number>> = new Set([1, 2, 3, TRACE_SCHEMA_VERSION]);
+/**
+ * EVERY generation ever written, named explicitly.
+ *
+ * F33-R1: this was `[1, 2, 3, TRACE_SCHEMA_VERSION]`, and a set spelled
+ * with a MOVING member drops the generation it was standing on every time
+ * the version rises. Raising 4 to 5 silently removed 4 — the version every
+ * trace the deployed 0.36.0 has ever written carries — so the reader
+ * stopped accepting the product's own live output while a v5 record went
+ * through. The whole generation-compat discipline exists to prevent that,
+ * and its own constant undid it.
+ *
+ * A new version is added here BY HAND, next to its field set and its hash
+ * spec. Three lists to extend is the point: a bump that forgets one is a
+ * bump that fails loudly rather than a reader that quietly narrows.
+ */
+export const TRACE_SCHEMA_VERSIONS: Readonly<Set<number>> = new Set([1, 2, 3, 4, 5]);
 
 import { PRICING_TABLE_V1, priceFor, pricingTableFor, validateCanonicalUsage } from "../usage/canonical.js";
 import type { CanonicalUsage } from "../usage/canonical.js";
@@ -70,7 +102,7 @@ export interface TraceSegment {
 /** That is the complete set for 1.2.0. */
 
 export interface TraceRecord {
-	schemaVersion: 4;
+	schemaVersion: 5;
 	kind: "request";
 	requestId: string; // crypto.randomUUID() per adapter call — W2's reverse-reference anchor
 	runId: string;
@@ -94,6 +126,12 @@ export interface TraceRecord {
 	 *  Canonical/billing usage lives in the `canonical` block (E2); these
 	 *  fields are observation only (a provider may count a token a dozen
 	 *  ways; billing must not). */
+	/** F33-1 (v5): did the provider actually REPORT usage for this request?
+	 *  The quartet below is written under a "0 = unknown" convention, so
+	 *  without this a request nobody measured and a request that genuinely
+	 *  cost nothing are the same four zeros. Optional only for reading v1-v4
+	 *  sidecars; every v5 writer records it. */
+	usageKnown?: boolean;
 	freshInput: number; // provider-raw usage, never normalized — normalization is E2's
 	cacheRead: number;
 	cacheWrite: number | null; // openai-compat honestly reports null; anthropic reports real
@@ -136,7 +174,7 @@ export interface TraceRecord {
 // checkable.
 
 export interface HeaderLine {
-	schemaVersion: 4;
+	schemaVersion: 5;
 	kind: "header";
 	sessionId: string;
 	kisoVersion: string;
@@ -144,7 +182,7 @@ export interface HeaderLine {
 }
 
 export interface RunEndLine {
-	schemaVersion: 4;
+	schemaVersion: 5;
 	kind: "run_end";
 	runId: string;
 	ts: number;
@@ -152,7 +190,7 @@ export interface RunEndLine {
 }
 
 export interface CrashLine {
-	schemaVersion: 4;
+	schemaVersion: 5;
 	kind: "crash";
 	ts: number;
 	note: string;
@@ -174,6 +212,7 @@ export const HASH_SPEC_BY_VERSION: Readonly<Record<number, HashSpec>> = {
 	2: { algorithm: "sha-256", output: "full-hex" }, // E2 — the algorithms do not change
 	3: { algorithm: "sha-256", output: "full-hex" }, // E3 — same algorithms, re-pinned (the E2 ritual)
 	4: { algorithm: "sha-256", output: "full-hex" }, // TUI2-R3v2 — `purpose` is a marker, not an input to any hash; re-pinned by the same ritual
+	5: { algorithm: "sha-256", output: "full-hex" }, // F33-1 — `usageKnown` is a marker, not an input to any hash; re-pinned by the same ritual
 };
 
 export function hashSpecFor(version: number): HashSpec {
@@ -227,10 +266,16 @@ export const TRACE_RECORD_FIELDS_V3 = [...TRACE_RECORD_FIELDS_V2, "rent"] as con
  *  TUI2-R3v2 ③: `purpose` is OPTIONAL — a run request omits it entirely,
  *  a side query names what it was for. It is listed in TRACE_RECORD_OPTIONAL
  *  below so the closed-set gate accepts a record without it. */
-export const TRACE_RECORD_FIELDS = [...TRACE_RECORD_FIELDS_V3, "purpose"] as const;
+export const TRACE_RECORD_FIELDS_V4 = [...TRACE_RECORD_FIELDS_V3, "purpose"] as const;
+
+/** The field set (schemaVersion 5) = the v4 set + `usageKnown` (F33-1).
+ *  Optional for the same reason `purpose` is: requiring it would invalidate
+ *  every v4 record ever written, and reading old generations is the whole
+ *  point of the discipline. Absent means the generation could not say. */
+export const TRACE_RECORD_FIELDS = [...TRACE_RECORD_FIELDS_V4, "usageKnown"] as const;
 
 /** The fields the closed-set check does not require to be present. */
-export const TRACE_RECORD_OPTIONAL = ["purpose"] as const;
+export const TRACE_RECORD_OPTIONAL = ["purpose", "usageKnown"] as const;
 
 export const TRACE_SEGMENT_FIELDS = ["role", "seqRange", "estTokens", "freshness"] as const;
 
@@ -289,11 +334,27 @@ export function validateTraceRecord(v: unknown): v is TraceRecord {
 	// no `purpose` on any record, which reads as "every request was a run
 	// request", the true statement about a ledger written before side
 	// queries existed.
-	if (version !== 1 && version !== 2 && version !== 3 && version !== TRACE_SCHEMA_VERSION) return false;
+	// F33-R1: the same moving-member defect lived here too. Every generation
+	// dispatches to ITS OWN field set; v4 is not "whatever the current one
+	// is minus a field", it is the set a v4 writer actually emitted.
+	if (typeof version !== "number" || !TRACE_SCHEMA_VERSIONS.has(version)) return false;
 	const fields =
-		version === 1 ? TRACE_RECORD_FIELDS_V1 : version === 2 ? TRACE_RECORD_FIELDS_V2 : version === 3 ? TRACE_RECORD_FIELDS_V3 : TRACE_RECORD_FIELDS;
+		version === 1
+			? TRACE_RECORD_FIELDS_V1
+			: version === 2
+				? TRACE_RECORD_FIELDS_V2
+				: version === 3
+					? TRACE_RECORD_FIELDS_V3
+					: version === 4
+						? TRACE_RECORD_FIELDS_V4
+						: TRACE_RECORD_FIELDS;
 	if (!hasClosedKeys(v, fields, ["lineageLink", ...TRACE_RECORD_OPTIONAL])) return false;
 	if (v.purpose !== undefined && (typeof v.purpose !== "string" || v.purpose === "")) return false;
+	// F33-R8: the completeness marker is a BOOLEAN. It was accepted as
+	// anything at all, so a record carrying `usageKnown: "yes"` validated and
+	// every consumer that branches on it read truthy — a marker a reader acts
+	// on has to be the type it claims to be.
+	if (v.usageKnown !== undefined && typeof v.usageKnown !== "boolean") return false;
 	if (v.kind !== "request") return false;
 	if (typeof v.requestId !== "string" || typeof v.runId !== "string") return false;
 	if (!isNonNegInt(v.requestIndex) || !isNonNegInt(v.retryAttempt)) return false;

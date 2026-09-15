@@ -66,25 +66,110 @@ cp -R "$B/fixture-t5/" "$WORK/repo/"
 rm -rf "$WORK/repo/.git"
 . "${XDG_CONFIG_HOME:-$HOME/.config}/claude-deepseek/credentials.env"
 TOT=0
+# PER-LEG HARD LIMITS. A leg had none: a hung arm ran until someone noticed,
+# a looping arm spent the programme's budget on one task. Overridable, but
+# never absent.
+. "$B/leg-limits.sh"
+. "$B/bare-env.sh"
+BARE_HOME=$(bare_home "$WORK")
+LEG_DEADLINE_S=${KISO_LEG_DEADLINE_S:-1800}
+LEG_MAX_REQUESTS=${KISO_LEG_MAX_REQUESTS:-200}
+LEG_STARTED=$(date +%s)
+LEG_STOPPED=""
+
+# Remaining wall budget for the next segment, or empty when it is spent.
+remaining() {
+	_used=$(( $(date +%s) - LEG_STARTED ))
+	_left=$(( LEG_DEADLINE_S - _used ))
+	[ "$_left" -gt 0 ] && echo "$_left" || echo ""
+}
+
+# Stop between segments when a bound is reached. Marks the leg INCOMPLETE
+# with its reason — never `fail`: a product that would have finished in one
+# more minute did not fail the task, it hit OUR limit.
+over_budget() {
+	_left=$(remaining)
+	if [ -z "$_left" ]; then
+		mark_incomplete "$WORK" deadline "the leg's ${LEG_DEADLINE_S}s wall budget was spent"
+		LEG_STOPPED=deadline; return 0
+	fi
+	# F33-R5: a counter that cannot answer stops the leg rather than waving
+	# it through. "unknown requests so far" is not "none so far".
+	if ! _reqs=$(requests_so_far "$WORK" "$TOOL"); then
+		mark_incomplete "$WORK" counter "the request counter could not read this leg's ledger"
+		LEG_STOPPED=counter; return 0
+	fi
+	if [ "$_reqs" -ge "$LEG_MAX_REQUESTS" ]; then
+		mark_incomplete "$WORK" requests "the leg was admitted at $_reqs requests (segment-admission ceiling $LEG_MAX_REQUESTS; not a hard cap during a process)"
+		LEG_STOPPED=requests; return 0
+	fi
+	return 1
+}
+
 cd "$WORK/repo"
 TURN() { node -e "console.log(JSON.parse(require('fs').readFileSync('$B/tasks-t5.json','utf8'))[$1-1])"; }
+
+# F33-R6: declared for EVERY arm, not inside one. It lived in the kiso
+# branch while the completion decision at the end is shared by all three, so
+# a pi or claude leg reached that line with the variable never set and
+# `set -u` killed the runner — after the work was done, leaving no status and
+# no verify record. Initialising it alone would only have turned the crash
+# into silence: those two arms discard their exit codes as well, so they
+# record them now too.
+SEG_FAILURE=""
+
+# note_exit <label> <rc> <budget-seconds> — one classifier for three arms.
+note_exit() {
+	[ "$2" -eq 0 ] && return 0
+	if [ "$2" -eq 142 ]; then
+		[ -n "$SEG_FAILURE" ] || SEG_FAILURE="deadline:$1 hit the $3s remaining wall budget"
+	else
+		[ -n "$SEG_FAILURE" ] || SEG_FAILURE="launch_or_run_error:$1 exited $2"
+	fi
+}
 
 case "$TOOL" in
   kiso)
     EXTDIR="$WORK/ext"; mkdir -p "$EXTDIR"; cp "$B/bench-allow.mjs" "$EXTDIR/"
-    KENV="OPENAI_BASE_URL=https://api.deepseek.com OPENAI_API_KEY=$DEEPSEEK_API_KEY OPENAI_MODEL=deepseek-v4-flash KISO_EXTENSIONS_DIR=$EXTDIR KISO_HOME=$WORK/kiso-home"
-    S=$(date +%s)
-    printf '%s\n' "$(TURN 1)" "$(TURN 2)" "$(TURN 3)" "$(TURN 4)" "$(TURN 5)" |
-      env $KENV $KISO_BIN --mode bypass "bench-t5-$TOOL-$RUN" > "$WORK/stdout-1.log" 2>&1 || true
-    E=$(date +%s); TOT=$((TOT + E - S))
-    S=$(date +%s)
-    printf '/compact\n' |
-      env $KENV $KISO_BIN --mode bypass "bench-t5-$TOOL-$RUN" > "$WORK/stdout-2.log" 2>&1 || true
-    E=$(date +%s); TOT=$((TOT + E - S))
-    S=$(date +%s)
-    printf '%s\n' "$(TURN 6)" "$(TURN 7)" "$(TURN 8)" |
-      env $KENV $KISO_BIN --mode bypass "bench-t5-$TOOL-$RUN" > "$WORK/stdout-3.log" 2>&1 || true
-    E=$(date +%s); TOT=$((TOT + E - S))
+    SKILLDIR="$WORK/skills"; mkdir -p "$SKILLDIR"
+    assert_bare kiso "$BARE_HOME" || exit 1
+    # §3: KISO_SKILLS_DIR was missing entirely — an arm reading the operator's
+    # skills is not the product as installed.
+    # §3: KISO_SKILLS_DIR was missing entirely — an arm reading the
+    # operator's skills is not the product as installed.
+    set -- "OPENAI_BASE_URL=https://api.deepseek.com" "OPENAI_API_KEY=$DEEPSEEK_API_KEY" \
+      "OPENAI_MODEL=deepseek-v4-flash" "KISO_EXTENSIONS_DIR=$EXTDIR" \
+      "KISO_HOME=$WORK/kiso-home" "KISO_SKILLS_DIR=$SKILLDIR" "KISO_NO_UPDATE_CHECK=1"
+    KISO_ENV_PAIRS="$*"
+    # F33-R4: the exit status is KEPT, not discarded. Every segment used to
+    # end in `|| true`, and the absence of a limit status later became
+    # `complete` — a fake CLI that reported a valid version and exited 7 on
+    # every invocation produced three launch-error logs, runner rc=0 and a
+    # leg recorded as COMPLETE. The verifier caught that particular fixture,
+    # but the execution-validity record was false, and a killed FINAL
+    # segment needs no successor to check it.
+    #
+    # 142 is the deadline (perl's alarm, through the shell). Anything else
+    # non-zero is the process failing to run or failing while running; both
+    # are OURS or the environment's, never the task's verdict.
+    seg() { # seg <n> <stdin-producer...>
+      _n=$1; shift
+      over_budget && return 0
+      _left=$(remaining)
+      S=$(date +%s)
+      set +e
+      # shellcheck disable=SC2086
+      "$@" | bare_bounded "$BARE_HOME" "$_left" "$WORK/stdout-$_n.log" \
+        $KISO_ENV_PAIRS -- $KISO_BIN --mode bypass "bench-t5-$TOOL-$RUN"
+      _rc=$?
+      set -e
+      E=$(date +%s); TOT=$((TOT + E - S))
+      printf '%s\n' "$_rc" > "$WORK/exit-$_n"
+      note_exit "segment $_n" "$_rc" "$_left"
+    }
+    seg 1 printf '%s\n' "$(TURN 1)" "$(TURN 2)" "$(TURN 3)" "$(TURN 4)" "$(TURN 5)"
+    seg 2 printf '/compact\n'
+    seg 3 printf '%s\n' "$(TURN 6)" "$(TURN 7)" "$(TURN 8)"
     node -e "
 const fs = require('fs');
 const { execSync } = require('child_process');
@@ -99,32 +184,129 @@ fs.writeFileSync('$WORK/meta.json', JSON.stringify(meta, null, 1) + '\n');
 "
     ;;
   pi)
+    assert_bare pi "$BARE_HOME" || exit 1
     for i in 1 2 3 4 5 6 7 8; do
-      S=$(date +%s)
-      env DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" \
+      over_budget && break
+      S=$(date +%s); _left=$(remaining)
+      set +e
+      bare_bounded "$BARE_HOME" "$_left" "$WORK/stdout-$i.log" \
+        "DEEPSEEK_API_KEY=$DEEPSEEK_API_KEY" -- \
         pi --provider deepseek --model deepseek-v4-flash -p --mode json \
-        --session "$WORK/pi-session" "$(TURN $i)" < /dev/null > "$WORK/stdout-$i.log" 2>&1 || true
+        --session "$WORK/pi-session" "$(TURN $i)" < /dev/null
+      _rc=$?
+      set -e
       E=$(date +%s); TOT=$((TOT + E - S))
+      printf '%s\n' "$_rc" > "$WORK/exit-$i"
+      note_exit "turn $i" "$_rc" "$_left"
     done
     ;;
   claude)
-    CENV="ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic ANTHROPIC_AUTH_TOKEN=$DEEPSEEK_API_KEY ANTHROPIC_MODEL=deepseek-v4-flash ANTHROPIC_DEFAULT_SONNET_MODEL=deepseek-v4-flash ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-v4-flash"
+    assert_bare claude "$BARE_HOME" || exit 1
+    CCFG="$WORK/claude-config"; mkdir -p "$CCFG"
+    # §3: a fresh HOME and CLAUDE_CONFIG_DIR. Without them the arm read the
+    # operator's ~/.claude.json and authenticated with THEIR account key —
+    # eight 401s recorded as a task failure.
+    set -- "CLAUDE_CONFIG_DIR=$CCFG" \
+      "ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic" \
+      "ANTHROPIC_AUTH_TOKEN=$DEEPSEEK_API_KEY" \
+      "ANTHROPIC_MODEL=deepseek-v4-flash" \
+      "ANTHROPIC_DEFAULT_SONNET_MODEL=deepseek-v4-flash" \
+      "ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-v4-flash"
+    CLAUDE_ENV_PAIRS="$*"
     SID=""
     for i in 1 2 3 4 5 6 7 8; do
-      S=$(date +%s)
+      over_budget && break
+      S=$(date +%s); _left=$(remaining)
       if [ -z "$SID" ]; then
-        env $CENV claude -p "$(TURN $i)" --output-format json --dangerously-skip-permissions \
-          < /dev/null > "$WORK/stdout-$i.log" 2>&1 || true
-        SID=$(python3 -c "import json;print(json.load(open('$WORK/stdout-$i.log')).get('session_id',''))" 2>/dev/null || true)
+        set +e
+        bare_bounded "$BARE_HOME" "$_left" "$WORK/stdout-$i.log" \
+          $CLAUDE_ENV_PAIRS -- \
+          claude -p "$(TURN $i)" --output-format json --strict-mcp-config --mcp-config '{"mcpServers":{}}' --dangerously-skip-permissions < /dev/null
+        _rc=$?; set -e
+        printf '%s\n' "$_rc" > "$WORK/exit-$i"
+        note_exit "turn $i" "$_rc" "$_left"
+        # PARSE PER LINE. Claude Code prints warnings around its result JSON
+        # — `[claude-code:unrecognized_model] {...}` is line one here — so
+        # `json.load(whole file)` throws and SID stayed empty. Every turn then
+        # started a NEW session: eight turns, eight session ids, each
+        # re-sending the whole context. Read as a product result that is
+        # "Claude Code is 6.8x more expensive on a long session", when no long
+        # session ever existed.
+        #
+        # extract.py already parses per line for exactly this reason. The fix
+        # was made there and not here, and nobody asked the sibling.
+        SID=$(python3 -c "
+import json,sys
+for line in open('$WORK/stdout-$i.log', errors='ignore'):
+    t=line.strip()
+    if not t.startswith('{'): continue
+    try: o=json.loads(t)
+    except Exception: continue
+    if isinstance(o,dict) and o.get('session_id'):
+        print(o['session_id']); break
+" 2>/dev/null || true)
+        [ -n "$SID" ] || echo "WARN: no session_id in turn $i — the next turn cannot resume" >&2
       else
-        env $CENV claude -p "$(TURN $i)" --resume "$SID" --output-format json --dangerously-skip-permissions \
-          < /dev/null > "$WORK/stdout-$i.log" 2>&1 || true
+        set +e
+        bare_bounded "$BARE_HOME" "$_left" "$WORK/stdout-$i.log" \
+          $CLAUDE_ENV_PAIRS -- \
+          claude -p "$(TURN $i)" --resume "$SID" --output-format json --strict-mcp-config --mcp-config '{"mcpServers":{}}' --dangerously-skip-permissions < /dev/null
+        _rc=$?; set -e
+        printf '%s\n' "$_rc" > "$WORK/exit-$i"
+        note_exit "turn $i" "$_rc" "$_left"
       fi
       E=$(date +%s); TOT=$((TOT + E - S))
     done
     ;;
 esac
 echo "$TOT" > "$WORK/wall_seconds"
+
+# ── the per-arm configuration manifest (§10.3, amendment 4b) ────────────
+#
+# Written for ALL THREE arms. Before this only kiso got a meta.json, and it
+# carried `model: 'deepseek-v4-flash'` as a hardcoded string — a
+# SPECIFICATION presented as a MEASUREMENT — plus a `commit` read from the
+# host checkout, which is the same defect as the version field: hand the
+# runner a pinned published bin and the record names a commit it was never
+# built from.
+#
+# Specified and observed are kept apart. The served model id is read back
+# from what the run actually produced; when it cannot be seen, the field is
+# null with a reason rather than the specification copied over.
+case "$TOOL" in
+  kiso)   ARM_CMD="$KISO_BIN"; ARM_MODEL="deepseek-v4-flash"; ARM_ENDPOINT="https://api.deepseek.com"; ARM_ENV="OPENAI_API_KEY OPENAI_BASE_URL OPENAI_MODEL KISO_HOME KISO_EXTENSIONS_DIR" ;;
+  pi)     ARM_CMD="pi";        ARM_MODEL="deepseek-v4-flash"; ARM_ENDPOINT="https://api.deepseek.com"; ARM_ENV="DEEPSEEK_API_KEY" ;;
+  claude) ARM_CMD="claude";    ARM_MODEL="deepseek-v4-flash"; ARM_ENDPOINT="https://api.deepseek.com/anthropic"; ARM_ENV="ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_MODEL" ;;
+esac
+OBSERVED_MODEL=$(node "$B/observed-model.mjs" "$WORK" "$TOOL" 2>/dev/null || echo "")
+export OBSERVED_MODEL
+node --input-type=module -e "
+import { captureArm } from '$B/capture-config.mjs';
+import { writeFileSync } from 'node:fs';
+const observed = {};
+const m = process.env.OBSERVED_MODEL;
+if (m) observed.model = m;
+const cfg = captureArm({
+  tool: '$TOOL',
+  command: '$ARM_CMD'.split(' ').filter(Boolean),
+  model: '$ARM_MODEL',
+  endpoint: '$ARM_ENDPOINT',
+  envNames: '$ARM_ENV'.split(' ').filter(Boolean),
+  observed,
+});
+cfg.task = 'T5'; cfg.run = '$RUN'; cfg.round = process.env.KISO_ROUND || null;
+cfg.legDeadlineSeconds = $LEG_DEADLINE_S; cfg.legMaxRequests = $LEG_MAX_REQUESTS;
+writeFileSync('$WORK/config.json', JSON.stringify(cfg, null, 1) + '\n');
+" 2>/dev/null || echo "WARN: configuration capture failed for $TOOL" >&2
+# F33-R4: execution validity is decided BEFORE the task verdict, and the
+# two are kept apart. A leg whose process never ran did not fail the task.
+if [ -f "$WORK/status" ]; then
+  : # a budget limit already classified this leg
+elif [ -n "$SEG_FAILURE" ]; then
+  mark_incomplete "$WORK" "${SEG_FAILURE%%:*}" "${SEG_FAILURE#*:}"
+else
+  mark_complete "$WORK"
+fi
 VERIFY=$("$B/t5-verify.sh" "$WORK/repo")
 echo "$VERIFY" > "$WORK/verify"
 echo "DONE T5 $TOOL run=$RUN wall=${TOT}s verify=$VERIFY"

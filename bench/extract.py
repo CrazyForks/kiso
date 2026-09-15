@@ -46,6 +46,36 @@ twice; no README table ever rendered it, but the fix is pinned in
 tests/test_extract.py so it stays honest.
 """
 import json, os, sys, glob
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from usage_marker import usage_marker, unmeasured, MISSING, MALFORMED  # F33-RR3
+
+def unknown_in_session_log(path):
+    """How many requests in a PLAIN session log had no reported usage.
+
+    Astra F33-1: the trace writer initialises the quartet to zero under an
+    explicit "0 = unknown" convention and settles it only when the provider
+    reports. A pre-v5 sidecar therefore cannot tell an unmeasured request
+    from a free one, and reading it alone turned usage_incomplete from true
+    to false the moment a sidecar was added to a session that had one. The
+    plain log kept the flag (`known: false`, null fields), so for those
+    generations it is the surviving source of known-ness.
+    """
+    n = 0
+    if not os.path.exists(path):
+        return None                                # nothing survives to consult
+    for line in open(path):
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        e = r.get("event")
+        if not isinstance(e, dict) or e.get("type") != "usage":
+            continue
+        i, ca, o = e.get("inputTokens"), e.get("cacheRead"), e.get("outputTokens")
+        if e.get("known") is False or i is None or ca is None or o is None:
+            n += 1
+    return n
+
 
 def kiso(work):
     # The traced set: sessions whose ledger the trace dir covers — their
@@ -58,36 +88,113 @@ def kiso(work):
     files = sorted(glob.glob(f"{sessions}/traces/*.jsonl") +
                    [p for p in glob.glob(f"{sessions}/*.jsonl")
                     if os.path.basename(p)[:-6] not in traced])
-    fresh = out = cache = reqs = 0
+    fresh = out = cache = reqs = unknown = 0
+    pre_v5_sessions = set()
     first = None
     for f in files:
         for line in open(f):
             r = json.loads(line)
             if "canonical" in r:                      # v2 ledger: the canonical block
+                # F33-1: a v5 record SAYS whether the provider reported.
+                # Before v5 the record could not say, and the four zeros of
+                # an unmeasured request are the four zeros of a free one —
+                # so the sibling plain log is consulted below instead.
+                mk = usage_marker(r)
+                if unmeasured(mk):
+                    reqs += 1
+                    unknown += 1
+                    if mk == MALFORMED:
+                        print(f"[extract] {f}: usageKnown is {r['usageKnown']!r}, not a boolean"
+                              " — counted as UNMEASURED", file=sys.stderr)
+                    continue
+                if r.get("kind") == "request" and mk == MISSING:
+                    pre_v5_sessions.add(os.path.basename(f)[:-6])
                 c = r["canonical"]
                 fr, ca, o = c["input"], c["cacheRead"], c["output"]
             elif r.get("kind") == "request":          # v1 ledger: the guard's fresh
+                mk = usage_marker(r)
+                if unmeasured(mk):
+                    reqs += 1
+                    unknown += 1
+                    if mk == MALFORMED:
+                        print(f"[extract] {f}: usageKnown is {r['usageKnown']!r}, not a boolean"
+                              " — counted as UNMEASURED", file=sys.stderr)
+                    continue
+                if mk == MISSING:
+                    pre_v5_sessions.add(os.path.basename(f)[:-6])
                 fr, ca, o = r["freshInput"], r["cacheRead"], r["output"]
             else:
                 e = r.get("event")
                 if not isinstance(e, dict) or e.get("type") != "usage":
                     continue                          # header/run_end/crash, non-usage
-                i = e.get("inputTokens") or 0
-                ca = e.get("cacheRead") or 0
-                o = e.get("outputTokens") or 0
+                # UNKNOWN IS NOT ZERO. The runtime states this and keeps it:
+                # `known: false` means the provider reported no usage and the
+                # token fields are null, "never faked as zero" (Area 6,
+                # packages/core/src/protocol/events.ts). Reading them as
+                # `or 0` destroyed exactly that distinction and never once
+                # consulted the flag set for this purpose — so a request whose
+                # usage nobody reported counted as a request costing NOTHING,
+                # and the arm with the least observable provider measured as
+                # the cheapest. In a comparison that rewards being unmeasurable.
+                i, ca, o = e.get("inputTokens"), e.get("cacheRead"), e.get("outputTokens")
+                if e.get("known") is False or i is None or ca is None or o is None:
+                    reqs += 1
+                    unknown += 1
+                    continue
                 fr = i - ca                           # legacy session log: the 0.1.23 derivation
             reqs += 1
             fresh += fr; cache += ca; out += o
             if first is None: first = fr + ca
+    # F33-1: for every traced session whose records predate v5, the sidecar
+    # cannot say; its sibling plain log can. A session whose plain log is
+    # gone is UNDECIDABLE, and undecidable is reported as incomplete — never
+    # as complete, which is the direction that flatters whoever is measured.
+    undecidable = 0
+    for sid in sorted(pre_v5_sessions):
+        n = unknown_in_session_log(f"{sessions}/{sid}.jsonl")
+        if n is None:
+            undecidable += 1
+        else:
+            unknown += n
     return dict(input=fresh, cache_read=cache, output=out, requests=reqs,
                 fresh=fresh, total=fresh + cache, cost_weighted=fresh + 0.1 * cache,
                 cost_equivalent=fresh + 0.02 * cache + 4 * out,
+                # The refusal handles: a caller comparing arms can see that a
+                # leg's usage is incomplete instead of reading it as cheap.
+                unknown_requests=unknown,
+                usage_incomplete=unknown > 0 or undecidable > 0,
+                undecidable_sessions=undecidable,
                 first_prompt=first)
+
+def completion_role(ev):
+    """What a pi `message_end` IS: "assistant", another role, or unknown.
+
+    F33-R2: pi emits message_end for user messages and tool results too —
+    the real calibration archive holds 8 user, 32 assistant and 24
+    toolResult — and counting all of them doubled a fully measured
+    32-request leg to 64 with 32 "unknown".
+
+    A MISSING role is its own answer and neither of the two convenient
+    ones. Calling it assistant re-admits the events R2 exists to exclude;
+    dropping it makes a request vanish, which is the same error one level
+    earlier. So it is counted as a completion whose usage is UNKNOWN: the
+    leg goes incomplete and says so, rather than being silently inflated or
+    silently shrunk.
+
+    The request COUNTER shares this predicate. Two definitions of "a
+    request" is how a leg's count and its ledger stop agreeing.
+    """
+    msg = ev.get("message")
+    if not isinstance(msg, dict):
+        return None
+    role = msg.get("role")
+    return role if isinstance(role, str) and role != "" else None
+
 
 def pi(work):
     # pi --mode json emits JSONL: one event per line; usage lives on
     # assistant "message"/"message_end" events' message.usage.
-    inp = out = cache = reqs = 0
+    inp = out = cache = reqs = unknown = 0
     first = None
     for line in open(f"{work}/stdout.log"):
         line = line.strip()
@@ -98,18 +205,39 @@ def pi(work):
         except json.JSONDecodeError:
             continue
         if not isinstance(ev, dict) or ev.get("type") != "message_end":
-            continue  # only the final per-request usage is real
+            continue
+        # F33-R2: only an ASSISTANT completion is a model request. Native pi
+        # emits message_end for user messages and tool results too — the real
+        # calibration archive holds 8 user, 32 assistant and 24 toolResult —
+        # and counting all of them doubled a fully measured 32-request leg to
+        # 64 with 32 "unknown", rejecting a valid comparator.
+        #
+        # The role is checked BEFORE the usage, and the usage after: F33-2's
+        # rule stands (a completion nobody measured is still a completion),
+        # it just applies to completions rather than to every message.
+        _role = completion_role(ev)
+        if _role is not None and _role != "assistant":
+            continue
+        reqs += 1
+        if _role is None:
+            unknown += 1
+            continue
         msg = ev.get("message")
         u = (msg or {}).get("usage") if isinstance(msg, dict) else None
-        if u and isinstance(u, dict) and "input" in u:
-            reqs += 1
-            inp += u.get("input") or 0
-            cache += u.get("cacheRead") or 0
-            out += u.get("output") or 0
-            if first is None: first = (u.get("input") or 0) + (u.get("cacheRead") or 0)
+        # UNKNOWN IS NOT ZERO — and this matters more here than for kiso:
+        # pi's trace format is not ours. A field it stops emitting would
+        # make this arm measure as free in the comparison a claim rests on.
+        i, ca, o = (u.get("input"), u.get("cacheRead"), u.get("output")) if isinstance(u, dict) else (None, None, None)
+        if i is None or ca is None or o is None:
+            unknown += 1
+            continue
+        inp += i; cache += ca; out += o
+        if first is None: first = i + ca
     return dict(input=inp, cache_read=cache, output=out, requests=reqs,
                 fresh=inp, total=inp + cache, cost_weighted=inp + 0.1 * cache,
                 cost_equivalent=inp + 0.02 * cache + 4 * out,
+                unknown_requests=unknown, usage_incomplete=unknown > 0,
+                undecidable_sessions=0,
                 first_prompt=first)
 
 def claude(work):
@@ -131,14 +259,19 @@ def claude(work):
     if d is None:
         raise ValueError("no usage JSON line in stdout.log")
     u = d.get("usage", {})
-    inp = u.get("input_tokens", 0)
-    cache = u.get("cache_read_input_tokens", 0)
-    out = u.get("output_tokens", 0)
+    # UNKNOWN IS NOT ZERO. `u.get(..., 0)` turned an absent field — or an
+    # absent usage block entirely — into a free run.
+    i, ca, o = u.get("input_tokens"), u.get("cache_read_input_tokens"), u.get("output_tokens")
+    unknown = 1 if (i is None or ca is None or o is None) else 0
+    inp = i or 0
+    cache = ca or 0
+    out = o or 0
     return dict(input=inp, cache_read=cache,
                 output=out,
                 requests=d.get("num_turns", 0),
                 fresh=inp, total=inp + cache, cost_weighted=inp + 0.1 * cache,
                 cost_equivalent=inp + 0.02 * cache + 4 * out,
+                unknown_requests=unknown, usage_incomplete=unknown > 0,
                 first_prompt=None)
 
 def main(workdir):
