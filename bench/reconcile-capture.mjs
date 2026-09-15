@@ -142,3 +142,27 @@ export function reconcile(recs, expected) {
 		shrinks,
 	};
 }
+
+/**
+ * PRE-FLIGHT, 2026-09-16, offline and free — no real endpoint contacted.
+ *
+ * The open question was whether the other arm's `--thinking high` survives
+ * a custom base URL, because if it did not, every leg of that arm would be
+ * `effort_not_bound` and the capture would buy nothing.
+ *
+ * It survives. Its model store rewritten into an isolated HOME with every
+ * `baseUrl` pointed at the capture proxy, and a fake upstream answering so
+ * nothing real was called, the arm's first request body carried BOTH
+ * spellings:
+ *
+ *     reasoning_effort  "high"
+ *     thinking          {"type": "enabled"}
+ *
+ * reconcile() read `effortObserved: "high"` from it. The credential
+ * appeared nowhere in the archived record — the header allowlist holding
+ * on real traffic, not only on the synthetic case.
+ *
+ * The older note that "it honours neither DEEPSEEK_BASE_URL nor
+ * OPENAI_BASE_URL" is about ENVIRONMENT VARIABLES and stands; the model
+ * store is a different route and it works.
+ */
