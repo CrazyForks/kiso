@@ -156,6 +156,14 @@
   {
    "file": "apps/cli/tests/pr1d-clause-pins.test.ts",
    "reason": "spawns nothing. It imports SYSTEM_PROMPT and shellTool to read the five MEASURED clause texts and assert the facts each one must state. The classifier reads SOURCE TEXT and tools-node is a module that can run commands when EXECUTED - this test only reads a tool's description and promptSnippet and never calls execute. Verified: no child_process, no spawn, no pty helper."
+  },
+  {
+   "file": "apps/cli/tests/a1a-display-vs-policy.test.ts",
+   "reason": "spawns nothing. It builds an in-process agent on a faux adapter and reads two ratios. The classifier follows its import of ../src/state.js, which carries one execFileSync(\"git\", [\"ls-files\"]) for @-file completion; this test calls only setAgentModel and setConfiguredWindow, two assignments that cannot reach it. Verified: no child_process, no spawn, no pty helper in the file."
+  },
+  {
+   "file": "apps/cli/tests/known-context-window.test.ts",
+   "reason": "spawns nothing. It calls knownContextWindow, contextWindowTokens and resolveContextWindow and asserts their values. The classifier follows its import of ../src/state.js, which carries one execFileSync(\"git\", [\"ls-files\"]) for @-file completion; this test calls only setConfiguredWindow, an assignment that cannot reach it. Verified: no child_process, no spawn, no pty helper in the file."
   }
  ]
 }

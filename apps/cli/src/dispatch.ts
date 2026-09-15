@@ -10,10 +10,10 @@ import { buildAdapter, lookupModelMetadata, resolveContinuationScope, resolveRea
 import type { AgentSession } from "@vincemakes/kiso-runtime";
 import { MODES, MODE_NOTE, getMode, setMode } from "./mode.js";
 import { clipboardWrite, lastAnswer } from "./clipboard.js";
-import { agentModel, body, bodyLog, codingToolOptions, kisoHome, configModels, dock, lastBinding, readContextLedger, sessionsDir, setAgentModel, setCurrentModelName, setModelChoice, type LineInput , setLastBinding } from "./state.js";
+import { agentModel, body, bodyLog, codingToolOptions, kisoHome, configModels, dock, lastBinding, mergedConfig, readContextLedger, sessionsDir, setAgentModel, setConfiguredWindow, setCurrentModelName, setModelChoice, type LineInput , setLastBinding } from "./state.js";
 import { adapterOptionsFor } from "./auth/adapter-options.js";
 import { microcompactThresholdFor } from "./chat.js";
-import { authForProfile, directWriteProfile, profileAvailable, unavailableReason, type ModelProfile } from "./config.js";
+import { authForProfile, directWriteProfile, profileAvailable, resolveContextWindow, unavailableReason, type ModelProfile } from "./config.js";
 import { shellTool } from "@vincemakes/kiso-tools-node";
 import { join } from "node:path";
 
@@ -699,6 +699,13 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 							// §2.5: the ONE source a reload reads for the model — a
 							// switch made here must survive the rebuild.
 							setModelChoice(arg);
+							// The window a PROFILE states travels with the switch,
+							// like the model id and the endpoint. Leaving it behind
+							// is CTX-1 one field over: the row would show a
+							// percentage of the OUTGOING model's window. An
+							// explicit env still wins, which resolveContextWindow
+							// decides.
+							setConfiguredWindow(resolveContextWindow(mergedConfig, profile));
 							// OR-7 (owner, 2026-09-09): the status row is repainted BY the
 							// switch — it used to keep the old model until the next
 							// recap repainted it, so "takes effect on the next turn"

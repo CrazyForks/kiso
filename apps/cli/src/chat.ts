@@ -40,6 +40,16 @@ import { MODES, getMode, setMode } from "./mode.js";
 /** B area: default context window for the ~ctx estimate (config overridable). */
 const DEFAULT_CONTEXT_WINDOW = 200_000;
 
+/** The in-process fake provider's id, and the window we declare for it.
+ *  Ours to state: faux is not a vendor's model, so "nobody published a
+ *  window" — the reason a real model's capacity is unknown — cannot apply.
+ *  200,000 is the figure every faux transcript has been measured against
+ *  since the fallback existed, so declaring it changes no behaviour; it
+ *  only stops an honest `ctx ?` from firing where the honest answer is a
+ *  number we own. */
+const FAUX_MODEL = "faux";
+const FAUX_CONTEXT_WINDOW = 200_000;
+
 /**
  * The ergonomics batch C8 — the /compact auto-trigger, OPT-IN (default off: only an
  * explicit KISO_AUTO_COMPACT=<ratio> enables it — the CLI never defaults
@@ -77,6 +87,37 @@ export function autoCompactFromEnv(): AutoCompact | undefined {
  * `baseUrl` is endpoint-less, and a half-given argument would have it
  * inherit the OUTGOING model's endpoint — the same bug one field over.
  */
+/**
+ * THE WINDOW SOMEBODY STATED, or null when nobody has.
+ *
+ * Three sources, in order: the config/profile window, KISO_CONTEXT_WINDOW,
+ * and the metadata registry. Each is a claim someone made and dated. When
+ * none of them speaks, this returns NULL rather than a number — because
+ * the question "how much of the window is left" has no answer without a
+ * window, and every display that shows a percentage needs this one, not
+ * the policy value below.
+ *
+ * DeepSeek is the live case: its /models endpoint returns ids only, the
+ * responses carry no window, and the registry records null on purpose. The
+ * display used to divide by a hardcoded 200,000 anyway and print a
+ * confident `ctx left ~82%` against a figure nobody had measured.
+ */
+export function knownContextWindow(of?: { readonly model: string; readonly baseUrl?: string }): number | null {
+	if (configuredWindow !== undefined) return configuredWindow;
+	const env = Number.parseInt(process.env.KISO_CONTEXT_WINDOW ?? "", 10);
+	if (Number.isFinite(env) && env > 0) return env;
+	const model = of?.model ?? agentModel;
+	// `faux` is OURS. The registry carries no row for it because it is not a
+	// vendor's model, but the reason the window is unknown elsewhere — nobody
+	// published one — does not apply to a model we wrote. Declaring it is a
+	// statement about our own artifact, with ourselves as the source, and it
+	// keeps faux mode showing a real percentage instead of the `ctx ?` that
+	// belongs to models whose capacity genuinely nobody states.
+	if (model === FAUX_MODEL) return FAUX_CONTEXT_WINDOW;
+	const known = lookupModelMetadata(model, of !== undefined ? of.baseUrl : agentBaseUrl)?.capabilities.contextWindow;
+	return known ?? null;
+}
+
 export function contextWindowTokens(of?: { readonly model: string; readonly baseUrl?: string }): number {
 	const windowOverride = configuredWindow;
 	if (windowOverride !== undefined) return windowOverride;
@@ -145,7 +186,14 @@ export function statusModelLabel(session: { readonly reasoning?: { readonly effo
 }
 
 export function displayCtxRatio(session: AgentSession): number {
-	return requestBudget(session.requestParts(), contextWindowTokens()).ratio;
+	// CAPACITY is not POLICY. `contextWindowTokens` falls back to 200,000 so
+	// that the compaction threshold always HAS a value — a policy needs a
+	// number. A percentage on screen is a different kind of thing: it is a
+	// claim about the model, and an unstated window makes it unanswerable.
+	// NaN reaches the status row as `ctx ?`.
+	const window = knownContextWindow();
+	if (window === null) return Number.NaN;
+	return requestBudget(session.requestParts(), window).ratio;
 }
 
 /** A1a: the number the auto-compact decision reads — the pre-A1a estimate,
