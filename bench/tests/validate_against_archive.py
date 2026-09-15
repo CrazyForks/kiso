@@ -25,8 +25,10 @@ never priced.
 import glob
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 
 BENCH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -128,27 +130,117 @@ def legs_under(runs_dir):
     return out
 
 
+def summary_totals(leg):
+    """The compaction summary calls in this leg, from their own records.
+    A difference between the two readings is explained by these ONLY when
+    it equals these — computed, never assumed from a request-count gap."""
+    fresh = cache = out = 0
+    n = 0
+    d = os.path.join(leg, "kiso-home", "sessions", "traces")
+    for f in sorted(glob.glob(os.path.join(d, "*.jsonl"))):
+        for line in open(f, errors="ignore"):
+            t = line.strip()
+            if not t.startswith("{"):
+                continue
+            try:
+                o = json.loads(t)
+            except Exception:
+                continue
+            if o.get("kind") != "summary":
+                continue
+            c = o.get("canonical") or {}
+            n += 1
+            fresh += c.get("input") or 0
+            cache += c.get("cacheRead") or 0
+            out += c.get("output") or 0
+    return {"fresh": fresh, "cache_read": cache, "output": out, "requests": n}
+
+
+def view_for(legs, tmp):
+    """The extractor globs `<workdir>/runs/*T5*` and splits the directory
+    name as <tool>-<task>-<run>. Build that shape rather than making the
+    caller do it — a validator that needs a hand-built view is one nobody
+    runs."""
+    runs = os.path.join(tmp, "runs")
+    os.makedirs(runs, exist_ok=True)
+    picked = []
+    for leg in legs:
+        name = os.path.basename(leg)
+        if "-T5-" not in name:
+            continue
+        # Rounds reuse leg names — `calib-2026-09-15/kiso-T5-r1` and
+        # `rsn1-verify/kiso-T5-r1` are different legs with one basename, and
+        # the first version of this collided on the symlink. The round rides
+        # the RUN field, which is the part the extractor treats as opaque.
+        tool, task, run = name.split("-", 2)
+        rnd = os.path.basename(os.path.dirname(leg)).replace("-", "")
+        alias = f"{tool}-{task}-{rnd}{run}"
+        os.symlink(os.path.abspath(leg), os.path.join(runs, alias))
+        picked.append((leg, tool, f"{rnd}{run}"))
+    return tmp, picked
+
+
 if __name__ == "__main__":
     runs = sys.argv[1] if len(sys.argv) > 1 else os.path.join(BENCH, "runs")
     legs = legs_under(runs)
     if not legs:
         print(f"no archived kiso legs under {runs} — an empty read is a failed read, not an answer", file=sys.stderr)
         sys.exit(2)
+
     bad = 0
+
+    # PART 1 — the two RAW readings, and a difference explained only by
+    # what the summary records actually say.
+    print("  raw readings: the session log's usage events vs the trace ledger\n")
     for leg in legs:
         a = raw_from_session_log(leg)
         b = raw_from_sidecar(leg)
+        rel = os.path.relpath(leg, runs)
         if b["requests"] == 0:
-            print(f"  {os.path.relpath(leg, runs):48} log-only, {a['requests']} requests")
+            print(f"    {rel:46} log-only, {a['requests']} requests")
             continue
-        same = (a["fresh"], a["cache_read"], a["output"]) == (b["fresh"], b["cache_read"], b["output"])
-        # the sidecar carries the summary call, which the session log's
-        # usage events do not: a difference of exactly that call is
-        # expected, anything else is not
-        note = "agree" if same else "differ (expected when the leg compacted — the summary call is a sidecar-only record)"
-        if not same and b["requests"] == a["requests"]:
+        d = {k: b[k] - a[k] for k in ("fresh", "cache_read", "output")}
+        summ = summary_totals(leg)
+        if all(v == 0 for v in d.values()):
+            print(f"    {rel:46} agree")
+        elif (d["fresh"], d["cache_read"], d["output"]) == (summ["fresh"], summ["cache_read"], summ["output"]):
+            print(f"    {rel:46} differ by EXACTLY the {summ['requests']} summary call(s)")
+        else:
             bad += 1
-            note = "DIFFER with equal request counts — that is not the summary call"
-        print(f"  {os.path.relpath(leg, runs):48} {note}")
-    print(f"\n  legs whose two raw readings disagree for no stated reason: {bad}")
+            print(f"    {rel:46} UNEXPLAINED: diff {d}, summaries {summ}")
+
+    # PART 2 — the extractor itself, which is the item's actual subject.
+    # The first version of this file defined `extractor()` and never called
+    # it: the tool shipped comparing two of MY readings to each other while
+    # its commit message claimed the extractor had been validated. The
+    # numbers in that claim came from a shell script that was never
+    # committed. A validator that does not run the thing under test is a
+    # validator of nothing.
+    print("\n  the extractor, against the raw readings\n")
+    tmp = tempfile.mkdtemp()
+    view, picked = view_for(legs, tmp)
+    rows = extractor(view)
+    if not rows:
+        print("    the extractor returned NOTHING — an empty read is a failed read", file=sys.stderr)
+        sys.exit(2)
+    by_run = {(r["tool"], r["run"]): r for r in rows}
+    checked = 0
+    for leg, tool, run in picked:
+        name = os.path.relpath(leg, runs)
+        r = by_run.get((tool, run))
+        if r is None:
+            bad += 1
+            print(f"    {name:46} the extractor produced no row for this leg")
+            continue
+        mine = raw_from_sidecar(leg)
+        for k in ("fresh", "cache_read", "output", "requests"):
+            checked += 1
+            if r[k] != mine[k]:
+                bad += 1
+                print(f"    {name:46} {k}: extractor {r[k]} vs raw {mine[k]}   MISMATCH")
+        if all(r[k] == mine[k] for k in ("fresh", "cache_read", "output", "requests")):
+            print(f"    {name:46} fresh {r['fresh']}, cache {r['cache_read']}, out {r['output']}, req {r['requests']}  all match")
+    shutil.rmtree(tmp, ignore_errors=True)
+    print(f"\n  quantities compared against the extractor: {checked}")
+    print(f"  disagreements with no stated cause: {bad}")
     sys.exit(1 if bad else 0)

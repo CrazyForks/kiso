@@ -70,7 +70,16 @@ if [ "$TOOL" = "kiso" ] && [ -z "${KISO_VERSION:-}" ]; then
     $SIG{ALRM} = sub { kill("KILL", -$pid); waitpid($pid, 0); exit 142; };
     alarm $secs;
     waitpid($pid, 0);
-    exit($? >> 8);
+    # A SIGNAL DEATH IS NOT A CLEAN EXIT. `$? >> 8` is 0 for a process
+    # killed by a signal, so a bin that printed a version and was then
+    # SIGTERMed read as success and its output was accepted. The low byte
+    # carries the signal; anything there becomes 128 + it, the shell own
+    # convention, which never collides with a real exit status.
+    #
+    # (No apostrophes in here: this whole program is a single-quoted shell
+    # string, and the first version of this comment closed it.)
+    my $sig = $? & 127;
+    exit($sig ? 128 + $sig : ($? >> 8));
   ' "$KISO_PROBE_DEADLINE_S" $KISO_BIN --version >"$_probe_out" 2>/dev/null </dev/null
   PROBE_RC=$?
   set -e
