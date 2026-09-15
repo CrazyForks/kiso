@@ -254,6 +254,17 @@ queue pop · `ctrl+o` expand cells · `ctrl+r` transcript · `tab` complete · `
 sheet.
 Panels: digits select · space toggles · `t` types an answer.
 
+## Long-running tasks
+
+Interactive tasks continue until they finish or you stop them with `esc`.
+They do not pause for confirmation after a fixed number of model turns:
+turn count alone cannot distinguish a healthy long task from a loop.
+
+Repeated identical failing tool calls are still refused with a reason, and
+stalled model streams still time out. These protections address specific
+failure modes; they do not detect every possible loop. Explicit `maxTurns`
+limits supplied by SDK, task, or subagent callers still take effect.
+
 ## Images
 
 `ctrl+v` attaches the image on the clipboard. The terminal's own paste

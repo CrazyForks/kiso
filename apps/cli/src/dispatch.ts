@@ -12,6 +12,7 @@ import { MODES, MODE_NOTE, getMode, setMode } from "./mode.js";
 import { clipboardWrite, lastAnswer } from "./clipboard.js";
 import { agentModel, body, bodyLog, codingToolOptions, kisoHome, configModels, dock, lastBinding, mergedConfig, readContextLedger, sessionsDir, setAgentModel, setConfiguredWindow, setCurrentModelName, setModelChoice, type LineInput , setLastBinding } from "./state.js";
 import { adapterOptionsFor } from "./auth/adapter-options.js";
+import { microcompactThresholdFor } from "./chat.js";
 import { authForProfile, directWriteProfile, profileAvailable, resolveContextWindow, unavailableReason, type ModelProfile } from "./config.js";
 import { shellTool } from "@vincemakes/kiso-tools-node";
 import { join } from "node:path";
@@ -668,6 +669,23 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 								adapter,
 								model: profile.model,
 								provider: profile.kind,
+								// CTX-1: the compaction threshold is derived from the
+								// LIVE model's window, so it moves with the binding.
+								// It used to be computed once at startup: switching
+								// from a 200k model to a 1M one showed 1,000,000 on
+								// the status row while still clearing tool results at
+								// 100,000, and switching the other way waited for
+								// 500,000 in a window that cannot hold it.
+								//
+								// PH-F8 fixed this class for the model id, the
+								// provider, the endpoint and the scope. This is the
+								// field one over that was never asked.
+								microcompact: {
+									thresholdTokens: microcompactThresholdFor({
+										model: profile.model,
+										...(profile.baseUrl !== undefined ? { baseUrl: profile.baseUrl } : {}),
+									}),
+								},
 								// OR-1: the endpoint is the fourth passenger — the cost
 								// path and the window lookup key on (model, endpoint).
 								...(profile.baseUrl !== undefined ? { baseUrl: profile.baseUrl } : {}),

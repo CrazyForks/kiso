@@ -1,17 +1,7 @@
-/**
- * LT-2b — the 50-turn checkpoint, end to end on a real PTY.
- *
- * R3e stands: no hard turn limit on an interactive session. What a long run
- * gets instead is a QUESTION every CHECKPOINT_TURNS model turns — "still
- * working, keep going?" — and the human's answer: keep going, or stop here
- * (the run ends as `aborted by user`, resumable). Headless entries never see
- * it (no dock, no panel).
- *
- * A faux model that calls the shell fifty times, one call per turn, then
- * answers. The panel must appear at the fiftieth turn, not before; choosing
- * "stop" ends the run as aborted and the session stays healthy.
+/** LT2B-F1: turn count alone must not ask a human to keep a healthy run alive.
+ * The old 50/100-turn panels blocked unattended work. These real PTY tests
+ * exercise both former boundaries and preserve deliberate cancellation.
  */
-
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,48 +9,65 @@ import { describe, expect, it } from "vitest";
 import { isolatedEnv } from "../../../tests/helpers/isolated-cli.mjs";
 import { fauxScript, ptyRun, spares } from "./helpers/pty.js";
 
-const CHECKPOINT_TURNS = 50;
-const call = (i: number) => ({ events: [{ type: "tool_call_end", callId: `c${i}`, name: "shell", input: { command: "true" } }, { type: "stop", reason: "tool_use" }] });
+const call = (i: number, command = "true") => ({ events: [
+	{ type: "tool_call_end", callId: `c${i}`, name: "shell", input: { command } },
+	{ type: "stop", reason: "tool_use" },
+] });
 
-describe("LT-2b — the turn checkpoint on a real PTY", () => {
-	it(`asks at turn ${CHECKPOINT_TURNS}, not before; "stop here" ends the run as aborted by user and the session survives`, () => {
+function events(home: string, id: string): Array<Record<string, unknown> & { type: string }> {
+	return readFileSync(join(home, "sessions", `${id}.jsonl`), "utf8").trim().split("\n")
+		.map((line) => JSON.parse(line).event);
+}
+
+// If the old panel returns, end it deliberately so the test can report a
+// completed counterexample instead of spending its timeout on a dead wait.
+const oldPanelEscape: [string, string][] = [["keep going?", "2"], ["(interrupted)", "exit\r"]];
+
+describe("LT2B-F1 — long interactive runs do not require periodic consent", () => {
+	it("completes beyond both former checkpoints without any continuation answer", () => {
+		const calls = 105;
+		const id = "lt2-unattended";
 		const { env, dirs } = isolatedEnv({
 			KISO_FAUX_SCRIPT: fauxScript([
-				...Array.from({ length: CHECKPOINT_TURNS + 10 }, (_, i) => call(i)),
-				{ events: [{ type: "text_delta", text: "done at last." }, { type: "stop", reason: "end_turn" }] },
+				...Array.from({ length: calls }, (_, i) => call(i)),
+				{ events: [{ type: "text_delta", text: "long-run complete." }, { type: "stop", reason: "end_turn" }] },
 				...spares(2),
 			]),
 			KISO_MODE: "bypass",
 		});
-		const workdir = mkdtempSync(join(tmpdir(), "kiso-checkpoint-"));
-		const raw = ptyRun(["--mode", "bypass", "lt2-checkpoint"], env as NodeJS.ProcessEnv, {
-			cwd: workdir,
-			feeds: [
-				["/ commands · ↑ history", "go\r"],
-				// the panel: a digit answers a single-select question at once
-				["keep going?", "2"],
-				// the abort lands between two model turns: the fiftieth turn's
-				// call was approved but never started, and its card says so
-				["(interrupted)", "exit\r"],
-			],
+		const raw = ptyRun(["--mode", "bypass", id], env as NodeJS.ProcessEnv, {
+			cwd: mkdtempSync(join(tmpdir(), "kiso-unattended-")),
+			feeds: [["/ commands · ↑ history", "go\r"], ["long-run complete.", "exit\r"], ...oldPanelEscape],
 			timeout: 90,
 		});
-		const plain = raw.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "");
-		expect(plain, "the checkpoint never asked").toContain(`${CHECKPOINT_TURNS} turns`);
+		const log = events(dirs.home, id);
+		expect(log.filter((e) => e.type === "terminal").map((e) => e.outcome)).toEqual([{ kind: "completed" }]);
+		expect(log.filter((e) => e.type === "stop")).toHaveLength(calls + 1);
+		expect(log.filter((e) => e.type === "tool_execution_succeeded")).toHaveLength(calls);
+		expect(raw).toContain("long-run complete.");
+		expect(raw).not.toContain("keep going?");
+	}, 180_000);
 
-		const log = readFileSync(join(dirs.home, "sessions", "lt2-checkpoint.jsonl"), "utf8")
-			.trim()
-			.split("\n")
-			.map((l) => JSON.parse(l) as { event: Record<string, unknown> & { type: string } });
-		// exactly CHECKPOINT_TURNS model turns ran before the question; none after "stop"
-		const stops = log.filter((e) => e.event.type === "stop");
-		expect(stops, "the run went on past the checkpoint, or stopped short of it").toHaveLength(CHECKPOINT_TURNS);
-		// stopped BETWEEN turns: the fiftieth turn's call was never started (the
-		// same shape as an esc mid-turn — `kiso resume` re-issues it)
-		const executed = log.filter((e) => e.event.type === "tool_execution_started");
-		expect(executed, "the fiftieth turn's call ran although the human said stop").toHaveLength(CHECKPOINT_TURNS - 1);
-		const terminal = log.find((e) => e.event.type === "terminal");
-		expect((terminal?.event.outcome as { kind: string; by?: string } | undefined)?.kind, "the answer 'stop here' did not end the run as an abort").toBe("aborted");
-		expect(plain, "the model kept going after the human said stop").not.toContain("done at last.");
+	it("Esc still aborts a long run after the former first checkpoint", () => {
+		const id = "lt2-cancel-long";
+		const { env, dirs } = isolatedEnv({
+			KISO_FAUX_SCRIPT: fauxScript([
+				...Array.from({ length: 55 }, (_, i) => call(i)),
+				call(55, "sleep 20"),
+				{ events: [{ type: "text_delta", text: "must not finish." }, { type: "stop", reason: "end_turn" }] },
+				...spares(2),
+			]),
+			KISO_MODE: "bypass",
+		});
+		const raw = ptyRun(["--mode", "bypass", id], env as NodeJS.ProcessEnv, {
+			cwd: mkdtempSync(join(tmpdir(), "kiso-cancel-long-")),
+			feeds: [["/ commands · ↑ history", "go\r"], ["sleep 20", "\x1b"], ["[aborting run]", "exit\r"], ...oldPanelEscape],
+			timeout: 90,
+		});
+		const log = events(dirs.home, id);
+		expect(log.filter((e) => e.type === "stop").length).toBeGreaterThanOrEqual(55);
+		expect(log.filter((e) => e.type === "terminal").map((e) => e.outcome)).toEqual([{ kind: "aborted", by: "user" }]);
+		expect(raw).not.toContain("must not finish.");
+		expect(raw).not.toContain("keep going?");
 	}, 180_000);
 });

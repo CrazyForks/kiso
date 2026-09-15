@@ -50,7 +50,7 @@ import { agentModel, atFiles, body, bodyLog, codingToolOptions, kisoHome, builtI
 import { askUi, resolveProjectTrust } from "./trust-ui.js";
 import { isFirstRun, scaffoldFirstRun } from "./first-run.js";
 import { fauxSkip, readFauxScript } from "./faux-glue.js";
-import { chat, contextWindowTokens, displayCtxRatio, statusModelLabel } from "./chat.js";
+import { chat, displayCtxRatio, microcompactThresholdFor, statusModelLabel } from "./chat.js";
 import { adapterOptionsFor } from "./auth/adapter-options.js";
 import { loadProjectConfig, loadUserConfig, mergeConfigs, resolveAutoCompact, resolveContextWindow, resolveModel } from "./config.js";
 import { checkForUpdate, knownUpdate, updateCardLines } from "./update-check.js";
@@ -813,7 +813,9 @@ async function makeAgent(sessionId: string | undefined, input?: LineInput, model
 		// half the model window (KISO_CONTEXT_WINDOW override included;
 		// 200k window → 100k tokens). Long sessions compact old read/list/
 		// search/shell outputs instead of silently growing past the window.
-		microcompact: { thresholdTokens: contextWindowTokens() / 2 },
+		// CTX-1: the startup value; `/model` recomputes it through the same
+		// function, so the two can never drift apart.
+		microcompact: { thresholdTokens: microcompactThresholdFor() },
 		// E6: the run-start context policy — OFF unless env-armed (beats the microcompact default when both fire).
 		...(contextPolicy !== undefined ? { contextPolicy } : {}),
 		// R3e (owner ruling, 2026-08-28): NO turn limit on an interactive
@@ -923,6 +925,40 @@ async function pickSession(agent: Awaited<ReturnType<typeof makeAgent>>, input: 
  * formatter — never a boot-time copy, which would drift from the real
  * row the moment either changed.
  */
+/**
+ * CTX-1 (Astra F34-1): EVERY entry point that opens a session must bind the
+ * policy that follows the session's OWN model.
+ *
+ * `agent.session()` restores the model recorded in the durable profile —
+ * any model that session ever used, not necessarily the one this process
+ * started on. The display and the compaction threshold are both derived
+ * from it, so both belong here.
+ *
+ * The first fix put these two lines in chatLoop only. `kiso resume <id>`
+ * and `kiso -p <text> <id>` open through their own paths, restored the
+ * model, and kept the STARTUP threshold: a session recorded on a 1M model,
+ * resumed from a 200k start, cleared its tool results at 100,000 while the
+ * interactive entry point cleared at 500,000. Three doors, one of them
+ * fixed, is the same defect with a smaller blast radius.
+ *
+ * The pair is passed EXPLICITLY, never read back out of the display state
+ * set on the line above: depending on two lines staying in order is how the
+ * threshold got stuck in the first place.
+ */
+function bindRestoredSession(session: {
+	readonly model: string;
+	readonly baseUrl: string | undefined;
+	setMicrocompactThreshold(n: number): void;
+}): void {
+	setAgentModel(session.model, session.baseUrl);
+	session.setMicrocompactThreshold(
+		microcompactThresholdFor({
+			model: session.model,
+			...(session.baseUrl !== undefined ? { baseUrl: session.baseUrl } : {}),
+		}),
+	);
+}
+
 function paintBootStatus(session: { log: { all: readonly unknown[] }; reasoning?: { readonly effort: string } }): void {
 	if (!dock.active) return;
 	// DF-0330-F1: the BOOT row gets the budget too — it is the same row, and
@@ -1135,7 +1171,9 @@ async function chatLoop(
 		// XP-1 §2.1: the switched-to session's OWN truth repaints the row —
 		// the global display state never outlives the session it described
 		// (pre-XP the row kept the previous session's /model selection).
-		setAgentModel(session.model, session.baseUrl);
+		// CTX-1: the restored session's own model decides the display AND
+		// the threshold. One step, shared by all three entry points.
+		bindRestoredSession(session);
 		setCurrentModelName(session.model);
 		paintBootStatus(session);
 		const nav = {
@@ -1421,6 +1459,7 @@ async function main(): Promise<void> {
 			agent = await makeAgent(id, input, modelFlag);
 			applyConfigMode();
 			const session = await agent.session({ id, ...(acceptDrift() ? { acceptDrift: true } : {}) });
+			bindRestoredSession(session); // CTX-1 (F34-1): the -p door, too
 			faux = currentFaux;
 			await resume(session, printPrompt, faux, input);
 			const last = [...session.log.all].reverse().find((e) => e.type === "terminal");
@@ -1474,6 +1513,7 @@ async function main(): Promise<void> {
 					break;
 				}
 				const session = await agent.session({ id, ...(acceptDrift() ? { acceptDrift: true } : {}) });
+				bindRestoredSession(session); // CTX-1 (F34-1): the explicit-id door
 				faux = currentFaux;
 				// E area: the durable script position is computed from the
 				// session id, and on the picker path the id did not exist when
