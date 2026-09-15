@@ -6,6 +6,12 @@ dist/
 .env
 *.kiso-tmp*
 bench/runs/
+# Raw bench legs are archived OUTSIDE the tree with a checksum, then the
+# working copies are cleaned — the established practice, which a `git add
+# -A` broke once: a 220K gzip in the tracked tree turned the CJK gate, the
+# byte gate and the whitespace gate red at once, because all three read it
+# as text and it is not.
+bench/artifacts/
 __pycache__/
 CLAUDE.md
 .claude/launch.json

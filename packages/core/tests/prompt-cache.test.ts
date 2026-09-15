@@ -105,4 +105,42 @@ describe("D: byte-identical projection discipline", () => {
 		expect(JSON.stringify(reloaded)).toBe(JSON.stringify(a));
 		expect(JSON.stringify(projectMessages(log.all))).toBe(JSON.stringify(a));
 	});
+	it("⑤ TRACE-F1: a usage carrying `servedModel` projects to the SAME bytes as one without it", () => {
+		// ADR-0051 §5.1, rule R6 — optional-field admission requires a case
+		// HERE, not a declaration elsewhere: "a new optional field MUST add a
+		// corresponding fixture case to the existing prompt-cache
+		// byte-discipline gate". The three admission conditions are what this
+		// pins: (i) old logs project byte-identically, (iii) the field never
+		// changes the meaning of existing bytes. (ii), the validator's true
+		// optionality, is pinned by event-schema's `TRACE-F1: servedModel is
+		// optional` case — which did NOT exist when this comment first
+		// claimed it did (Astra caught the claim). A comment asserting a
+		// gate is not a gate.
+		//
+		// The field is the SERVER's statement about which model answered. It
+		// is recorded so a silently aliased id stops being invisible — it is
+		// not context, and a byte of it must never reach a provider request,
+		// or recording the observation would itself invalidate the cache the
+		// observation exists to measure.
+		const build = (withField: boolean): ReturnType<typeof projectMessages> => {
+			const log = new EventLog();
+			log.append({ type: "user_input", content: "go" });
+			log.append({ type: "tool_call_end", callId: "c1", name: "read_file", input: { path: "a.ts" } });
+			log.append({ type: "tool_result", callId: "c1", content: "line1\n", isError: false });
+			log.append(
+				withField
+					? { type: "usage", inputTokens: 10, outputTokens: 2, cacheRead: 0, cacheWrite: null, known: true, servedModel: "served-elsewhere" }
+					: { type: "usage", inputTokens: 10, outputTokens: 2, cacheRead: 0, cacheWrite: null, known: true },
+			);
+			log.append({ type: "stop", reason: "end_turn" });
+			return projectMessages(log.all);
+		};
+		const withField = build(true);
+		const without = build(false);
+		expect(JSON.stringify(withField), "the served id leaked into the projection — it is an observation, not context").toBe(
+			JSON.stringify(without),
+		);
+		// and the id itself appears nowhere in the bytes a provider would see
+		expect(JSON.stringify(withField)).not.toContain("served-elsewhere");
+	});
 });

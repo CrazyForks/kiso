@@ -447,6 +447,50 @@ export interface Usage {
 	readonly cacheRead: number | null;
 	readonly cacheWrite: number | null;
 	readonly known: boolean;
+	/**
+	 * RSN-1: how many of `outputTokens` the model spent THINKING, when the
+	 * provider says. It is a SPLIT of the output, not a fifth quantity —
+	 * the bill has always counted it, because completion tokens include
+	 * reasoning ones (measured: 39 reasoning inside 76 completion, with the
+	 * remaining 37 accounting for the answer exactly).
+	 *
+	 * What was missing is the SPLIT, and the split is what the effort knob
+	 * controls. Without it, an arm that costs more cannot be told from an
+	 * arm that thought longer — and a cost regression traced to reasoning
+	 * length once already had to be found by other means.
+	 *
+	 * ABSENT means the provider did not report one: the field is missing
+	 * entirely from the vendor's response when thinking is off, and missing
+	 * on every route whose usage carries no breakdown at all. Absent is not
+	 * zero, and a zero here is a provider that measured no thinking.
+	 */
+	readonly reasoningTokens?: number;
+	/**
+	 * TRACE-F1: the model id the SERVER says it served, when it says one.
+	 *
+	 * Every adapter until now spoke only of `options.model` — the id we
+	 * ASKED for. A vendor is free to serve something else: a retired name
+	 * that is now an alias, a migration id, a silently upgraded tier. The
+	 * bench read `deepseek-v4-flash` off its own config for four days while
+	 * the server served `deepseek-flash`, and the specified-vs-observed
+	 * reconciliation built exactly to catch that never fired, because
+	 * nothing produced the observed half.
+	 *
+	 * Optional because it is the SERVER's statement, not ours: a provider
+	 * that reports no model leaves this undefined, and undefined means
+	 * "not stated", never "same as requested" (Area 6 — unknown is not a
+	 * default).
+	 *
+	 * It rides the usage event because that is where the adapter holds the
+	 * response. NOT because usage arrives once: the contract is AT LEAST
+	 * once, and the openai-compat adapter has three exits that can emit it
+	 * — believing otherwise is what W22-R1 was, where a second report for
+	 * one call was added to the first and put a wrong number on screen. A
+	 * consumer of this field must therefore expect repeats, and they are
+	 * the same statement rather than two: the adapters capture the served
+	 * id ONCE per call and every exit reports that one value.
+	 */
+	readonly servedModel?: string;
 }
 
 /** MG-1 (ADR-0051 Amendment 5): the continuation envelope's scope — WHO
@@ -755,6 +799,16 @@ function isContinuation(v: unknown): boolean {
 
 function isUsage(v: Record<string, unknown>): boolean {
 	if (typeof v.known !== "boolean") return false;
+	// TRACE-F1: a stated served model is a NON-EMPTY string. An empty one is
+	// a provider field we failed to read, and it would reconcile as a
+	// contradiction against every requested id — absent says "not stated".
+	if (v.servedModel !== undefined && (typeof v.servedModel !== "string" || v.servedModel === "")) return false;
+	// RSN-1: a reported split is a non-negative integer, and it CANNOT ride
+	// a `known: false` event — that says the provider reported nothing, and
+	// a number here would be reporting something.
+	if (v.reasoningTokens !== undefined) {
+		if (!isNonNegativeInt(v.reasoningTokens) || v.known === false) return false;
+	}
 	const tokens = [v.inputTokens, v.outputTokens, v.cacheRead, v.cacheWrite];
 	if (v.known === false) return tokens.every((t) => t === null);
 	return tokens.some((t) => isNonNegativeInt(t)) && tokens.every((t) => t === null || isNonNegativeInt(t));
