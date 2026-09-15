@@ -395,6 +395,17 @@ for want in on off none; do
 		|| note RED "a leg whose edits carried '$want' was read back as '$got'"
 done
 
+
+# ---- the frozen criteria and the script that applies them must agree ---
+if [ -f "$B/kits/edit-echo-ab.md" ] && [ -f "$B/edit-echo-verdict.mjs" ]; then
+	agree=$(node "$B/tests/criteria-agree.mjs" "$B/kits/edit-echo-ab.md" "$B/edit-echo-verdict.mjs" 2>&1 || echo "the comparison itself failed")
+	if [ "$agree" = agree ]; then
+		note ok "the verdict script's margins match the frozen kit"
+	else
+		note RED "the verdict script and the frozen kit disagree: $agree"
+	fi
+fi
+
 rm -rf "$B/runs/offline-smoke"
 [ "$FAILED" -eq 0 ] && echo "[offline-runner-smoke] the lifecycle holds on all three arms" || echo "[offline-runner-smoke] RED"
 exit "$FAILED"
