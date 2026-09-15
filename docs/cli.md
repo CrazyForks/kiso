@@ -207,9 +207,24 @@ Rows from a real 100-column screen, while a call runs and once it settles:
     exit=0
     exit 0 · 4 lines · 2.6s
 
-✦ took 22s · in 175 out 54 · cache 97% · ctx left ~98%
+✦ took 22s · fresh 175 out 54 · cache 97% · ctx left ~98%
 ▸ bypass · /mode to switch · deepseek-v…s-on-0910 · CH 97% · ctx left ~98% · 186 tok/s
 ```
+
+`fresh` and `out` are the **turn's** figures — every model call the turn
+made, summed. `fresh` is the input the turn bought at full price (the
+provider's own total minus what it served from cache, E2), `out` is what
+it wrote back, and the `cache %` beside them is cache/(fresh + cache):
+the share of the turn's prompt the provider had already seen. A turn that
+makes nine calls reports all nine. The row used to report the LAST call
+alone while reading as the turn's — the owner's nine-call turn, which had
+spent 120,358 prompt tokens and 4,608 output tokens, printed `in 412 out
+924 · cache 98%`. `in` is renamed `fresh` in the same round so that the
+number says what it is. The raw cached total is deliberately never
+printed: a sum over calls counts the same prefix once per call, so that
+figure lives in the request ledger, not on the row. A call whose usage the
+provider did not report makes the whole turn's figure unknown — the row
+says nothing rather than a lower bound read as a total.
 
 `ctx left` is the estimated headroom counting every part of the next
 request — the system prompt, the tool table, the messages with their

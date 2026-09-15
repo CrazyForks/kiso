@@ -216,7 +216,7 @@ and the same turn once it settles:
     exit=0
     exit 0 · 4 lines · 2.6s
 
-✦ took 22s · in 175 out 54 · cache 97% · ctx left ~98%
+✦ took 22s · fresh 175 out 54 · cache 97% · ctx left ~98%
 ▸ bypass · /mode to switch · deepseek-v…s-on-0910 · CH 97% · ctx left ~98% · 186 tok/s
 ```
 

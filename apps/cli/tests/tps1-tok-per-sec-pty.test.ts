@@ -197,6 +197,11 @@ describe("TPS-1 — the settled decode rate on the status row", () => {
 		// the SECOND call's rate, not the first's and not a turn-wide average
 		expect(rate, "the row carries the first call's rate — the clock is per turn, not per call").toBeLessThan(30);
 		expect(rate).toBeGreaterThan(2);
+		// W22: the two scopes sit next to each other and mean different
+		// things — the RATE is the call that just settled, the RECAP is the
+		// turn's (both calls summed: 100+100 fresh, 120+30 out).
+		const recap = screenAt(raw, "took ").find((row) => row.includes("✦ took")) ?? "";
+		expect(recap, `no recap row carrying the turn's usage: ${recap}`).toContain("fresh 200 out 150");
 	}, 150_000);
 	it("DF-0330-F1 — the CLI hands the row its WIDTH: at 60 columns the hint goes and every fact stays", () => {
 		// What this level proves, and the unit gates cannot: that the CLI

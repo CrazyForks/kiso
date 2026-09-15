@@ -70,7 +70,7 @@ numbers are pressure readings, not passed gates):
   shell) composed from a constant, with AGENTS.md/CLAUDE.md injected and
   truncated at 8KB; one-line tool summaries per call
   (`✓ edit src/foo.ts (+12 -3)` / `✗ shell npm test (exit 1)`), the status
-  line (`[turn 3 · in 12.4k out 1.8k · cache 9.2k · ctx ~14%]` — usage
+  line (`[turn 3 · fresh 12.4k out 1.8k · cache 9.2k · ctx ~14%]` — usage
   events only, unknown fields omitted entirely, faux mode shows
   `[turn N · faux]`), and `/last` to print the most recent tool call's
   full input/output straight from the event stream. The first-run scaffold
