@@ -134,4 +134,67 @@ test("reconcileServedModel is pure — the same aggregate twice, the same verdic
 	assert.deepEqual(reconcileServedModel("model-a", agg), reconcileServedModel("model-a", agg));
 });
 
+
+// ── TRACE-F1-R2/R3 (Astra) — the two ways a verdict was too generous ──────
+
+test("a KNOWN mismatch outranks incomplete coverage", () => {
+	// requested A, observed [B, absent]. B has already disproved agreement;
+	// reporting that as unknown is the same error as reporting an unknown as
+	// agreement, pointed the other way.
+	const v = manifestModel(["model-b", null]);
+	assert.equal(v.agrees, false, "a definite mismatch was discarded by the coverage branch");
+	assert.equal(v.observedRequests, 1);
+	assert.equal(v.requests, 2);
+});
+
+test("incomplete coverage with NO mismatch is still unknown", () => {
+	// requested A, observed [A, absent] — nothing contradicts A, and the
+	// request nobody looked at cannot be certified. This is the case the
+	// rule above must not swallow.
+	const v = manifestModel(["model-a", null]);
+	assert.equal(v.agrees, null);
+	assert.match(v.why, /only 1 of 2/);
+});
+
+test("a comparator record WITHOUT a model stays in the denominator", () => {
+	// Two completions, one naming a model. The skipped record used to leave
+	// before the counter ran, so missing evidence read as complete coverage.
+	const work = mkdtempSync(join(tmpdir(), "legwork-pi-"));
+	writeFileSync(
+		join(work, "stdout-1.log"),
+		[
+			JSON.stringify({ type: "message_end", model: "model-a", message: { role: "assistant", usage: { input: 1, output: 1 } } }),
+			JSON.stringify({ type: "message_end", message: { role: "assistant", usage: { input: 1, output: 1 } } }),
+		].join("\n") + "\n",
+	);
+	const agg = observedModels(work, "pi");
+	assert.equal(agg.requests, 2, "the record without a model vanished from the denominator");
+	assert.equal(agg.observed, 1);
+	assert.deepEqual(agg.ids, ["model-a"]);
+	const v = reconcileServedModel("model-a", agg);
+	assert.equal(v.agrees, null, "one observation cannot certify two requests");
+});
+
+test("an arm whose log cannot establish per-request coverage says so", () => {
+	// Claude Code prints ONE result object per invocation carrying
+	// num_turns: the requests are summed, never enumerated. Manufacturing a
+	// denominator from the records that happen to name a model is exactly
+	// the finding.
+	const work = mkdtempSync(join(tmpdir(), "legwork-cc-"));
+	writeFileSync(
+		join(work, "stdout-1.log"),
+		'[claude-code:unrecognized_model] {"model":"model-a"}\n' +
+			JSON.stringify({ num_turns: 4, usage: { input_tokens: 1 }, modelUsage: { "model-a": { inputTokens: 1 } } }) +
+			"\n",
+	);
+	const agg = observedModels(work, "claude");
+	assert.equal(agg.requests, null, "coverage must be UNAVAILABLE, not invented");
+	assert.deepEqual(agg.ids, ["model-a"]);
+	const v = reconcileServedModel("model-a", agg);
+	assert.equal(v.agrees, null);
+	assert.match(v.why, /cannot establish per-request coverage/);
+	// and a mismatch is still knowable without coverage
+	assert.equal(reconcileServedModel("model-z", agg).agrees, false);
+});
+
 console.log(`[test_observed_model] ${n} assertions OK`);

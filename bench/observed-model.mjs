@@ -11,6 +11,7 @@
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { isMain } from "../scripts/is-main.mjs";
+import { isReferenceCompletion } from "./requests-so-far.mjs";
 
 const firstString = (o, keys) => {
 	for (const k of keys) if (typeof o?.[k] === "string" && o[k]) return o[k];
@@ -62,22 +63,56 @@ export function observedModels(work, tool) {
 		return { ids, requests, observed };
 	}
 
-	// The comparators print their own result JSON on stdout, and the `model`
-	// there IS the server's statement — a different file, a different claim.
+	// TRACE-F1-R3 (Astra): a record WITHOUT a model used to be skipped
+	// before `note` ran — and `note` is what counts a request. Two records
+	// with one model between them reported `1 of 1, agrees: true`: missing
+	// evidence had become complete coverage, which is the same manufactured
+	// agreement this whole observer exists to prevent, arriving through the
+	// denominator instead of the numerator.
+	//
+	// So the boundary is identified FIRST, by the shared predicate, and the
+	// model is read after.
+	if (tool === "pi") {
+		for (const f of existsSync(work) ? readdirSync(work) : []) {
+			if (!/^stdout.*\.log$/.test(f)) continue;
+			for (const line of readFileSync(join(work, f), "utf8").split("\n")) {
+				const t = line.trim();
+				if (!t.startsWith("{")) continue;
+				let o;
+				try { o = JSON.parse(t); } catch { continue; }
+				if (!isReferenceCompletion(o)) continue;
+				note(firstString(o, ["model"]) ?? firstString(o.message ?? {}, ["model"]));
+			}
+		}
+		return { ids, requests, observed };
+	}
+
+	// Claude Code prints ONE result object per invocation carrying
+	// `num_turns` — the requests it covers are summed, never enumerated. So
+	// per-request coverage cannot be established from this log at all, and
+	// saying so is the honest answer. `requests: null` means "this arm's
+	// native record cannot tell us", which the verdict below refuses to read
+	// as completeness. The ids it DOES name are still collected: a mismatch
+	// is knowable even when coverage is not.
 	for (const f of existsSync(work) ? readdirSync(work) : []) {
 		if (!/^stdout.*\.log$/.test(f)) continue;
 		for (const line of readFileSync(join(work, f), "utf8").split("\n")) {
 			const t = line.trim();
-			if (!t.startsWith("{")) continue;
+			const i = t.indexOf("{");
+			if (i < 0) continue;
 			let o;
-			try { o = JSON.parse(t); } catch { continue; }
+			try { o = JSON.parse(t.slice(i)); } catch { continue; }
+			// the id appears as a VALUE on the warning line and as a KEY in
+			// modelUsage; both are the server's statement about this leg
 			const direct = firstString(o, ["model"]);
-			const nested = direct ?? firstString(o.message ?? o.event ?? o.canonical ?? {}, ["model"]);
-			if (nested === null && direct === null) continue;
-			note(direct ?? nested);
+			if (direct !== null && !ids.includes(direct)) ids.push(direct);
+			const mu = o.modelUsage;
+			if (mu !== null && typeof mu === "object") {
+				for (const k of Object.keys(mu)) if (k !== "" && !ids.includes(k)) ids.push(k);
+			}
 		}
 	}
-	return { ids, requests, observed };
+	return { ids, requests: null, observed: null };
 }
 
 /**
@@ -90,22 +125,42 @@ export function observedModels(work, tool) {
  */
 export function reconcileServedModel(specified, agg) {
 	const { ids, requests, observed } = agg;
-	const out = { specified, observed: ids.length === 1 ? ids[0] : ids.length === 0 ? null : [...ids], agrees: null, requests, observedRequests: observed };
+	const complete = requests !== null && observed !== null && observed >= requests;
+	const out = {
+		specified,
+		observed: ids.length === 1 ? ids[0] : ids.length === 0 ? null : [...ids],
+		agrees: null,
+		requests,
+		observedRequests: observed,
+	};
 	if (ids.length === 0) {
-		out.why = "not observed in this run";
+		out.why = requests === null ? "this arm's native record cannot establish per-request coverage" : "not observed in this run";
 		return out;
 	}
-	if (ids.length > 1) {
+	// TRACE-F1-R2 (Astra): A MISMATCH OUTRANKS INCOMPLETE COVERAGE. Asking
+	// for A and observing [B, absent] used to return `null`, because the
+	// coverage branch came first — but B has already disproved agreement
+	// with A, and reporting a known disagreement as unknown is the same
+	// error as reporting an unknown as agreement, pointed the other way.
+	// Only when everything observed AGREES is missing coverage the reason
+	// we cannot conclude.
+	const wrong = ids.filter((id) => id !== specified);
+	if (wrong.length > 0) {
 		out.agrees = false;
-		out.why = `the leg was served by ${ids.length} different models — both are kept`;
+		out.why =
+			ids.length > 1
+				? `the leg was served by ${ids.length} different models — all are kept`
+				: "the run did not use what was specified — both are kept";
 		return out;
 	}
-	if (observed < requests) {
-		out.why = `observed on ${observed} of ${requests} requests — the rest stated nothing`;
+	if (!complete) {
+		out.why =
+			requests === null
+				? "every observation agrees, but this arm's native record cannot establish per-request coverage"
+				: `every observation agrees, but only ${observed} of ${requests} requests were observed`;
 		return out;
 	}
-	out.agrees = ids[0] === specified;
-	if (!out.agrees) out.why = "the run did not use what was specified — both are kept";
+	out.agrees = true;
 	return out;
 }
 
