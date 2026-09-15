@@ -52,6 +52,7 @@ def kiso(work):
                    [p for p in glob.glob(f"{sessions}/*.jsonl")
                     if os.path.basename(p)[:-6] not in traced])
     fresh = out = cache = reqs = unknown = 0
+    reasoning = reasoning_reported = 0
     pre_v5_sessions = set()
     for f in files:
         for line in open(f):
@@ -99,6 +100,20 @@ def kiso(work):
                 fr = i - ca                           # legacy session log
             reqs += 1
             fresh += fr; cache += ca; out += o
+            # THE REASONING SPLIT. This extractor never read it, so every T5
+            # row reported reasoning as 0 for BOTH arms — and 0 that was
+            # never read is not 0 that was measured. The T6 extractor has
+            # read it since schema 6; this is the same field, the same rule:
+            # summed only where STATED, with a count of how many requests
+            # stated it, because an absent split is not a split of zero.
+            _rsn = (r.get("canonical", {}).get("reasoning") if isinstance(r.get("canonical"), dict) else None)
+            if _rsn is None:
+                _rsn = r.get("reasoningTokens")
+            if _rsn is None and isinstance(r.get("event"), dict):
+                _rsn = r["event"].get("reasoningTokens")
+            if isinstance(_rsn, int):
+                reasoning += _rsn
+                reasoning_reported += 1
     undecidable = 0
     for sid in sorted(pre_v5_sessions):
         n = unknown_in_session_log(f"{sessions}/{sid}.jsonl")
@@ -109,6 +124,7 @@ def kiso(work):
     return dict(input=fresh, cache_read=cache, output=out, requests=reqs,
                 fresh=fresh, total=fresh + cache, cost_weighted=fresh + 0.1 * cache,
                 cost_equivalent=fresh + 0.02 * cache + 4 * out,
+                reasoning=reasoning, reasoning_reported=reasoning_reported,
                 unknown_requests=unknown,
                 usage_incomplete=unknown > 0 or undecidable > 0,
                 undecidable_sessions=undecidable)
@@ -140,6 +156,7 @@ def completion_role(ev):
 
 def pi(work):
     inp = out = cache = reqs = unknown = 0
+    reasoning = reasoning_reported = 0
     for i in range(1, 9):
         path = f"{work}/stdout-{i}.log"
         if not os.path.exists(path):
@@ -177,9 +194,19 @@ def pi(work):
                 unknown += 1
                 continue
             inp += i; cache += ca; out += o
+            # The other arm reports its split under `reasoning`, not our
+            # spelling. Reading only ours made it look as though that
+            # product reported no thinking at all — the shape of a false
+            # comparison, and the same mistake the T6 extractor already
+            # had corrected.
+            _rsn = u.get("reasoning")
+            if isinstance(_rsn, int):
+                reasoning += _rsn
+                reasoning_reported += 1
     return dict(input=inp, cache_read=cache, output=out, requests=reqs,
                 fresh=inp, total=inp + cache, cost_weighted=inp + 0.1 * cache,
                 cost_equivalent=inp + 0.02 * cache + 4 * out,
+                reasoning=reasoning, reasoning_reported=reasoning_reported,
                 unknown_requests=unknown, usage_incomplete=unknown > 0)
 
 def claude(work):
