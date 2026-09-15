@@ -18,18 +18,44 @@ that turn; usage before any input — none, the log always opens with the
 input). pi: each stdout-N.log is one turn (one -p invocation).
 """
 import json, os, sys, glob
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from usage_marker import usage_marker, unmeasured, MALFORMED
 
 BUCKETS = 4
 TURNS_PER_BUCKET = 6
 
 
 def _sum_usage(events):
-    d = dict(input=0, cache=0, output=0, requests=0)
+    """UNKNOWN IS NOT ZERO.
+
+    This summed `u.get("cacheRead") or 0` over every usage event, so a
+    request the provider never reported usage for counted as a request
+    costing nothing — and the bucket carrying it read as the cheap one. The
+    runtime states the convention explicitly (`known: false` means the
+    fields are null and are "never faked as zero"); reading them with `or
+    0` destroyed exactly the distinction the flag exists to carry.
+
+    Unmeasured requests are COUNTED and reported separately. A bucket with
+    unknowns is not a bucket with a smaller number.
+    """
+    d = dict(input=0, cache=0, output=0, reasoning=0, requests=0, unknown=0)
     for u in events:
         d["requests"] += 1
-        d["cache"] += u.get("cacheRead") or 0
-        d["output"] += u.get("outputTokens") or 0
-        d["input"] += u.get("inputTokens") or 0
+        i, ca, o = u.get("inputTokens"), u.get("cacheRead"), u.get("outputTokens")
+        if u.get("known") is False or i is None or ca is None or o is None:
+            d["unknown"] += 1
+            continue
+        d["cache"] += ca
+        d["output"] += o
+        d["input"] += i
+        # The reasoning split, recorded for the first time in schema 6. It
+        # is OPTIONAL: absent means the provider did not report a split,
+        # which is not the same as a split of zero — so it is summed only
+        # where stated and the bucket says how many requests stated it.
+        r = u.get("reasoningTokens")
+        if isinstance(r, int):
+            d["reasoning"] += r
+            d["reasoning_reported"] = d.get("reasoning_reported", 0) + 1
     return d
 
 
@@ -52,7 +78,9 @@ def kiso(work):
         slice_ = turns[p * TURNS_PER_BUCKET:(p + 1) * TURNS_PER_BUCKET]
         u = _sum_usage([u for t in slice_ for u in t])
         b = dict(fresh=u["input"] - u["cache"], cache_read=u["cache"],
-                 output=u["output"], requests=u["requests"])
+                 output=u["output"], requests=u["requests"],
+                 unknown_requests=u["unknown"], reasoning=u["reasoning"],
+                 reasoning_reported=u.get("reasoning_reported", 0))
         b["total"] = u["input"]
         b["cost_weighted"] = b["fresh"] + 0.1 * b["cache_read"]
         b["wall"] = int(open(f"{work}/wall_{p + 1}").read().strip())
@@ -63,7 +91,7 @@ def kiso(work):
 def pi(work):
     buckets = []
     for p in range(BUCKETS):
-        u = dict(input=0, cache=0, output=0, requests=0)
+        u = dict(input=0, cache=0, output=0, requests=0, unknown=0)
         for i in range(p * TURNS_PER_BUCKET + 1, (p + 1) * TURNS_PER_BUCKET + 1):
             path = f"{work}/stdout-{i}.log"
             if not os.path.exists(path):
@@ -79,14 +107,36 @@ def pi(work):
                 if not isinstance(ev, dict) or ev.get("type") != "message_end":
                     continue
                 m = ev.get("message") or {}
-                u2 = m.get("usage") or {}
-                if isinstance(u2, dict) and "input" in u2:
-                    u["requests"] += 1
-                    u["input"] += u2.get("input") or 0
-                    u["cache"] += u2.get("cacheRead") or 0
-                    u["output"] += u2.get("output") or 0
+                # A REQUEST IS AN ASSISTANT MESSAGE. Exactly half of this
+                # arm's message_end events are role=user and role=toolResult
+                # — the turn's input and its tool results — and they carry
+                # no usage because they are not model responses.
+                #
+                # The old filter was `if "input" in u2`, which happened to
+                # exclude them for the wrong reason, and would have silently
+                # dropped a genuine ASSISTANT response whose usage lacked a
+                # field. Replacing it with "no input means unmeasured" was
+                # worse: it reported this arm as 170 requests, 85 of them
+                # unmeasured — a claim that the other product is half
+                # unobservable, which its log flatly contradicts. Filter on
+                # what a request IS, then apply unknown-is-not-zero inside.
+                if m.get("role") != "assistant":
+                    continue
+                u2 = m.get("usage")
+                u["requests"] += 1
+                if not isinstance(u2, dict):
+                    u["unknown"] += 1
+                    continue
+                iv, cv, ov = u2.get("input"), u2.get("cacheRead"), u2.get("output")
+                if iv is None or ov is None:
+                    u["unknown"] += 1
+                    continue
+                u["input"] += iv
+                u["cache"] += cv or 0
+                u["output"] += ov
         b = dict(fresh=u["input"], cache_read=u["cache"], output=u["output"],
-                 requests=u["requests"])
+                 requests=u["requests"], unknown_requests=u["unknown"],
+                 reasoning=0, reasoning_reported=0)
         b["total"] = u["input"] + u["cache"]
         b["cost_weighted"] = u["input"] + 0.1 * u["cache"]
         b["wall"] = int(open(f"{work}/wall_{p + 1}").read().strip())
@@ -94,17 +144,101 @@ def pi(work):
     return buckets
 
 
+def claude(work):
+    """Claude Code, per bucket.
+
+    Like pi, one stdout-N.log per turn — so the same bucketing applies. The
+    usage convention is Anthropic's: input_tokens is FRESH-ONLY, cache
+    reads are reported separately (extract.py pins the same reading).
+
+    UNKNOWN IS NOT ZERO here too: a turn whose result carries no usage
+    block, or a usage block missing a field, is COUNTED as unmeasured and
+    contributes nothing — never read as a free turn.
+    """
+    buckets = []
+    for p in range(BUCKETS):
+        u = dict(input=0, cache=0, output=0, requests=0, unknown=0)
+        for i in range(p * TURNS_PER_BUCKET + 1, (p + 1) * TURNS_PER_BUCKET + 1):
+            path = f"{work}/stdout-{i}.log"
+            if not os.path.exists(path):
+                continue
+            d = None
+            for line in open(path):
+                line = line.strip()
+                if not line.startswith("{"):
+                    continue          # CC prints warnings around the result JSON
+                try:
+                    o = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(o, dict) and "usage" in o:
+                    d = o             # keep the LAST object carrying usage
+            if d is None:
+                u["requests"] += 1
+                u["unknown"] += 1
+                continue
+            uu = d.get("usage") or {}
+            iv = uu.get("input_tokens")
+            cv = uu.get("cache_read_input_tokens")
+            ov = uu.get("output_tokens")
+            u["requests"] += 1
+            if iv is None or cv is None or ov is None:
+                u["unknown"] += 1
+                continue
+            u["input"] += iv
+            u["cache"] += cv
+            u["output"] += ov
+        b = dict(fresh=u["input"], cache_read=u["cache"], output=u["output"],
+                 requests=u["requests"], unknown_requests=u["unknown"],
+                 reasoning=0, reasoning_reported=0)
+        b["total"] = u["input"] + u["cache"]
+        b["cost_weighted"] = u["input"] + 0.1 * u["cache"]
+        try:
+            b["wall"] = int(open(f"{work}/wall_{p + 1}").read().strip())
+        except OSError:
+            b["wall"] = None
+        buckets.append(b)
+    return buckets
+
+
 def main(workdir):
     rows = []
-    for work in sorted(glob.glob(workdir + "/runs/*T6*")):
+    # E4-e scopes a round under runs/<round>/, and this glob only ever
+    # looked one level down — so every leg of every scoped round was
+    # invisible to the extractor and it printed an empty list, which reads
+    # exactly like "the round produced nothing".
+    legs = sorted(set(glob.glob(workdir + "/runs/*T6*")
+                      + glob.glob(workdir + "/runs/*/*T6*")))
+    for work in legs:
         name = os.path.basename(work)
         tool, task, run = name.split("-", 2)
         if not os.path.exists(f"{work}/wall_1"):
             continue
         try:
-            buckets = {"kiso": kiso, "pi": pi}[tool](work)
+            buckets = {"kiso": kiso, "pi": pi, "claude": claude}[tool](work)
             m = dict(tool=tool, task=task, run=run, buckets=buckets,
                      verify=open(f"{work}/verify").read().strip())
+            m["round"] = os.path.basename(os.path.dirname(work))
+            if m["round"] == "runs":
+                m["round"] = None
+            # The sidecars, surfaced rather than left on disk: the verdict
+            # needs the per-check detail, and the arm a leg ACTUALLY ran as.
+            for key, fname in (("effort_bound", "effort_bound"),
+                               ("edit_echo", "edit_echo"),
+                               ("edit_echo_requested", "edit_echo_requested"),
+                               ("status", "status")):
+                try:
+                    m[key] = open(f"{work}/{fname}").read().strip()
+                except OSError:
+                    m[key] = None
+            try:
+                with open(f"{work}/verify.json") as fh:
+                    v = json.load(fh)
+                m["verify_predicate"] = v.get("predicate")
+                m["boundary"] = v.get("boundary")
+                m["scope"] = v.get("scope")
+            except (OSError, ValueError):
+                m["verify_predicate"] = None
         except Exception as ex:
             m = dict(tool=tool, task=task, run=run, error=str(ex)[:80])
         rows.append(m)
