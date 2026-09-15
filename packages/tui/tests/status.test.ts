@@ -20,8 +20,20 @@ describe("KC2 §5: the idle status row (byte-identical to the pre-extraction CLI
 		expect(idleStatus("plan", "faux", 0)).toContain("▸ plan · /mode to switch");
 	});
 
-	it("a non-finite ratio prints the row's long-standing ~null%, never an invented number", () => {
-		expect(idleStatus("default", "faux", Number.NaN)).toBe("▸ default · /mode to switch · faux · ctx left ~null%");
+	it("a non-finite ratio prints `ctx ?`, never an invented number", () => {
+		// The rule this case has always been about is unchanged: a row with
+		// no window does NOT get to print a percentage. Only the wording
+		// moved — `~null%` said it to a reader who knew the internals, and
+		// `ctx ?` says it to everyone.
+		//
+		// The invented number is the failure it guards, and that failure was
+		// live until 2026-09-14: the window fell back to a hardcoded 200,000
+		// whenever a model published none, so every DeepSeek session printed
+		// a confident `ctx left ~82%` computed against a figure nobody had
+		// measured.
+		const row = idleStatus("default", "faux", Number.NaN);
+		expect(row).toBe("▸ default · /mode to switch · faux · ctx ?");
+		expect(row).not.toMatch(/~\d+%/);
 	});
 });
 

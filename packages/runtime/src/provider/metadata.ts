@@ -307,7 +307,28 @@ const ENTRIES: readonly ModelMetadataEntry[] = [
 		capabilities: { contextWindow: null, maxOutputTokens: null, promptCaching: "automatic", reasoning: {
 			emitsThinkingStream: true,
 			thinking: { modes: ["enabled", "disabled"], default: "enabled" },
-			effort: { levels: ["low", "high", "max"], default: "high", wire: "reasoning_effort" },
+			// `none` added 2026-09-14 from a live probe. The three natives were
+			// RIGHT and stay: the endpoint's enum accepts seven values, but
+			// the vendor maps minimal->low, medium->high and xhigh->high, so
+			// those three are the provider's own aliases and this row's rule
+			// is that an alias is never shown as native. Offering `medium`
+			// would promise a level the model does not have.
+			//
+			// `none` is not an alias. It turns thinking OFF: the response
+			// carries no reasoning_content and completion_tokens_details is
+			// null outright. A distinct behaviour the row simply lacked, and
+			// the only reachable way to buy no reasoning at all.
+			//
+			// Measured, 12 runs per level on one task (median reasoning
+			// tokens): minimal 191, low 186 | medium 212, high 199, xhigh 195
+			// | max 229. The grouping and the ordering match the vendor's
+			// mapping. The unset default sits at 219, which this sample
+			// cannot separate from high or from max, so `default` stays what
+			// the vendor documents rather than what one task suggests.
+			//
+			// bench/probe-effort-levels.mjs reads the accepted set from the
+			// endpoint's own refusal and costs nothing.
+			effort: { levels: ["none", "low", "high", "max"], default: "high", wire: "reasoning_effort" },
 			asOf: "2026-08-26",
 			source: "https://api-docs.deepseek.com/guides/thinking_mode",
 		}, inputModalities: null },
@@ -341,7 +362,28 @@ const ENTRIES: readonly ModelMetadataEntry[] = [
 		capabilities: { contextWindow: null, maxOutputTokens: null, promptCaching: "automatic", reasoning: {
 			emitsThinkingStream: true,
 			thinking: { modes: ["enabled", "disabled"], default: "enabled" },
-			effort: { levels: ["low", "high", "max"], default: "high", wire: "reasoning_effort" },
+			// `none` added 2026-09-14 from a live probe. The three natives were
+			// RIGHT and stay: the endpoint's enum accepts seven values, but
+			// the vendor maps minimal->low, medium->high and xhigh->high, so
+			// those three are the provider's own aliases and this row's rule
+			// is that an alias is never shown as native. Offering `medium`
+			// would promise a level the model does not have.
+			//
+			// `none` is not an alias. It turns thinking OFF: the response
+			// carries no reasoning_content and completion_tokens_details is
+			// null outright. A distinct behaviour the row simply lacked, and
+			// the only reachable way to buy no reasoning at all.
+			//
+			// Measured, 12 runs per level on one task (median reasoning
+			// tokens): minimal 191, low 186 | medium 212, high 199, xhigh 195
+			// | max 229. The grouping and the ordering match the vendor's
+			// mapping. The unset default sits at 219, which this sample
+			// cannot separate from high or from max, so `default` stays what
+			// the vendor documents rather than what one task suggests.
+			//
+			// bench/probe-effort-levels.mjs reads the accepted set from the
+			// endpoint's own refusal and costs nothing.
+			effort: { levels: ["none", "low", "high", "max"], default: "high", wire: "reasoning_effort" },
 			asOf: "2026-09-12",
 			source: "https://api-docs.deepseek.com/quick_start/pricing/",
 		}, inputModalities: null },
@@ -356,7 +398,28 @@ const ENTRIES: readonly ModelMetadataEntry[] = [
 		capabilities: { contextWindow: null, maxOutputTokens: null, promptCaching: "automatic", reasoning: {
 			emitsThinkingStream: true,
 			thinking: { modes: ["enabled", "disabled"], default: "enabled" },
-			effort: { levels: ["low", "high", "max"], default: "high", wire: "reasoning_effort" },
+			// `none` added 2026-09-14 from a live probe. The three natives were
+			// RIGHT and stay: the endpoint's enum accepts seven values, but
+			// the vendor maps minimal->low, medium->high and xhigh->high, so
+			// those three are the provider's own aliases and this row's rule
+			// is that an alias is never shown as native. Offering `medium`
+			// would promise a level the model does not have.
+			//
+			// `none` is not an alias. It turns thinking OFF: the response
+			// carries no reasoning_content and completion_tokens_details is
+			// null outright. A distinct behaviour the row simply lacked, and
+			// the only reachable way to buy no reasoning at all.
+			//
+			// Measured, 12 runs per level on one task (median reasoning
+			// tokens): minimal 191, low 186 | medium 212, high 199, xhigh 195
+			// | max 229. The grouping and the ordering match the vendor's
+			// mapping. The unset default sits at 219, which this sample
+			// cannot separate from high or from max, so `default` stays what
+			// the vendor documents rather than what one task suggests.
+			//
+			// bench/probe-effort-levels.mjs reads the accepted set from the
+			// endpoint's own refusal and costs nothing.
+			effort: { levels: ["none", "low", "high", "max"], default: "high", wire: "reasoning_effort" },
 			asOf: "2026-08-26",
 			source: "https://api-docs.deepseek.com/guides/thinking_mode",
 		}, inputModalities: null },
