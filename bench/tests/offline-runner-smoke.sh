@@ -126,6 +126,33 @@ else
 	note RED "kiso: the consequence was reported in place of the cause ($(cat "$W/status" 2>/dev/null || echo '-'))"
 fi
 
+echo "  --- the T6 runner, ported to the same apparatus ---"
+# It was eight generations behind: no bare HOME, no limits at all, exit
+# codes discarded, no third arm. The port is only real if it holds the same
+# lifecycle, so it is checked by the same substitutes.
+for tool in kiso pi claude; do
+	W="$B/runs/offline-smoke/$tool-T6-s1"
+	rm -rf "$W"; rm -f "$TMP/exit-code"
+	sh "$B/run-t6.sh" "$tool" s1 >/dev/null 2>&1
+	[ -f "$W/verify" ] && note ok "$tool T6: a verify record exists" || note RED "$tool T6: NO verify record"
+	[ -f "$W/status" ] && note ok "$tool T6: a status exists" || note RED "$tool T6: NO status"
+	[ -f "$W/config.json" ] && note ok "$tool T6: a manifest exists" || note RED "$tool T6: NO manifest"
+	# the curve's own shape: four buckets, four walls, for every arm
+	n=$(ls "$W"/wall_[1-4] 2>/dev/null | wc -l | tr -d " ")
+	[ "$n" = 4 ] && note ok "$tool T6: four bucket walls" || note RED "$tool T6: $n bucket walls, expected 4"
+done
+
+echo "  --- and a nonzero exit is OURS on the T6 arms too ---"
+for tool in kiso pi claude; do
+	W="$B/runs/offline-smoke/$tool-T6-s2"
+	rm -rf "$W"; echo 3 > "$TMP/exit-code"
+	sh "$B/run-t6.sh" "$tool" s2 >/dev/null 2>&1
+	rm -f "$TMP/exit-code"
+	grep -q "launch_or_run_error" "$W/status" 2>/dev/null \
+		&& note ok "$tool T6: classified as launch_or_run_error" \
+		|| note RED "$tool T6: exit 3 not classified ($(cat "$W/status" 2>/dev/null || echo none))"
+done
+
 rm -rf "$B/runs/offline-smoke"
 [ "$FAILED" -eq 0 ] && echo "[offline-runner-smoke] the lifecycle holds on all three arms" || echo "[offline-runner-smoke] RED"
 exit "$FAILED"
