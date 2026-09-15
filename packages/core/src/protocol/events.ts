@@ -448,6 +448,24 @@ export interface Usage {
 	readonly cacheWrite: number | null;
 	readonly known: boolean;
 	/**
+	 * RSN-1: how many of `outputTokens` the model spent THINKING, when the
+	 * provider says. It is a SPLIT of the output, not a fifth quantity —
+	 * the bill has always counted it, because completion tokens include
+	 * reasoning ones (measured: 39 reasoning inside 76 completion, with the
+	 * remaining 37 accounting for the answer exactly).
+	 *
+	 * What was missing is the SPLIT, and the split is what the effort knob
+	 * controls. Without it, an arm that costs more cannot be told from an
+	 * arm that thought longer — and a cost regression traced to reasoning
+	 * length once already had to be found by other means.
+	 *
+	 * ABSENT means the provider did not report one: the field is missing
+	 * entirely from the vendor's response when thinking is off, and missing
+	 * on every route whose usage carries no breakdown at all. Absent is not
+	 * zero, and a zero here is a provider that measured no thinking.
+	 */
+	readonly reasoningTokens?: number;
+	/**
 	 * TRACE-F1: the model id the SERVER says it served, when it says one.
 	 *
 	 * Every adapter until now spoke only of `options.model` — the id we
@@ -785,6 +803,12 @@ function isUsage(v: Record<string, unknown>): boolean {
 	// a provider field we failed to read, and it would reconcile as a
 	// contradiction against every requested id — absent says "not stated".
 	if (v.servedModel !== undefined && (typeof v.servedModel !== "string" || v.servedModel === "")) return false;
+	// RSN-1: a reported split is a non-negative integer, and it CANNOT ride
+	// a `known: false` event — that says the provider reported nothing, and
+	// a number here would be reporting something.
+	if (v.reasoningTokens !== undefined) {
+		if (!isNonNegativeInt(v.reasoningTokens) || v.known === false) return false;
+	}
 	const tokens = [v.inputTokens, v.outputTokens, v.cacheRead, v.cacheWrite];
 	if (v.known === false) return tokens.every((t) => t === null);
 	return tokens.some((t) => isNonNegativeInt(t)) && tokens.every((t) => t === null || isNonNegativeInt(t));
