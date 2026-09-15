@@ -326,6 +326,75 @@ for fam in t5 t6; do
 		|| note RED "$fam: scope reported outOfScope=[$out] added=[$added] (clean leg: $clean_out entries)"
 done
 
+
+# ---- the A/B switch reaches the product, or the experiment is void ----
+#
+# BENCH_EDIT_ECHO must survive `bare_bounded`, which strips the environment
+# on purpose and rebuilds it from an explicit whitelist. A variable that
+# never arrives makes the B arm behave exactly like the A arm, and the two
+# agree because they are the same arm — an experiment destroyed silently,
+# with a result that looks like a clean null.
+cat > "$TMP/bin/envprobe" <<'EP'
+#!/bin/sh
+case "$1" in --version) echo "9.9.9"; exit 0 ;; esac
+cat > /dev/null 2>&1 || true
+echo "KISO_EDIT_ECHO=${KISO_EDIT_ECHO:-<unset>}"
+EP
+chmod +x "$TMP/bin/envprobe"
+for want in 0 1; do
+	out="$TMP/echo-plumb-$want.log"
+	( cd "$B" && BENCH_EDIT_ECHO=$want KISO_BIN="$TMP/bin/envprobe" KISO_VERSION=9.9.9 \
+		KISO_ROUND=offline-echo DEEPSEEK_API_KEY=x KISO_LEG_DEADLINE_S=60 \
+		sh ./run-t6.sh kiso "e$want" >/dev/null 2>&1 )
+	got=$(cat "$B/runs/offline-echo/kiso-T6-e$want/stdout-1.log" 2>/dev/null | grep -m1 '^KISO_EDIT_ECHO=' || echo "")
+	case "$want:$got" in
+		"1:KISO_EDIT_ECHO=1") note ok "BENCH_EDIT_ECHO=1 reaches the binary as KISO_EDIT_ECHO=1" ;;
+		"0:KISO_EDIT_ECHO=<unset>") note ok "BENCH_EDIT_ECHO=0 leaves the binary with no KISO_EDIT_ECHO" ;;
+		*) note RED "BENCH_EDIT_ECHO=$want produced [$got] at the binary — the arms are not distinct" ;;
+	esac
+done
+rm -rf "$B/runs/offline-echo"
+
+# And the leg's OWN evidence decides which arm it was. `effort_bound` taught
+# this: a label a leg carries must be read back from what the leg did, never
+# from what it was asked to do. `none` is a third value on purpose — a leg
+# that made no successful edit cannot testify either way.
+ECHO_FIX="$TMP/echo-detect"; mkdir -p "$ECHO_FIX"
+mk_log() { # $1=dir  $2=on|off|none
+	mkdir -p "$1/kiso-home/sessions"
+	L="$1/kiso-home/sessions/s.jsonl"
+	: > "$L"
+	printf '%s\n' '{"event":{"type":"tool_call_start","callId":"c1","name":"edit_file"}}' >> "$L"
+	case "$2" in
+		on)   printf '%s\n' '{"event":{"type":"tool_result","callId":"c1","isError":false,"content":"edited src/a.js\n@@ 3-5 @@\n 3 x\n 4 y\n 5 z\n[rev:00]"}}' >> "$L" ;;
+		off)  printf '%s\n' '{"event":{"type":"tool_result","callId":"c1","isError":false,"content":"edited src/a.js\n[rev:00]"}}' >> "$L" ;;
+		none) printf '%s\n' '{"event":{"type":"tool_result","callId":"c1","isError":true,"content":"edit_file: pattern not found"}}' >> "$L" ;;
+	esac
+}
+detect() { node -e '
+const fs=require("fs"),p=require("path");
+const d=process.argv[1]+"/kiso-home/sessions";
+let names={},saw=0,edits=0;
+try{
+  const f=fs.readdirSync(d).find(x=>x.endsWith(".jsonl")&&!x.includes("trace"));
+  for(const line of fs.readFileSync(p.join(d,f),"utf8").split("\n")){
+    if(!line.trim())continue; let o; try{o=JSON.parse(line);}catch{continue}
+    const e=o.event||o;
+    if(e.type==="tool_call_start")names[e.callId]=e.name;
+    if(e.type==="tool_result"&&names[e.callId]==="edit_file"&&!e.isError){
+      edits++; if(/^@@ \d+-\d+ @@$/m.test(String(e.content||"")))saw++; }
+  }
+}catch{}
+process.stdout.write(edits===0?"none":(saw>0?"on":"off"));
+' "$1"; }
+for want in on off none; do
+	mk_log "$ECHO_FIX/$want" "$want"
+	got=$(detect "$ECHO_FIX/$want")
+	[ "$got" = "$want" ] \
+		&& note ok "a leg whose edits carried '$want' is read back as $want" \
+		|| note RED "a leg whose edits carried '$want' was read back as '$got'"
+done
+
 rm -rf "$B/runs/offline-smoke"
 [ "$FAILED" -eq 0 ] && echo "[offline-runner-smoke] the lifecycle holds on all three arms" || echo "[offline-runner-smoke] RED"
 exit "$FAILED"

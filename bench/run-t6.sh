@@ -240,6 +240,11 @@ CFG
     set -- "OPENAI_BASE_URL=https://api.deepseek.com" "OPENAI_API_KEY=$DEEPSEEK_API_KEY" \
       "OPENAI_MODEL=deepseek-flash" "KISO_EXTENSIONS_DIR=$EXTDIR" \
       "KISO_HOME=$WORK/kiso-home" "KISO_SKILLS_DIR=$SKILLDIR" "KISO_NO_UPDATE_CHECK=1"
+    # EDIT-ECHO A/B: the ONLY difference between the two arms of this
+    # experiment. Same binary, same model, same effort, same prompts — one
+    # arm is told what its edit produced and the other is not. The switch
+    # is on the PRODUCT side (KISO_EDIT_ECHO), never on the task side.
+    if [ "${BENCH_EDIT_ECHO:-0}" = 1 ]; then set -- "$@" "KISO_EDIT_ECHO=1"; fi
     KISO_ENV_PAIRS="$*"
     for P in 1 2 3 4; do
       over_budget && break
@@ -366,6 +371,7 @@ const cfg = captureArm({
 });
 cfg.task = 'T6'; cfg.run = '$RUN'; cfg.round = process.env.KISO_ROUND || null;
 cfg.legDeadlineSeconds = $LEG_DEADLINE_S; cfg.legMaxRequests = $LEG_MAX_REQUESTS;
+cfg.editEchoRequested = '$TOOL' === 'kiso' ? ${BENCH_EDIT_ECHO:-0} === 1 : null;
 writeFileSync('$WORK/config.json', JSON.stringify(cfg, null, 1) + '\n');
 " 2>/dev/null || echo "WARN: configuration capture failed for $TOOL" >&2
 # F33-R4: execution validity is decided BEFORE the task verdict, and the
@@ -390,6 +396,31 @@ if [ "$TOOL" = "kiso" ]; then
   process.stdout.write(bound === null ? "" : String(bound));
   ' "$WORK" 2>/dev/null || echo "")
   printf '%s\n' "${EFFORT_BOUND:-<none>}" > "$WORK/effort_bound"
+  # AND THE ECHO MUST BE BOUND, NOT MERELY REQUESTED. Setting
+  # KISO_EDIT_ECHO=1 against a binary that predates the switch produces a
+  # leg LABELLED B that behaved exactly like A — the experiment destroyed
+  # silently, with both arms agreeing because they were the same arm. So
+  # the evidence is what the edit results ACTUALLY carried: a successful
+  # edit_file whose result has an `@@ a-b @@` header. Three values, and
+  # `none` is not `off`: a leg that never edited anything cannot testify.
+  EDIT_ECHO_OBSERVED=$(node -e '
+  const fs=require("fs"),p=require("path");
+  const d=process.argv[1]+"/kiso-home/sessions";
+  let names={},saw=0,edits=0;
+  try{
+    const f=fs.readdirSync(d).find(x=>x.endsWith(".jsonl")&&!x.includes("trace"));
+    for(const line of fs.readFileSync(p.join(d,f),"utf8").split("\n")){
+      if(!line.trim())continue; let o; try{o=JSON.parse(line);}catch{continue}
+      const e=o.event||o;
+      if(e.type==="tool_call_start")names[e.callId]=e.name;
+      if(e.type==="tool_result"&&names[e.callId]==="edit_file"&&!e.isError){
+        edits++; if(/^@@ \d+-\d+ @@$/m.test(String(e.content||"")))saw++; }
+    }
+  }catch{}
+  process.stdout.write(edits===0?"none":(saw>0?"on":"off"));
+  ' "$WORK" 2>/dev/null || echo "unknown")
+  printf '%s\n' "$EDIT_ECHO_OBSERVED" > "$WORK/edit_echo"
+  printf '%s\n' "${BENCH_EDIT_ECHO:-0}" > "$WORK/edit_echo_requested"
 fi
 
 if [ -f "$WORK/status" ]; then
