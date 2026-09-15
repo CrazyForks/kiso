@@ -49,8 +49,19 @@ echo 'DEEPSEEK_API_KEY=smoke-not-a-key' > "$TMP/cfg/claude-deepseek/credentials.
 XDG_CONFIG_HOME="$TMP/cfg"; export XDG_CONFIG_HOME
 KISO_BIN=kiso; export KISO_BIN
 KISO_ROUND=offline-smoke; export KISO_ROUND
-LEG_MAX_REQUESTS=4; export LEG_MAX_REQUESTS
-LEG_DEADLINE_S=20; export LEG_DEADLINE_S
+# RUNNER-R2 (Astra): the PUBLIC override names, which is what the runner
+# reads. The smoke used to export LEG_MAX_REQUESTS and LEG_DEADLINE_S, and
+# the runner unconditionally sets those from the KISO_-prefixed ones — so
+# the smoke declared 20s/4 and every leg actually ran with 1800s/200. A
+# harness that states a bound it does not set is worse than one with no
+# bound: it is a bound nobody will check again.
+#
+# Three names for one idea was the cause: the runner read KISO_LEG_*, the
+# probe read an unprefixed PROBE_DEADLINE_S, and the smoke exported the
+# unprefixed leg names. They are all KISO_-prefixed now.
+KISO_LEG_MAX_REQUESTS=4; export KISO_LEG_MAX_REQUESTS
+KISO_LEG_DEADLINE_S=20; export KISO_LEG_DEADLINE_S
+KISO_PROBE_DEADLINE_S=${KISO_PROBE_DEADLINE_S:-10}; export KISO_PROBE_DEADLINE_S
 
 for tool in kiso pi claude; do
 	W="$B/runs/offline-smoke/$tool-T5-s1"
@@ -64,6 +75,16 @@ for tool in kiso pi claude; do
 	[ -f "$W/verify" ] && note ok "$tool: a verify record exists" || note RED "$tool: NO verify record (F33-R6's symptom)"
 	[ -f "$W/status" ] && note ok "$tool: a status exists" || note RED "$tool: NO status"
 	[ -f "$W/config.json" ] && note ok "$tool: a manifest exists" || note RED "$tool: NO manifest"
+	# RUNNER-R2: the limits this smoke DECLARED, read back from what the
+	# runner actually recorded. Exporting the right names is not evidence
+	# that they took — the previous names were exported too, and the legs
+	# ran at 1800/200 while this file said 20/4.
+	eff=$(node -e 'const j=require(process.argv[1]);console.log(j.legDeadlineSeconds+"/"+j.legMaxRequests)' "$W/config.json" 2>/dev/null || echo "?")
+	if [ "$eff" = "$KISO_LEG_DEADLINE_S/$KISO_LEG_MAX_REQUESTS" ]; then
+		note ok "$tool: the declared limits are the effective ones ($eff)"
+	else
+		note RED "$tool: declared $KISO_LEG_DEADLINE_S/$KISO_LEG_MAX_REQUESTS, the manifest records $eff"
+	fi
 done
 
 echo "  --- a nonzero exit is OURS, never the task's verdict ---"

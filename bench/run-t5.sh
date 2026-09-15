@@ -39,26 +39,52 @@ if [ "$TOOL" = "kiso" ] && [ -z "${KISO_VERSION:-}" ]; then
   # --version" went into meta.json as if it were 0.34.0.
   # THE PROBE IS A PROCESS LIKE ANY OTHER, AND NOTHING WAS WATCHING IT.
   #
-  # The per-leg limits live in bare-env.sh, sourced thirty lines below this,
-  # and they bound the leg's WORK. This runs before any of that exists: a
-  # bin that hangs here — reading a stdin nobody closes, waiting on a
-  # network, blocked on a lock — stalls the leg BEFORE its clock starts,
-  # and no deadline, no budget and no classifier ever sees it. Found by an
-  # offline smoke whose substitute read stdin: three legs hung indefinitely
-  # with LEG_DEADLINE_S set to twenty seconds.
+  # The per-leg limits live in bare-env.sh, sourced further below, and they
+  # bound the leg's WORK. This runs before any of that exists: a bin that
+  # hangs here stalls the leg BEFORE its clock starts, and no deadline, no
+  # budget and no classifier ever sees it.
   #
-  # So: a wall of its own (perl's alarm, the same mechanism the legs use),
-  # and stdin CLOSED, because a probe has nothing to read.
-  PROBE_DEADLINE_S=${PROBE_DEADLINE_S:-20}
-  PROBE=$(perl -e 'alarm shift; exec @ARGV or exit 127' "$PROBE_DEADLINE_S" $KISO_BIN --version 2>/dev/null </dev/null)
+  # RUNNER-R1 (Astra): the first repair bounded the wrong thing, twice.
+  #
+  # `perl alarm` kills the process it exec'd and NOT its descendants, and
+  # KISO_BIN is documented to be a wrapper ("npx -y ..."). A wrapper whose
+  # child outlives it keeps the command substitution's stdout pipe open, so
+  # the substitution waits for EOF long after the alarm fired: measured at
+  # 10s against a 1s deadline. So the probe runs in its OWN PROCESS GROUP,
+  # the alarm kills the GROUP, and the output goes to a FILE — a pipe is a
+  # second thing a descendant can hold, and there is no reason to hold one.
+  #
+  # And `set -e` is on. `PROBE=$(...)` failing exited the runner BEFORE the
+  # status check, so the message written to explain a hang could never
+  # print: /usr/bin/false exits in 0.011s with empty stderr. The capture is
+  # now inside a `set +e` window, which is the only way to read a status
+  # the shell would otherwise act on first.
+  KISO_PROBE_DEADLINE_S=${KISO_PROBE_DEADLINE_S:-20}
+  _probe_out=$(mktemp)
+  set +e
+  perl -e '
+    my $secs = shift;
+    my $pid = fork();
+    if (!defined $pid) { exit 127; }
+    if ($pid == 0) { setpgrp(0, 0); exec @ARGV or exit 127; }
+    $SIG{ALRM} = sub { kill("KILL", -$pid); waitpid($pid, 0); exit 142; };
+    alarm $secs;
+    waitpid($pid, 0);
+    exit($? >> 8);
+  ' "$KISO_PROBE_DEADLINE_S" $KISO_BIN --version >"$_probe_out" 2>/dev/null </dev/null
   PROBE_RC=$?
+  set -e
+  PROBE=$(cat "$_probe_out" 2>/dev/null || echo "")
+  rm -f "$_probe_out"
   if [ "$PROBE_RC" -eq 0 ]; then
     KISO_VERSION=$(printf '%s' "$PROBE" | tr -d '\r' | tail -1)
   else
     KISO_VERSION=""
-    # a TIMEOUT and a wrong answer call for different actions, so they are
-    # not reported as the same thing
-    [ "$PROBE_RC" -eq 142 ] && echo "FAIL: KISO_BIN ($KISO_BIN) did not answer --version within ${PROBE_DEADLINE_S}s." >&2
+    if [ "$PROBE_RC" -eq 142 ]; then
+      echo "FAIL: KISO_BIN ($KISO_BIN) did not answer --version within ${KISO_PROBE_DEADLINE_S}s." >&2
+    else
+      echo "FAIL: KISO_BIN ($KISO_BIN) exited $PROBE_RC answering --version." >&2
+    fi
   fi
   # And it must LOOK like a version. Anything else is a bin that answered
   # something other than the question.
