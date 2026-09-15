@@ -92,9 +92,27 @@ export function packageOf(binPath) {
  * finding.
  */
 /** TRACE-F1-R1: an aggregate is `{ids, requests, observed}` from
- *  `observedModels`; anything else is the legacy scalar. */
+ *  `observedModels`; anything else is the legacy scalar.
+ *
+ *  TRACE-F1-R4 (Astra): `requests` is `number | null`. R3 introduced the
+ *  null — an arm whose native record cannot establish per-request coverage
+ *  says so — and this test still demanded a number, so the aggregate fell
+ *  through to the SCALAR path and the whole object was compared against a
+ *  model name. The manifest then recorded `agrees: false` for a leg whose
+ *  every observation agreed, which is the third shape of the same defect:
+ *  a verdict manufactured where the honest answer was "unknown".
+ *
+ *  It reproduced on the archived calibration: the observer returned null
+ *  and the config file said false. The R3 cases missed it because they
+ *  called the verdict function DIRECTLY — the bug lives in the path that
+ *  chooses which verdict function to call. */
 function isServedAggregate(v) {
-	return v !== null && typeof v === "object" && Array.isArray(v.ids) && typeof v.requests === "number";
+	return (
+		v !== null &&
+		typeof v === "object" &&
+		Array.isArray(v.ids) &&
+		(typeof v.requests === "number" || v.requests === null)
+	);
 }
 
 export function reconcile(specified, observed) {

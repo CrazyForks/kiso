@@ -197,4 +197,54 @@ test("an arm whose log cannot establish per-request coverage says so", () => {
 	assert.equal(reconcileServedModel("model-z", agg).agrees, false);
 });
 
+
+// ── TRACE-F1-R4 (Astra) — through captureArm, which is what gets written ──
+//
+// The R3 cases called the verdict function directly. The defect lived one
+// step earlier, in the shape test that DECIDES which verdict function to
+// call: it demanded a numeric `requests`, so an aggregate carrying the
+// honest `null` fell through to the scalar path, the whole object was
+// compared against a model name, and the manifest recorded `agrees: false`
+// for a leg whose every observation agreed. Reproduced on the archived
+// calibration before this fix.
+//
+// A gate that stops short of the write is a gate for a different program.
+
+const ccLeg = (lines) => {
+	const work = mkdtempSync(join(tmpdir(), "legwork-cc-"));
+	writeFileSync(join(work, "stdout-1.log"), lines.join("\n") + "\n");
+	return work;
+};
+const ccManifest = (specified, lines) =>
+	captureArm({
+		tool: "claude",
+		command: ["node", "--version"],
+		model: specified,
+		observed: { model: observedModels(ccLeg(lines), "claude") },
+	}).model;
+
+const ccResult = (model) =>
+	JSON.stringify({ num_turns: 3, usage: { input_tokens: 1 }, ...(model === null ? {} : { modelUsage: { [model]: { inputTokens: 1 } } }) });
+
+test("captureArm: agreeing observations with UNKNOWN coverage write `null`, not false", () => {
+	const v = ccManifest("model-a", [ccResult("model-a")]);
+	assert.equal(v.agrees, null, "the aggregate fell through to the scalar path and became a mismatch");
+	assert.equal(v.observed, "model-a");
+	assert.equal(v.requests, null);
+	assert.match(v.why, /cannot establish per-request coverage/);
+});
+
+test("captureArm: nothing observed writes `null` and says why", () => {
+	const v = ccManifest("model-a", [ccResult(null)]);
+	assert.equal(v.agrees, null);
+	assert.equal(v.observed, null);
+	assert.match(v.why, /cannot establish per-request coverage/);
+});
+
+test("captureArm: a KNOWN mismatch writes false even with coverage unknown", () => {
+	const v = ccManifest("model-a", [ccResult("model-z")]);
+	assert.equal(v.agrees, false, "a mismatch is knowable without coverage");
+	assert.equal(v.observed, "model-z");
+});
+
 console.log(`[test_observed_model] ${n} assertions OK`);
