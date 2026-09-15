@@ -240,10 +240,17 @@ CFG
     set -- "OPENAI_BASE_URL=https://api.deepseek.com" "OPENAI_API_KEY=$DEEPSEEK_API_KEY" \
       "OPENAI_MODEL=deepseek-flash" "KISO_EXTENSIONS_DIR=$EXTDIR" \
       "KISO_HOME=$WORK/kiso-home" "KISO_SKILLS_DIR=$SKILLDIR" "KISO_NO_UPDATE_CHECK=1"
-    # EDIT-ECHO A/B: the ONLY difference between the two arms of this
+    # EDIT-ECHO A/B: the ONLY difference between the two arms of that
     # experiment. Same binary, same model, same effort, same prompts — one
     # arm is told what its edit produced and the other is not. The switch
     # is on the PRODUCT side (KISO_EDIT_ECHO), never on the task side.
+    #
+    # THE PRODUCT SWITCH IS RETIRED (the round did not support adoption;
+    # it did not refute the mechanism, having no resolution to refute
+    # with). This plumbing is kept for a properly powered revival and is
+    # NOT silently dead: against a build without the switch, the binding
+    # check below reads `edit_echo=off` on a leg that asked for `on`, and
+    # the leg is VOID rather than quietly joining the control arm.
     if [ "${BENCH_EDIT_ECHO:-0}" = 1 ]; then set -- "$@" "KISO_EDIT_ECHO=1"; fi
     KISO_ENV_PAIRS="$*"
     for P in 1 2 3 4; do
