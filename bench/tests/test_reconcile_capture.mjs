@@ -1,5 +1,5 @@
 /** The reconciler's own gates, on synthetic captures. No network, no money. */
-import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readCapture, reconcile, effortOf } from "../reconcile-capture.mjs";
@@ -81,6 +81,22 @@ const ordering = dumpCapture([
 const ord = readCapture(ordering).map((x) => `${x.pid}-${x.seq}`);
 note(JSON.stringify(ord) === JSON.stringify(["9-2", "9-10", "10-1"]),
 	`dumps order by pid then seq, not as strings (got ${JSON.stringify(ord)})`);
+
+// AND THE PID ORDER MUST LOSE TO THE WRITE ORDER. A pid does not rise
+// with start time — the OS reuses and wraps them — so a later process can
+// carry a SMALLER pid. Written in the true order with the pids inverted,
+// the capture must still read in the order it was written.
+const wrapped = mkdtempSync(join(tmpdir(), "wrap-"));
+const later = { pid: 7, seq: 1, body: call(9, { reasoning_effort: "high" }) };   // ran second, smaller pid
+const first = { pid: 9000, seq: 1, body: call(1, { reasoning_effort: "high" }) }; // ran first, larger pid
+writeFileSync(join(wrapped, `req-${first.pid}-1.json`), JSON.stringify(first.body));
+const t0 = Date.now();
+utimesSync(join(wrapped, `req-${first.pid}-1.json`), t0 / 1000, t0 / 1000);
+writeFileSync(join(wrapped, `req-${later.pid}-1.json`), JSON.stringify(later.body));
+utimesSync(join(wrapped, `req-${later.pid}-1.json`), (t0 + 5000) / 1000, (t0 + 5000) / 1000);
+const wrapOrder = readCapture(wrapped).map((x) => x.pid);
+note(JSON.stringify(wrapOrder) === JSON.stringify([9000, 7]),
+	`a wrapped pid loses to the write order (got ${JSON.stringify(wrapOrder)})`);
 
 // and the shapes coexist: a leg may hold both arms' captures side by side
 const bothShapes = mkdtempSync(join(tmpdir(), "both-"));

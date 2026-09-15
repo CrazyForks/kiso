@@ -24,7 +24,7 @@
  *              legitimately shrinks one, so a drop is a fact to show
  *              beside the cache numbers, not a failure.
  */
-import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 const EFFORT_KEYS = ["reasoning_effort", "reasoningEffort", "thinking", "reasoning"];
@@ -70,20 +70,33 @@ export function readCapture(dir) {
 
 	const proxied = names.filter((f) => /^req-\d+\.json$/.test(f))
 		.sort((a, b) => Number(a.match(/\d+/)[0]) - Number(b.match(/\d+/)[0]));
+	// ORDER ACROSS PROCESSES IS NOT THE PID ORDER. A pid is not guaranteed
+	// to rise with start time — the OS reuses and wraps them — so sorting
+	// by pid encoded an assumption the gate did not check. With three
+	// sequential processes per leg it is near-certain, and near-certain is
+	// not checked. The file's mtime IS the write time, which is the request
+	// time, so it orders across processes on a fact rather than a habit.
+	// Within a process the seq is authoritative and breaks an mtime tie
+	// (two requests can land in the same timestamp tick).
 	const dumped = names.filter((f) => /^req-\d+-\d+\.json$/.test(f))
-		.map((f) => { const [, pid, seq] = f.match(/^req-(\d+)-(\d+)\.json$/); return { f, pid: Number(pid), seq: Number(seq) }; })
-		.sort((a, b) => (a.pid - b.pid) || (a.seq - b.seq));
+		.map((f) => {
+			const [, pid, seq] = f.match(/^req-(\d+)-(\d+)\.json$/);
+			let mtime = 0;
+			try { mtime = statSync(join(dir, f)).mtimeMs; } catch { /* unreadable: falls back to pid/seq below */ }
+			return { f, pid: Number(pid), seq: Number(seq), mtime };
+		})
+		.sort((a, b) => (a.mtime - b.mtime) || (a.pid - b.pid) || (a.seq - b.seq));
 
 	const recs = [];
 	for (const f of proxied) {
 		try { recs.push(JSON.parse(readFileSync(join(dir, f), "utf8"))); } catch { /* a torn write is not a request */ }
 	}
-	for (const { f, pid, seq } of dumped) {
+	for (const { f, pid, seq, mtime } of dumped) {
 		try {
 			const body = JSON.parse(readFileSync(join(dir, f), "utf8"));
 			// the dump has no envelope; give it the same shape so one set of
 			// gates reads both sources rather than two sets drifting apart
-			recs.push({ seq, pid, path: "(dumped by the adapter)", source: "dump", body,
+			recs.push({ seq, pid, mtime, path: "(dumped by the adapter)", source: "dump", body,
 				bodyBytes: JSON.stringify(body).length });
 		} catch { /* a torn write is not a request */ }
 	}
