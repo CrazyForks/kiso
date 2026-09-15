@@ -20,14 +20,18 @@ import { describe, expect, it } from "vitest";
 import { lookupModelMetadata, resolveReasoning } from "../src/provider/metadata.js";
 
 describe("XP-1 — the DeepSeek V4 identity fix, dated and sourced", () => {
-	it("deepseek-v4-flash: request-time toggle default-enabled, native effort low/high/max", () => {
+	it("deepseek-v4-flash: request-time toggle default-enabled, native effort none/low/high/max", () => {
 		const e = lookupModelMetadata("deepseek-v4-flash", "https://api.deepseek.com");
 		expect(e).toBeDefined();
 		expect(e!.providerId).toBe("deepseek");
 		const r = e!.capabilities.reasoning;
 		expect(r?.emitsThinkingStream).toBe(true);
 		expect(r?.thinking).toEqual({ modes: ["enabled", "disabled"], default: "enabled" });
-		expect(r?.effort?.levels).toEqual(["low", "high", "max"]);
+		// `none` joined the natives 2026-09-14: it is not an alias onto
+		// another level, it turns thinking off. minimal/medium/xhigh stay
+		// OUT — the endpoint takes them and maps them onto low/high/high,
+		// and this row never shows an alias as native.
+		expect(r?.effort?.levels).toEqual(["none", "low", "high", "max"]);
 		expect(r?.effort?.default).toBe("high");
 		expect(r?.effort?.wire).toBe("reasoning_effort");
 		expect(r?.asOf).toBe("2026-08-26");
@@ -36,7 +40,7 @@ describe("XP-1 — the DeepSeek V4 identity fix, dated and sourced", () => {
 
 	it("deepseek-v4-pro exists with the identical matrix", () => {
 		const e = lookupModelMetadata("deepseek-v4-pro", "https://api.deepseek.com");
-		expect(e?.capabilities.reasoning?.effort?.levels).toEqual(["low", "high", "max"]);
+		expect(e?.capabilities.reasoning?.effort?.levels).toEqual(["none", "low", "high", "max"]);
 	});
 
 	it("the legacy IDs carry their deprecation, sourced to the changelog", () => {

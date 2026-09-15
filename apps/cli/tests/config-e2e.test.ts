@@ -115,7 +115,13 @@ describe("merge round B — /model on a real PTY (dual profiles)", () => {
 		expect(out).toContain("anthropic/claude-sonnet-5");
 		expect(out).toContain("unavailable"); // the qualifier rides the row, as (unavailable) rode the line
 		// the picker's CLI half: each row shows the model's LEGAL effort levels with the default bracketed
-		expect(out).toContain("effort: low · [high] · max"); // deepseek-v4-flash's three native levels, the default bracketed
+		// The picker names the model's NATIVE levels with the default
+		// bracketed. `none` joined them on 2026-09-14: it is the one way to
+		// buy no reasoning at all, and it is not an alias onto another level
+		// the way minimal/medium/xhigh are — those the endpoint accepts and
+		// silently maps onto low/high, so this row still refuses them rather
+		// than promise a level the model does not have.
+		expect(out).toContain("effort: none · low · [high] · max");
 		expect(out).toContain("model claude: unavailable — no credential: run `kiso login anthropic` or set the env var ANTHROPIC_API_KEY");
 		expect(out).toContain("model → ds (deepseek-v4-flash · max) — takes effect on the next turn");
 		// OR-7 / OR-8 (owner, 2026-09-09): the status row is repainted BY the
