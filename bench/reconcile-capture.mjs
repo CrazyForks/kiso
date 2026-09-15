@@ -42,12 +42,50 @@ export function effortOf(body) {
 	return null;
 }
 
+/**
+ * TWO SOURCES, because one arm must not be proxied.
+ *
+ * A loopback base URL defeats our own endpoint-keyed metadata lookup —
+ * `lookupModelMetadata(model, baseUrl)` finds nothing for 127.0.0.1, the
+ * reasoning capability reads null, and `/model ds high` is REFUSED. Every
+ * leg would then be `effort_not_bound`: the whole round void, after the
+ * money. It also moves credential resolution onto a path that is not the
+ * one under test.
+ *
+ * So our arm dumps its own bodies (`KISO_DUMP_REQUESTS=<dir>`, a permanent
+ * debug sink in the openai-compat adapter, silent on failure, no proxy and
+ * no endpoint change), and the proxy is for the OTHER arm, which has no
+ * such sink. The two file shapes:
+ *
+ *   proxy  req-00001.json      { seq, path, headers, bodySha256, body }
+ *   dump   req-<pid>-<seq>.json  the bare request body
+ *
+ * The dump's counter is per PROCESS, and T5 runs three processes per leg,
+ * so ordering is by pid and THEN seq — sorting the names as strings
+ * interleaves the processes and puts request 10 before request 2.
+ */
 export function readCapture(dir) {
 	if (!existsSync(dir)) return null;
-	const files = readdirSync(dir).filter((f) => /^req-\d+\.json$/.test(f)).sort();
+	const names = readdirSync(dir);
+
+	const proxied = names.filter((f) => /^req-\d+\.json$/.test(f))
+		.sort((a, b) => Number(a.match(/\d+/)[0]) - Number(b.match(/\d+/)[0]));
+	const dumped = names.filter((f) => /^req-\d+-\d+\.json$/.test(f))
+		.map((f) => { const [, pid, seq] = f.match(/^req-(\d+)-(\d+)\.json$/); return { f, pid: Number(pid), seq: Number(seq) }; })
+		.sort((a, b) => (a.pid - b.pid) || (a.seq - b.seq));
+
 	const recs = [];
-	for (const f of files) {
+	for (const f of proxied) {
 		try { recs.push(JSON.parse(readFileSync(join(dir, f), "utf8"))); } catch { /* a torn write is not a request */ }
+	}
+	for (const { f, pid, seq } of dumped) {
+		try {
+			const body = JSON.parse(readFileSync(join(dir, f), "utf8"));
+			// the dump has no envelope; give it the same shape so one set of
+			// gates reads both sources rather than two sets drifting apart
+			recs.push({ seq, pid, path: "(dumped by the adapter)", source: "dump", body,
+				bodyBytes: JSON.stringify(body).length });
+		} catch { /* a torn write is not a request */ }
 	}
 	return recs;
 }

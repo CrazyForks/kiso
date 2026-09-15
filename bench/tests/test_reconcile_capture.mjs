@@ -54,5 +54,40 @@ note(r.ok && r.nonCallRecords === 1, "traffic that is not a model call is exclud
 
 note(reconcile(null, {}).ok === false, "a missing capture directory is not a pass");
 
+// --- the adapter's OWN dump: the other file shape, and the ordering trap
+function dumpCapture(entries) {
+	const d = mkdtempSync(join(tmpdir(), "dump-"));
+	for (const { pid, seq, body } of entries) writeFileSync(join(d, `req-${pid}-${seq}.json`), JSON.stringify(body));
+	return d;
+}
+
+const dump = dumpCapture([
+	{ pid: 9, seq: 1, body: call(1, { reasoning_effort: "high" }) },
+	{ pid: 9, seq: 2, body: call(2, { reasoning_effort: "high" }) },
+	{ pid: 10, seq: 1, body: call(3, { reasoning_effort: "high" }) },
+]);
+r = reconcile(readCapture(dump), { requests: 3, model: "deepseek-flash", effort: "high" });
+note(r.ok, "a directory of adapter DUMPS reconciles, with no proxy involved");
+
+// THE ORDERING TRAP. The dump counter is per PROCESS and a leg runs
+// several, so the names sort wrong twice over: lexicographically
+// "req-10-1" precedes "req-9-1" (process order inverted) and "req-9-10"
+// precedes "req-9-2" (request order inverted). Both must be by NUMBER.
+const ordering = dumpCapture([
+	{ pid: 9, seq: 2, body: call(2, { reasoning_effort: "high" }) },
+	{ pid: 9, seq: 10, body: call(10, { reasoning_effort: "high" }) },
+	{ pid: 10, seq: 1, body: call(1, { reasoning_effort: "high" }) },
+]);
+const ord = readCapture(ordering).map((x) => `${x.pid}-${x.seq}`);
+note(JSON.stringify(ord) === JSON.stringify(["9-2", "9-10", "10-1"]),
+	`dumps order by pid then seq, not as strings (got ${JSON.stringify(ord)})`);
+
+// and the shapes coexist: a leg may hold both arms' captures side by side
+const bothShapes = mkdtempSync(join(tmpdir(), "both-"));
+writeFileSync(join(bothShapes, "req-00001.json"), JSON.stringify({ seq: 1, path: "/v1/chat/completions", bodyBytes: 10, body: call(1, { reasoning_effort: "high" }) }));
+writeFileSync(join(bothShapes, "req-4242-1.json"), JSON.stringify(call(2, { reasoning_effort: "high" })));
+r = reconcile(readCapture(bothShapes), { requests: 2, model: "deepseek-flash", effort: "high" });
+note(r.ok && r.checked === 2, "a proxy record and an adapter dump read through ONE set of gates");
+
 console.log(`[reconcile-capture] ${failed ? "RED" : "OK"}`);
 process.exit(failed);
