@@ -36,6 +36,10 @@ export interface RawUsage {
 	readonly outputTokens: number | null;
 	readonly cacheRead: number | null;
 	readonly cacheWrite: number | null;
+	/** RSN-1: absent when the provider reported no split. Optional rather
+	 *  than `number | null` so every existing caller stays valid and an
+	 *  omission cannot be mistaken for a measured zero. */
+	readonly reasoningTokens?: number;
 }
 
 /** The ONE canonical usage record. Every field has exactly one meaning
@@ -49,7 +53,17 @@ export interface CanonicalUsage {
 	readonly cacheRead: number;
 	/** null = the provider reports none (openai-compat honestly does). */
 	readonly cacheWrite: number | null;
-	/** null = no reasoning split reported (reserved — every provider today). */
+	/** RSN-1: how much of `output` was THINKING, when the provider says.
+	 *  A SPLIT of the output, never a fifth quantity — completion tokens
+	 *  have always included reasoning ones, so the bill was never short;
+	 *  what was missing is which half the money went to, and that is the
+	 *  half the effort knob moves.
+	 *
+	 *  null = not reported. The comment here used to say "reserved — every
+	 *  provider today", which was true when it was written and had stopped
+	 *  being true: the field sat hardcoded null while the vendor's own
+	 *  response carried `completion_tokens_details.reasoning_tokens`, read
+	 *  from the SAME object we already read the cache figure out of. */
 	readonly reasoning: number | null;
 	/** USD from the pricing table below — null is the R5b-④c ABSENT stamp:
 	 *  the table has no rate for this route (an injected table's hole is
@@ -166,7 +180,11 @@ export function canonicalizeUsage(route: string, raw: RawUsage, table: PricingTa
 		output,
 		cacheRead,
 		cacheWrite,
-		reasoning: null, // reserved — no provider reports a split today
+		// RSN-1: the reported split, or null when none was reported. NEVER 0
+		// for an absent one — a provider that measured no thinking and a
+		// provider that measured nothing are different facts, and this file
+		// spent a release conflating them under a comment that had aged out.
+		reasoning: raw.reasoningTokens ?? null,
 		costUsd: priceFor(route, { input, output, cacheRead, cacheWrite }, table),
 		pricingTableId: table.id,
 		pricingTableVersion: table.version,

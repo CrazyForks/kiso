@@ -42,12 +42,24 @@ import { displayWidth } from "@vincemakes/kiso-tui-cells/width";
  */
 export const STATUS_GLYPHS = TWINKLE;
 
-/** The ~ctx estimate as the whole-percent LEFT. A non-finite ratio (no
- *  window, no estimate) yields null and the row prints "~null%" — the
- *  long-standing shape, kept on purpose: an honest null beats an
- *  invented percentage. */
-function ctxLeft(ratio: number): number | null {
-	return Number.isFinite(ratio) ? Math.round((1 - ratio) * 100) : null;
+/**
+ * The ~ctx estimate as the whole-percent LEFT, or `ctx ?` when there is no
+ * window to divide by.
+ *
+ * A percentage needs a denominator. When the model's context window is not
+ * KNOWN — the registry records null for it, nobody set one in the profile,
+ * no env — there is no denominator, and this row's rule is the same as
+ * every other number on it: a measurement, or nothing. It used to print
+ * `ctx left ~null%`, which at least did not invent a figure; `ctx ?` says
+ * the same thing to a reader.
+ *
+ * The failure this replaces is worse than either: the window fell back to
+ * a hardcoded 200,000 and the row printed a confident `ctx left ~82%`
+ * against a number nobody had measured. A reader had no way to tell that
+ * percentage from one computed against a real window.
+ */
+function ctxSegment(ratio: number): string {
+	return Number.isFinite(ratio) ? `ctx left ~${Math.round((1 - ratio) * 100)}%` : "ctx ?";
 }
 
 /**
@@ -93,7 +105,7 @@ export function runningStatus(glyph: string, since: number, outTokens: number | 
 	// state, so its row says nothing rather than guessing.
 	const rate = tokPerSec !== null ? ` · ${tokPerSec} tok/s` : "";
 	const seconds = Math.max(1, Math.round((Date.now() - since) / 1000));
-	return `${glyph} working ${seconds}s${out}${rate} · esc stop · alt+⏎ redirect · ctx left ~${ctxLeft(ctxRatio)}%`;
+	return `${glyph} working ${seconds}s${out}${rate} · esc stop · alt+⏎ redirect · ${ctxSegment(ctxRatio)}`;
 }
 
 /**
@@ -198,7 +210,7 @@ export function idleStatus(tier: string, model: string, ctxRatio: number, meter?
 		parts.push(label);
 		if (meter?.cacheHitPct != null) parts.push(`CH ${Math.round(meter.cacheHitPct)}%`);
 		// costUsd deliberately NOT rendered — see StatusMeter.costUsd.
-		parts.push(`ctx left ~${ctxLeft(ctxRatio)}%`);
+		parts.push(ctxSegment(ctxRatio));
 		if (meter?.tokPerSec != null) parts.push(`${meter.tokPerSec} tok/s`); // TPS-1: last, after the ctx estimate
 		return parts.join(" · ");
 	};

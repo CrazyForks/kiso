@@ -57,6 +57,21 @@ export interface ModelProfile {
 	/** LT-1: milliseconds the model stream may go silent before the request
 	 *  is aborted and retried. Default 120,000; 0 disables the watchdog. */
 	readonly streamIdleMs?: number;
+	/**
+	 * The model's context window, in tokens, when YOU know it and nobody
+	 * else publishes it.
+	 *
+	 * The registry carries a window only where a vendor states one, dated
+	 * and sourced. DeepSeek states none: its /models endpoint returns ids
+	 * only and its responses carry no window. Without a window the status
+	 * row has no denominator and shows `ctx ?` rather than a percentage of
+	 * a number nobody measured.
+	 *
+	 * Setting this makes the percentage real FOR YOU, and it is your claim,
+	 * not ours — which is why it lives in your profile rather than in the
+	 * registry, where every figure has to carry a source.
+	 */
+	readonly contextWindow?: number;
 }
 
 export interface AutoCompactConfig {
@@ -438,9 +453,13 @@ export function resolveModeFromConfig(merged: KisoConfig): Mode | undefined {
 
 /** Context window: env (KISO_CONTEXT_WINDOW) > config.contextWindow >
  *  default (200k — the caller's default). */
-export function resolveContextWindow(merged: KisoConfig): number | undefined {
+export function resolveContextWindow(merged: KisoConfig, profile?: ModelProfile): number | undefined {
 	const fromEnv = Number.parseInt(process.env.KISO_CONTEXT_WINDOW ?? "", 10);
 	if (Number.isFinite(fromEnv) && fromEnv > 0) return fromEnv;
+	// The PROFILE's window beats the global one: it is stated about a
+	// specific model, and the global figure is a default for whatever is
+	// selected. Env still beats both — someone who set it meant it.
+	if (profile?.contextWindow !== undefined && profile.contextWindow > 0) return profile.contextWindow;
 	return merged.contextWindow;
 }
 

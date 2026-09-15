@@ -760,9 +760,13 @@ async function makeAgent(sessionId: string | undefined, input?: LineInput, model
 	// the environment. A model never supplies a command; it names a check.
 	process.env.KISO_DELEGATION_CONFIG_JSON = JSON.stringify({ checks: merged.checks ?? {}, profiles: Object.keys(merged.models ?? {}) });
 	setConfigModels(merged.models ?? {});
-	setConfiguredWindow(resolveContextWindow(merged));
 
 	const resolved = resolveModel(modelFlag, merged);
+	// AFTER the model resolves: the window a PROFILE states is about that
+	// profile's model, so it cannot be read before we know which profile is
+	// selected. Reading it a line too early is how the compaction threshold
+	// ended up frozen at the wrong model's value (CTX-1).
+	setConfiguredWindow(resolveContextWindow(merged, resolved?.profile));
 	const model = resolved === null ? "faux" : resolved.profile.model;
 	if (resolved === null) {
 		console.log(

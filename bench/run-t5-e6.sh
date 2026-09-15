@@ -79,7 +79,7 @@ case "$ARM" in
     ;;
 esac
 echo "$TOT" > "$WORK/wall_seconds"
-VERIFY=$("$B/t5-verify.sh" "$WORK/repo")
+VERIFY=$("$B/t5-verify.sh" "$WORK/repo" "$WORK")
 echo "$VERIFY" > "$WORK/verify"
 node -e "
 const fs = require('fs');

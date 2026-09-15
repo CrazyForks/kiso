@@ -31,6 +31,7 @@ import { defineTool, type Tool, type ToolResult } from "@vincemakes/kiso-core";
 // WR-1/WR-1A — the revision-guard primitives (unit-tested in wr1a-coda):
 import { strippedShellEnv } from "./secret-env.js";
 import { contentRevision, normalizeRevision, postEffectEscape, precondition, publishNewFile, revalidateBeforeRename } from "./wr1.js";
+import { describeSearchMiss } from "./search-miss.js";
 
 /**
  * TUI2-R1 (C) — THE SHELL PROGRESS SIDECAR.
@@ -999,7 +1000,14 @@ export function editFileTool(opts: WorkspaceToolsOptions): Tool<{ path: string; 
 						// WR-1A ④: the WORLD lacks the pattern (the input is
 						// fine) and nothing ran — precondition; the note never
 						// rides an edit that wrote nothing.
-						return precondition(hunks.length === 1 && edits === undefined ? `edit_file: pattern not found in ${path}` : `edit_file: pattern not found in ${path} (hunk ${i + 1})`);
+						// The headline says WHAT failed; the detail says WHERE.
+						// A refusal that names the divergence costs one line
+						// here and saves a whole file read at the caller.
+						const headline = hunks.length === 1 && edits === undefined
+							? `edit_file: pattern not found in ${path}`
+							: `edit_file: pattern not found in ${path} (hunk ${i + 1})`;
+						const detail = describeSearchMiss(text, h.search);
+						return precondition(detail ? `${headline}\n${detail}` : headline);
 					}
 					spans.push({ start: at, end: at + h.search.length, replace: h.replace });
 				}

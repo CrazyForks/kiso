@@ -148,6 +148,25 @@ describe("isKisoEvent per-variant schema (A group)", () => {
 		expect(isKisoEvent({ seq: 0, type: "usage", known: true, inputTokens: -1, outputTokens: null, cacheRead: null, cacheWrite: null })).toBe(false);
 	});
 
+	it("TRACE-F1: `servedModel` is optional, and a present one is a NON-EMPTY string", () => {
+		// Astra's review of the optional-field admission: the prompt-cache
+		// gate's comment claimed these cases existed here. They did not.
+		// A comment asserting a gate is not a gate — so here they are.
+		const known = { known: true, inputTokens: 5, outputTokens: 3, cacheRead: 2, cacheWrite: 1 };
+		// ABSENT is the historical shape and must stay valid forever
+		expect(isKisoEvent({ seq: 0, type: "usage", ...known })).toBe(true);
+		expect(isKisoEvent({ seq: 0, type: "usage", ...known, servedModel: "deepseek-flash" })).toBe(true);
+		// EMPTY is a field we failed to read, not a statement: it would
+		// reconcile as a contradiction against every requested id.
+		expect(isKisoEvent({ seq: 0, type: "usage", ...known, servedModel: "" })).toBe(false);
+		expect(isKisoEvent({ seq: 0, type: "usage", ...known, servedModel: 7 })).toBe(false);
+		expect(isKisoEvent({ seq: 0, type: "usage", ...known, servedModel: null })).toBe(false);
+		// a server may state WHICH model ran while reporting nothing about
+		// what it cost — the two are separate facts
+		const silent = { inputTokens: null, outputTokens: null, cacheRead: null, cacheWrite: null };
+		expect(isKisoEvent({ seq: 0, type: "usage", known: false, ...silent, servedModel: "deepseek-flash" })).toBe(true);
+	});
+
 	it("round 5: validates ContentBlock shapes (text/image) wherever content blocks appear", () => {
 		const blockContent = [
 			{ type: "text", text: "caption" },

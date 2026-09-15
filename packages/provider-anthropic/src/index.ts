@@ -124,11 +124,19 @@ export function createAnthropicAdapter(client: Anthropic, adapterOpts: Anthropic
 			const thinkBuffer = new Map<number, { type: "thinking"; thinking: string; signature: string } | { type: "redacted_thinking"; data: string }>();
 			const contEntries: { kind: string; data: string }[] = [];
 			let sawToolUse = false;
+			// TRACE-F1: the model the SERVER says it served, from message_start.
+			// ONE variable for both usage exits below — see the openai-compat
+			// adapter, where two places computing one policy was W22-R1.
+			let served: string | null = null;
 
 			try {
 				for await (const event of stream) {
 					switch (event.type) {
 						case "message_start":
+							// the served id, stated by the server. A tier the
+							// vendor silently upgrades reads identical to the
+							// one we asked for without this.
+							if (typeof event.message.model === "string" && event.message.model !== "") served = event.message.model;
 							inputTokens = event.message.usage.input_tokens ?? null;
 							// D5: cache counters are READ from the SDK — never
 							// faked as zero.
@@ -226,6 +234,7 @@ export function createAnthropicAdapter(client: Anthropic, adapterOpts: Anthropic
 								cacheRead,
 								cacheWrite,
 								known: usageSeen,
+								...(served !== null ? { servedModel: served } : {}),
 							};
 							break;
 						case "message_stop":
@@ -245,6 +254,7 @@ export function createAnthropicAdapter(client: Anthropic, adapterOpts: Anthropic
 									cacheRead,
 									cacheWrite,
 									known: usageSeen,
+									...(served !== null ? { servedModel: served } : {}),
 								};
 							}
 							// D3: a message_stop with NO delta means the
