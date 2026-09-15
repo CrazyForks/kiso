@@ -55,7 +55,27 @@ function writeSkillCmd(skillsDir: string, name: string, mark: string): string {
 	// feature. That is what the first run of this gate did.
 	const md = `---\nname: ${name}\ndescription: ${mark}\n---\n\nthe skill's instructions\n`;
 	const b64 = Buffer.from(md, "utf8").toString("base64");
-	return `!!mkdir -p ${skillsDir}/${name} && printf %s ${b64} | base64 -d > ${skillsDir}/${name}/SKILL.md\r`;
+	return `!!mkdir -p ${skillsDir}/${name} && printf %s ${b64} | base64 -d > ${skillsDir}/${name}/SKILL.md${doneEcho(SHELL_DONE)}\r`;
+}
+
+/** The completion marker for a `!!` line.
+ *
+ *  These gates used to wait on the CLOCK — `[9, "/reload\r"]` meant "nine
+ *  seconds ought to be enough for the shell command". Ten scenarios of
+ *  that is 277 of this file's 278 seconds, spent waiting for things that
+ *  had already happened.
+ *
+ *  A feed needs a needle, and the obvious one — the command's own text —
+ *  is wrong: the composer ECHOES what is typed, so the needle fires
+ *  before the command runs. Same trap the mark in `writeSkillCmd` was
+ *  built to dodge. So the marker travels base64-encoded and is decoded by
+ *  the command itself: the plaintext exists only in the shell block the
+ *  CLI prints AFTER the command finished. */
+const SHELL_DONE = "BANG-COMMAND-FINISHED";
+const DONE_A = "BANG-A-FINISHED";
+const DONE_B = "BANG-B-FINISHED";
+function doneEcho(mark: string): string {
+	return ` && printf %s ${Buffer.from(mark, "utf8").toString("base64")} | base64 -d`;
 }
 
 /** An extension contributing ONE tool that answers with a fixed word. */
@@ -84,6 +104,46 @@ function skillDir(root: string, name: string, mark: string): void {
 	writeFileSync(join(root, name, "SKILL.md"), `---\nname: ${name}\ndescription: ${mark}\n---\n\nthe skill's instructions\n`, "utf8");
 }
 
+/** RELOAD-R1 (Astra): a `!!` line that makes the NEXT reload distinguishable.
+ *
+ *  Consecutive reloads printed the same line, so the gates keyed the next
+ *  step on a marker that was already on screen and counted SUBSTRINGS of a
+ *  repainted stream. Gate 8 asked for three reloads, got two, saw the
+ *  success text drawn three times by the compositor, and passed; gate 5's
+ *  reads ran before the second rebuild finished. Ordered input delivery is
+ *  not ordered completion: `/reload` resolves the chat-end signal and the
+ *  rebuild happens on the turn chain, so two immediate requests can
+ *  coalesce.
+ *
+ *  Adding an extension changes the COUNT the reload reports, so each one
+ *  announces itself with a line no earlier reload could have produced. A
+ *  repaint of `2 extensions` still proves the third reload ran with two
+ *  present; a coalesced or omitted reload cannot produce that line at all. */
+function addExtensionCmd(dir: string, name: string, mark: string): string {
+	const mod = `export default { name: ${JSON.stringify(name)}, tools: [] };\n`;
+	const b64 = Buffer.from(mod, "utf8").toString("base64");
+	return `!!mkdir -p ${dir} && printf %s ${b64} | base64 -d > ${dir}/${name}.mjs${doneEcho(mark)}\r`;
+}
+
+/** The reload line names its own extension count — the only part of it that
+ *  differs between consecutive reloads in these gates.
+ *
+ *  BASELINE is what a reload reports in THESE gates before anything is
+ *  added, measured by dumping their own screens — not guessed, and not
+ *  measured somewhere else. Two earlier numbers were wrong for instructive
+ *  reasons: 0 (pure invention: both gates stalled, loudly, naming the
+ *  needle that never appeared), then 3 (a bare CLI probe WITHOUT
+ *  isolatedEnv, which installs one — a fixture easier than the world, and
+ *  the count it produced slid the feed chain by one so two reloads ran
+ *  where three were asked for, which is exactly the defect being repaired
+ *  and which the new assertion caught).
+ *
+ *  If the kernel's own extension set changes, these gates go red naming
+ *  the needle that never appeared, and the fix is this one number. That is
+ *  a thing someone should look at. */
+const BASELINE = 4;
+const reloadWith = (added: number): string => `[reload] ${BASELINE + added} extensions`;
+
 describe("§2.5 — /reload", () => {
 	it("gate 1 — a skill added mid-session is in the index AND its tool can read it", () => {
 		// The gate that decides the shape: every in-place design passes the
@@ -103,11 +163,11 @@ describe("§2.5 — /reload", () => {
 			feeds: [
 				["/ commands · ↑ history", "go\r"],
 				["before.", writeSkillCmd(dirs.skills, "greet", "SKILL-ADDED-AFTER-START")],
-			],
-			delays: [
-				[9, "/reload\r"],
-				[15, "use it\r"],
-				[22, "exit\r"],
+				// each step waits for the PREVIOUS one to have happened,
+				// not for a number of seconds to pass
+				[SHELL_DONE, "/reload\r"],
+				["[reload]", "use it\r"],
+				["after.", "exit\r"],
 			],
 		});
 		const out = strip(raw);
@@ -130,12 +190,10 @@ describe("§2.5 — /reload", () => {
 		const raw = ptyRun(["--mode", "bypass", "reload-drop"], env as NodeJS.ProcessEnv, {
 			feeds: [
 				["/ commands · ↑ history", "call it\r"],
-				["first done.", `!!rm -f ${join(dirs.extensions, "probe.mjs")}\r`],
-			],
-			delays: [
-				[10, "/reload\r"],
-				[16, "call it again\r"],
-				[23, "exit\r"],
+				["first done.", `!!rm -f ${join(dirs.extensions, "probe.mjs")}${doneEcho(SHELL_DONE)}\r`],
+				[SHELL_DONE, "/reload\r"],
+				["[reload]", "call it again\r"],
+				["second done.", "exit\r"],
 			],
 		});
 		const out = strip(raw);
@@ -159,12 +217,10 @@ describe("§2.5 — /reload", () => {
 		const raw = ptyRun(["--mode", "bypass", "reload-broken"], env as NodeJS.ProcessEnv, {
 			feeds: [
 				["/ commands · ↑ history", "go\r"],
-				["before.", `!!printf 'throw new Error("deliberately broken");\\n' > ${join(dirs.extensions, "broken.mjs")}\r`],
-			],
-			delays: [
-				[9, "/reload\r"],
-				[15, "still there?\r"],
-				[22, "exit\r"],
+				["before.", `!!printf 'throw new Error("deliberately broken");\\n' > ${join(dirs.extensions, "broken.mjs")}${doneEcho(SHELL_DONE)}\r`],
+				[SHELL_DONE, "/reload\r"],
+				["[reload]", "still there?\r"],
+				["STILL ALIVE", "exit\r"],
 			],
 		});
 		const out = strip(raw);
@@ -190,10 +246,10 @@ describe("§2.5 — /reload", () => {
 			"utf8",
 		);
 		const raw = ptyRun(["chat", "reload-model"], { ...env, RELOAD_KEY: "fake" } as NodeJS.ProcessEnv, {
-			feeds: [["/ commands · ↑ history", "/model beta\r"]],
-			delays: [
-				[6, "/reload\r"],
-				[13, "exit\r"],
+			feeds: [
+				["/ commands · ↑ history", "/model beta\r"],
+				["model-beta", "/reload\r"],
+				["[reload]", "exit\r"],
 			],
 		});
 		const out = strip(raw);
@@ -228,14 +284,15 @@ describe("§2.5 — /reload", () => {
 			timeout: 110,
 			feeds: [
 				["trust this project's .kiso?", "y\r"],
-				["/ commands · ↑ history", `!!rm -rf ${join(dirs.skills, "doomed")}\r`],
-			],
-			delays: [
-				[9, "/reload\r"],
-				[16, "/reload\r"],
-				[23, "read kept\r"],
-				[32, "read doomed\r"],
-				[41, "exit\r"],
+				["/ commands · ↑ history", `!!rm -rf ${join(dirs.skills, "doomed")}${doneEcho(SHELL_DONE)}\r`],
+				[SHELL_DONE, "/reload\r"],
+				// ONE reload at a time, each awaited on a line the previous
+				// one could not have printed
+				[reloadWith(0), addExtensionCmd(dirs.extensions, "countable", DONE_A)],
+				[DONE_A, "/reload\r"],
+				[reloadWith(1), "read kept\r"],
+				["kept read.", "read doomed\r"],
+				["doomed asked.", "exit\r"],
 			],
 		});
 		const out = strip(raw);
@@ -282,19 +339,30 @@ describe("§2.5 — /reload", () => {
 		const raw = ptyRun(["--mode", "bypass", "reload-mcp"], env as NodeJS.ProcessEnv, {
 			cwd: workdir,
 			timeout: 110,
-			feeds: [["trust this project's .kiso?", "y\r"]],
-			delays: [
-				[8, "/reload\r"],
-				[15, "/reload\r"],
-				[22, "/reload\r"],
-				[30, "exit\r"],
+			feeds: [
+				["trust this project's .kiso?", "y\r"],
+				["/ commands · ↑ history", "/reload\r"],
+				// three reloads, driven ONE AT A TIME. Each is awaited on a
+				// line no earlier reload could have printed, because an
+				// extension is added between them.
+				[reloadWith(0), addExtensionCmd(dirs.extensions, "countable-a", DONE_A)],
+				[DONE_A, "/reload\r"],
+				[reloadWith(1), addExtensionCmd(dirs.extensions, "countable-b", DONE_B)],
+				[DONE_B, "/reload\r"],
+				[reloadWith(2), "exit\r"],
 			],
 		});
 		const out = strip(raw);
 		// the collision error is the loop's own signature: it can only fire
 		// if the user side already contains the project's servers
 		expect(out, "the merge never read its own output back as the user config").not.toContain("exists in both");
-		expect(out.split("the conversation is unchanged").length - 1, "all three reloads SUCCEEDED").toBeGreaterThanOrEqual(3);
+		// RELOAD-R1: COMPLETED OPERATIONS, not repaint occurrences. The
+		// compositor redraws the success text, so counting substrings of the
+		// byte stream overcounted — this gate saw three and two had run.
+		// Each line below can only exist if the reload before it finished.
+		for (const n of [0, 1, 2]) {
+			expect(out, `reload ${n + 1} of 3 completed with ${n} extensions loaded`).toContain(reloadWith(n));
+		}
 	}, 360_000);
 
 	it("gate 9 — RL-F5: a rule file written before this change keeps its rules through the first grant", () => {
@@ -326,8 +394,8 @@ describe("§2.5 — /reload", () => {
 			feeds: [
 				["/ commands · ↑ history", "go\r"],
 				["don't ask again", "2"], // grant `shell` on top of the legacy `read_file`
+				["granted.", "exit\r"],
 			],
-			delays: [[20, "exit\r"]],
 		});
 		const after = readFileSync(join(dirs.extensions, "dont-ask-again.mjs"), "utf8");
 		expect(after, "the rule granted now is on disk").toContain("shell");
