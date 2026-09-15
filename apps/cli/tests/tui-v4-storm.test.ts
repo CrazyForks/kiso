@@ -356,7 +356,26 @@ describe("TUI v4 #16 — the resize-storm gate (real PTY, 24×80)", () => {
 		// This gate's own property is unchanged and still asserted: the
 		// right-hand hint is cut before the status text, and the status is
 		// never truncated from the left.
-		expect(narrow).toContain("▸ default · faux · ctx left ~99%");
+		// DECLARED SUPERSESSION: this read `ctx left ~99%` — the DIGITS.
+		// They are not this gate's property, and they are not even a
+		// property of the repository: `composeSystemPrompt(cwd)` injects the
+		// workspace's AGENTS.md/CLAUDE.md, so the idle context estimate is a
+		// function of a file that is not tracked. A 5KB project-instructions
+		// file moves the reading from ~99% to ~98% and turns this case red,
+		// while CI — which has no such file — stays green forever.
+		//
+		// That is a gate answering a different question in every working
+		// tree, and it answers it AGAINST the contributor: anyone following
+		// this project's own convention cannot get a green local chain, from
+		// a case that has nothing to do with their change. The comment above
+		// already says the expected string "does not depend on the
+		// percentage's digits" — the assertion simply did not implement what
+		// the comment claimed.
+		//
+		// The property is unchanged and still asserted: at 44 columns the
+		// status text is present and whole, the context estimate is not cut,
+		// and the hint gave way for it.
+		expect(narrow).toMatch(/▸ default · faux · ctx left ~\d+%/);
 		expect(narrow, "the teaching hint survived a row with no room for it").not.toContain("/mode to switch · faux");
 		// DECLARED SUPERSESSION (REL-0152-R1): the status row is written
 		// by ROW NUMBER now, not by a CHA at the end of a bottom-up march.

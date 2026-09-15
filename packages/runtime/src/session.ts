@@ -164,6 +164,12 @@ export class AgentSession {
 	#continuationScope: ContinuationScope | undefined;
 	// XP-1: the selected axes; resolved per request (next-turn semantics).
 	#reasoning: ReasoningSetting;
+	// CTX-1: the compaction threshold is derived from the LIVE model's window,
+	// so it is a passenger on the binding like the four above. PH-F8 fixed
+	// exactly this class — a frozen startup value still in use after a switch
+	// — for the model id, the provider, the endpoint and the scope. The
+	// threshold was one field over and was never asked.
+	#microcompact: { readonly thresholdTokens: number } | undefined;
 	// XP-1: a legacy session records revision 1 at the next explicit
 	// selection or first request — never eagerly at open.
 	#profilePending: boolean;
@@ -219,6 +225,8 @@ export class AgentSession {
 		this.#baseUrl = config.baseUrl;
 		this.#continuationScope = config.continuationScope;
 		this.#reasoning = config.reasoning ?? { thinking: "default", effort: "default" };
+		// CTX-1: starts as the startup policy, then follows the binding.
+		this.#microcompact = config.microcompact;
 		this.#profilePending = config.profilePending === true;
 	}
 
@@ -227,9 +235,10 @@ export class AgentSession {
 	 *  fresh per call so an in-flight run keeps the config it started with
 	 *  — the same boundary setAdapter has always drawn. */
 	#effectiveConfig(): SessionConfig {
-		const { provider: _startup, baseUrl: _startupUrl, continuationScope: _startupScope, ...rest } = this.#config;
+		const { provider: _startup, baseUrl: _startupUrl, continuationScope: _startupScope, microcompact: _startupMicro, ...rest } = this.#config;
 		return {
 			...rest,
+			...(this.#microcompact !== undefined ? { microcompact: this.#microcompact } : {}),
 			model: this.#model,
 			...(this.#provider !== undefined ? { provider: this.#provider } : {}),
 			...(this.#baseUrl !== undefined ? { baseUrl: this.#baseUrl } : {}),
@@ -311,6 +320,10 @@ export class AgentSession {
 		/** XP-1: the reasoning axes travel with the binding too; absent =
 		 *  fresh defaults (a new binding never inherits stale effort). */
 		readonly reasoning?: ReasoningSetting;
+		/** CTX-1: the compaction threshold follows the live model's window.
+		 *  Absent KEEPS the current one — a caller that does not know the new
+		 *  model's window must not silently reset the policy to nothing. */
+		readonly microcompact?: { readonly thresholdTokens: number };
 	}): void {
 		this.#adapter = binding.adapter;
 		this.#model = binding.model;
@@ -318,9 +331,30 @@ export class AgentSession {
 		this.#baseUrl = binding.baseUrl;
 		this.#continuationScope = binding.scope;
 		this.#reasoning = binding.reasoning ?? { thinking: "default", effort: "default" };
+		if (binding.microcompact !== undefined) this.#microcompact = binding.microcompact;
 		// XP-1: an explicit selection is DURABLE — the setting survives
 		// /resume because a revision records it now, not at some later flush.
 		this.#recordProfile();
+	}
+
+	/**
+	 * CTX-1: the compaction threshold alone, with NO profile revision.
+	 *
+	 * `setModelBinding` is the atomic switch — the adapter and everything
+	 * that must travel with it, recorded durably. This is the other door:
+	 * a session OPENED onto a model the process was not configured for.
+	 * `/resume` restores the recorded model, which can be any model the
+	 * session ever used, while the threshold came from whatever model this
+	 * process started on. Resuming a 1M session from a 200k start left it
+	 * clearing tool results at 100,000.
+	 *
+	 * It writes no revision because nothing was selected: the caller is
+	 * bringing the policy into line with a model already in force, not
+	 * choosing one. Recording a revision here would write a new profile on
+	 * every open.
+	 */
+	setMicrocompactThreshold(thresholdTokens: number): void {
+		this.#microcompact = { thresholdTokens };
 	}
 
 	/** E2: the adapter identity (anthropic / openai-compat / openai-responses) — the route
