@@ -115,6 +115,19 @@ before it is frozen.
 3. **Exceeding the tolerance with every verify passing is a FINDING for
    the lead, never an auto-block.**
 
+**Why two-sided, recorded at the lead's instruction.** Two reasons, and
+the second is not the author's:
+
+- **It costs no power.** This metric is report-only — nothing but rule 1
+  blocks on it — so making the comparison two-sided removes the structural
+  blindness without weakening anything. Version 1's guard could fire only
+  in the direction its author feared, and the legs held the other
+  direction: control 3 stale refusals to the arm's 2.
+- **A large REDUCTION would be as surprising as a large increase**, and
+  deserves reading rather than silence. If the arm cites stale materially
+  LESS often than the control, that is a fact about the sentence too, and
+  a one-sided guard would have thrown it away.
+
 **The tolerance is justified without reference to version 1's rate.** A
 stale-revision refusal that a leg recovers from produces no wrong write;
 it costs the refused call and the retry. At 1.0 pp of repeat edits — about
