@@ -1,9 +1,9 @@
 /**
  * Token round — acceptance (2): the big-file default truncation is HONEST and
  * the model CAN continue from its note. The faux script models a model
- * that reads the "… N more lines (call again with offset=…)" note and
+ * that reads the "… N more lines (call again with offset=… limit=…)" note and
  * follows it: first a default read (head 200 + note), then the range read
- * the note names (offset=201 → the tail, no note). The session log proves
+ * the note names (offset=201 limit=200 → the tail, no note). The session log proves
  * both the truncated first result and the exact continuation call.
  */
 
@@ -22,7 +22,7 @@ writeFileSync(
 );
 
 describe("token round e2e: big-file default truncation + continuation reading via the note", () => {
-	it("the model reads the head 200 + note, then completes the file with offset=201", () => {
+	it("the model reads the head 200 + note, then completes the file with the offset AND limit the note named", () => {
 		const { env, dirs } = isolatedEnv({ KISO_FAUX_SCRIPT: join(WORKSPACE, "faux.json") });
 		// The playbook: default read → the continuation the note names → end.
 		const script = [
@@ -34,7 +34,7 @@ describe("token round e2e: big-file default truncation + continuation reading vi
 			},
 			{
 				events: [
-					{ type: "tool_call_end", callId: "c2", name: "read_file", input: { path: "big.txt", offset: 201 } },
+					{ type: "tool_call_end", callId: "c2", name: "read_file", input: { path: "big.txt", offset: 201, limit: 200 } },
 					{ type: "stop", reason: "tool_use" },
 				],
 			},
@@ -55,11 +55,13 @@ describe("token round e2e: big-file default truncation + continuation reading vi
 		const first = events.find((e) => e.type === "tool_result" && e.callId === "c1");
 		expect(first.content).toContain("line 200");
 		expect(first.content).not.toContain("line 201");
-		expect(first.content).toContain("… 50 more lines (call again with offset=201)");
+		expect(first.content).toContain("… 50 more lines (call again with offset=201 limit=200)");
 
-		// The model's continuation follows the note EXACTLY (offset=201).
+		// The model's continuation follows the note EXACTLY — BOTH parameters.
+		// Naming only the offset was an instruction to read the rest of the file,
+		// because an absent limit reads to EOF.
 		const secondCall = events.find((e) => e.type === "tool_call_end" && e.callId === "c2");
-		expect(secondCall.input).toEqual({ path: "big.txt", offset: 201 });
+		expect(secondCall.input).toEqual({ path: "big.txt", offset: 201, limit: 200 });
 
 		// The tail read completes the file — no note, full content reachable.
 		const second = events.find((e) => e.type === "tool_result" && e.callId === "c2");

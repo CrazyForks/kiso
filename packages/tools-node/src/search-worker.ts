@@ -17,12 +17,18 @@
  */
 
 import { open, readdir } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { basename, join, relative } from "node:path";
 import { isMainThread, parentPort } from "node:worker_threads";
 
 export interface SearchRequest {
 	readonly token: number;
 	readonly root: string;
+	/** The WORKSPACE root, which is not always the search root: a search under
+	 *  `packages/runtime` must still name `packages/runtime/src/run.ts` so the
+	 *  result can be handed to `read_file` unchanged. Realpath'd by the
+	 *  caller, because `full` is walked from a realpath'd root and a mixed
+	 *  pair produces `../..` the moment a symlink is involved. */
+	readonly workspaceRoot: string;
 	/** a single file to scan instead of walking `root` */
 	readonly single: string | null;
 	readonly pattern: string;
@@ -109,7 +115,11 @@ export async function runSearch(req: SearchRequest): Promise<SearchReply> {
 			for (const [i, line] of text.split("\n").entries()) {
 				if (regex.test(line)) {
 					totalMatches += 1;
-					if (matches.length < req.maxMatches) matches.push(`${full}:${i + 1}: ${line.trim().slice(0, 160)}`);
+					// WORKSPACE-RELATIVE, not absolute: `read_file` refuses an
+					// absolute path, so an absolute hit here is a result the
+					// model cannot feed back without rewriting it by hand.
+					if (matches.length < req.maxMatches)
+						matches.push(`${relative(req.workspaceRoot, full) || basename(full)}:${i + 1}: ${line.trim().slice(0, 160)}`);
 				}
 			}
 		} catch {
