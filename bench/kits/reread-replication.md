@@ -62,15 +62,46 @@ round: ruled post-launch, `reread-round-ruling-2026-09-16.md` §7.
 
 Both conditions, not either.
 
+**The sign rule is REPORTED, never a bar** — carried forward from version
+1 and still true: a rule demanding some fraction of pairs be negative asks
+the observed negative share to beat the true one, which is a coin flip at
+every n. The negative-pair count is printed and gates nothing.
+
 ## Guards
 
 | guard | bar |
 |---|---|
-| quality | verify=pass, or misses only in the **frozen empty-input class** carried verbatim from version 1's DECLARED SUPERSESSION |
-| cost | median v2 delta ≤ **+6%** — this round's own stricter choice; `bm1-a1` is +20% |
+| quality | verify=pass, or misses only in the **frozen empty-input class** listed below |
+| cost | median v2 delta ≤ **+6%** — **THIS ROUND'S OWN CHOICE, stricter than BM-1**: `bm1-a1`, the default since the rel-030 freeze, is +20%; +6% is the retired `bm1-frozen`. A change meant to save requests must not cost more, so this round holds itself to the tighter number by choice |
 | wall | median delta ≤ **+25%** |
 | edit refusals | arm refused share of edit calls ≤ **12%** |
 | **stale revision — SIZED and TWO-SIDED** | see below |
+
+### The frozen empty-input class, carried verbatim from version 1
+
+Version 1's DECLARED SUPERSESSION closed this list at eight, and it is
+reproduced here rather than referenced: a kit that sends the reader
+somewhere else for its own bar is a kit whose bar can drift unnoticed.
+
+`parseRangeList('')` · `sumOf(startsOf(''))` · `startsOf('')` ·
+`totalSpan('')` · `mergedText('')` · `hasOverlap('')` ·
+`countDistinct('')` · `longestRun('')`
+
+The held-out boundary's other ten checks are other classes and still
+block. The list does not grow to fit whatever fails next; the criteria
+test holds it closed at eight.
+
+**Where this exemption came from, carried with it.** It was proposed by
+version 1's kit author **AFTER an inconvenient result** — a leg failed on
+this class mid-round — and **adjudicated by the lead, who is not rescued
+by it**, against the test "would it have been accepted written before the
+first leg". It rests on the class being a fixture trap both products and
+both arms fall into: `pi-T6-r2` (the other product), `tool-table-a/ctl5`
+(ours, the control), `reread/a4` and `reread/a7` (ours, the arm). The
+arithmetic that should have preceded version 1's freeze is recorded with
+it: one such failure in 18 legs means **under one in ten** chance of 44
+clean, and a per-leg absolute guard is sized against the known base rate
+before it is frozen.
 
 ### The hazard guard, written so it cannot repeat version 1's fault
 
@@ -107,6 +138,16 @@ justifies blocking is the verify miss, and that is rule 1.
    and it is **the true cost of editing without a fresh view**. It is
    stated to the owner in those words, net of the cost movement, not
    buried.
+
+## Void legs, and no leg excluded
+
+Arm identity is read from each leg's OWN first captured request body
+(`prompt_arm`), never from the build path the runner was handed. **A leg
+whose bodies carry a prompt other than the one launched is VOID and stops
+the scoring**; the verdict script refuses the round rather than scoring
+around one. **No leg is excluded for what it measured** — a leg discarded
+is a leg the apparatus broke, and it is preserved with its reason, as
+version 1's pair 4 was.
 
 ## Before the freeze
 

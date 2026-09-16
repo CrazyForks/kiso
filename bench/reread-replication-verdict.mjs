@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 /**
+ * The REPLICATION round's verdict. Version 1's verdict script is left
+ * untouched beside this one: it is the record of what version 1 was
+ * judged by, and editing it would rewrite a verdict already given.
+ *
  * The re-read exemption round's verdict, applied mechanically to the
  * criteria frozen in kits/reread-exemption.md before any leg ran.
  *
@@ -21,11 +25,12 @@ import { readbackRate, callStream } from "./readback-rate.mjs";
 import { rng } from "./concealed/rng.mjs";
 
 const B = dirname(fileURLToPath(import.meta.url));
-const ROUND = process.argv[2] ?? "reread";
-const PAIRS = Number(process.argv[3] ?? 22);
+const ROUND = process.argv[2] ?? "reread-replication";
+const PAIRS = Number(process.argv[3] ?? 12);
 
 // --- transcribed from the frozen kit. Do not edit to fit a result. ---
-const RATE_DELTA_MAX = -0.50;     // primary: the median must be at or below
+const RATE_DELTA_MAX = -0.30;     // primary: the median must be at or below
+const STALE_TOLERANCE_PP = 1.0;   // guard: |arm - control| in points of repeat edits
 const BOOTSTRAP_N = 20000;        // secondary: resamples
 const BOOTSTRAP_SEED = "20260916";
 const REFUSED_SHARE_MAX = 0.12;   // guard: refused share of edit calls
@@ -171,7 +176,21 @@ const excludesZero = hi < 0 || lo > 0;
 const verifyAll = pairs.every((p) => p.ctl.quality.ok && p.arm.quality.ok);
 const exempted = pairs.flatMap((p) => [["ctl", p.i, p.ctl], ["arm", p.i, p.arm]]).filter(([, , l]) => l.quality.exempt.length);
 const blocked = pairs.flatMap((p) => [["ctl", p.i, p.ctl], ["arm", p.i, p.arm]]).filter(([, , l]) => l.quality.blocking.length);
-const staleRise = pairs.filter((p) => (p.arm.ref?.stale ?? 0) > (p.ctl.ref?.stale ?? 0));
+// THE HAZARD GUARD, sized and TWO-SIDED. Version 1's asked only whether the
+// arm exceeded the control, so it could not see its own control exceeding
+// its arm — which is what that round's legs actually held (control 3,
+// arm 2). A guard that can fire in only the direction its author feared
+// is not a guard.
+const staleArm = pairs.reduce((a, p) => a + (p.arm.ref?.stale ?? 0), 0);
+const staleCtl = pairs.reduce((a, p) => a + (p.ctl.ref?.stale ?? 0), 0);
+const repeatArm = pairs.reduce((a, p) => a + p.arm.repeatEdits, 0);
+const repeatCtl = pairs.reduce((a, p) => a + p.ctl.repeatEdits, 0);
+const ppArm = repeatArm ? 100 * staleArm / repeatArm : 0;
+const ppCtl = repeatCtl ? 100 * staleCtl / repeatCtl : 0;
+const staleGap = Math.abs(ppArm - ppCtl);
+// Rule 1: a verify miss on a leg that also carried a stale refusal BLOCKS.
+const staleThenMiss = pairs.flatMap((p) => [p.arm, p.ctl]).filter((l) => (l.ref?.stale ?? 0) > 0 && !l.quality.ok);
+const staleRise = staleThenMiss;   // only this blocks; the gap is reported
 const armEdits = pairs.reduce((a, p) => a + (p.arm.ref?.edits ?? 0), 0);
 const armRefused = pairs.reduce((a, p) => a + (p.arm.ref?.refused ?? 0), 0);
 const refusedShare = armEdits ? armRefused / armEdits : 0;
@@ -183,11 +202,12 @@ console.log(`  SECONDARY  bootstrap 95% of the median [${pct(lo)}, ${pct(hi)}] (
 console.log(`  guard quality   verify=pass, or misses only in the frozen empty-input class  -> ${verifyAll ? "ok" : "FAIL"}`);
 for (const [tag, i, l] of exempted) console.log(`     pair ${i} ${tag}: EXEMPTED under the class — ${l.quality.exempt.join(", ")}`);
 for (const [tag, i, l] of blocked) console.log(`     pair ${i} ${tag}: BLOCKING — ${l.quality.blocking.join(", ")}`);
-console.log(`  guard stale-rev arm not above control, per leg  -> ${staleRise.length === 0 ? "ok" : `FAIL on pairs ${staleRise.map((p) => p.i).join(", ")}`}`);
+console.log(`  guard stale-rev a verify miss on a leg carrying a stale refusal  -> ${staleThenMiss.length === 0 ? "ok (none)" : `FAIL on ${staleThenMiss.map((l) => l.run).join(", ")}`}`);
+console.log(`     REPORTED: arm ${staleArm}/${repeatArm} = ${ppArm.toFixed(2)} pp · control ${staleCtl}/${repeatCtl} = ${ppCtl.toFixed(2)} pp · |gap| ${staleGap.toFixed(2)} pp vs tolerance ${STALE_TOLERANCE_PP.toFixed(1)} pp${staleGap > STALE_TOLERANCE_PP ? "  -> EXCEEDED: a finding for the lead, not a block" : ""}`);
 console.log(`  guard refusals  arm refused ${armRefused}/${armEdits} = ${(100 * refusedShare).toFixed(1)}% <= ${100 * REFUSED_SHARE_MAX}%  -> ${refusedShare <= REFUSED_SHARE_MAX ? "ok" : "FAIL"}`);
 console.log(`  guard cost      median v2 ${pct(mV2)} <= ${pct(COST_DELTA_MAX)}  -> ${costOk ? "ok" : "FAIL"}`);
 
-const guardsOk = verifyAll && staleRise.length === 0 && refusedShare <= REFUSED_SHARE_MAX && costOk;
+const guardsOk = verifyAll && staleThenMiss.length === 0 && refusedShare <= REFUSED_SHARE_MAX && costOk;
 let verdict;
 if (!guardsOk) verdict = "BLOCKED — a guard failed; nothing about the clause is proposable, whatever the readings say";
 else if (mRate !== null && mRate <= RATE_DELTA_MAX) verdict = "PRIMARY — the sentence is most of the gap. The change ships as its own PR and release; the sequencing is the owner's";
