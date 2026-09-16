@@ -252,6 +252,15 @@ CFG
     # check below reads `edit_echo=off` on a leg that asked for `on`, and
     # the leg is VOID rather than quietly joining the control arm.
     if [ "${BENCH_EDIT_ECHO:-0}" = 1 ]; then set -- "$@" "KISO_EDIT_ECHO=1"; fi
+    # CAPTURE: our arm dumps its OWN bodies. It must NOT go through a proxy —
+    # a loopback baseUrl defeats the endpoint-keyed metadata lookup
+    # (dispatch.ts: lookupModelMetadata(model, baseUrl)), so `/model ds high`
+    # is refused and every leg reads effort_not_bound. The round would be
+    # void, after the money.
+    if [ "${BENCH_CAPTURE:-0}" = 1 ]; then
+      mkdir -p "$WORK/capture"
+      set -- "$@" "KISO_DUMP_REQUESTS=$WORK/capture"
+    fi
     KISO_ENV_PAIRS="$*"
     for P in 1 2 3 4; do
       over_budget && break
@@ -272,7 +281,31 @@ CFG
     done
     ;;
   pi)
-    assert_bare pi "$BARE_HOME" || exit 1
+    # CAPTURE: this arm has no dump sink, so the proxy records for it. Its
+    # base URL moves via its MODEL STORE (environment variables are not
+    # honoured — the older note stands), which means one file inside the
+    # bare home. That file is DECLARED to the bareness gate rather than
+    # hidden from it, and the gate still fails on anything undeclared.
+    CAPTURE_DECL=""
+    if [ "${BENCH_CAPTURE:-0}" = 1 ]; then
+      mkdir -p "$WORK/capture" "$BARE_HOME/.pi/agent"
+      CAP_UP=${CAP_UPSTREAM:-api.deepseek.com}
+      CAP_PORT=$(node -e 'const n=require("net");const s=n.createServer();s.listen(0,()=>{console.log(s.address().port);s.close();});')
+      python3 "$B/capture-proxy.py" --port "$CAP_PORT" --upstream "$CAP_UP" --scheme https         --out "$WORK/capture" --label "pi-$RUN" >/dev/null 2>&1 &
+      CAP_PID=$!
+      sleep 2
+      node -e '
+        const fs = require("fs");
+        const src = process.env.HOME + "/.pi/agent/models-store.json";
+        const d = JSON.parse(fs.readFileSync(src, "utf8"));
+        // metadata only — this file carries no credential (checked); the key
+        // rides in the environment, as it does without the proxy
+        for (const m of (d.deepseek && d.deepseek.models) || []) m.baseUrl = process.argv[1];
+        fs.writeFileSync(process.argv[2], JSON.stringify(d));
+      ' "http://127.0.0.1:$CAP_PORT" "$BARE_HOME/.pi/agent/models-store.json"
+      CAPTURE_DECL=".pi/agent/models-store.json"
+    fi
+    assert_bare pi "$BARE_HOME" $CAPTURE_DECL || exit 1
     for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24; do
       over_budget && break
       S=$(date +%s); _left=$(remaining)
@@ -287,6 +320,7 @@ CFG
       note_exit "turn $i" "$_rc" "$_left"
     done
     BUCKET_WALLS
+    [ -n "${CAP_PID:-}" ] && kill "$CAP_PID" 2>/dev/null
     ;;
   claude)
     CCFG="$WORK/claude-config"; mkdir -p "$CCFG"
@@ -428,6 +462,31 @@ if [ "$TOOL" = "kiso" ]; then
   ' "$WORK" 2>/dev/null || echo "unknown")
   printf '%s\n' "$EDIT_ECHO_OBSERVED" > "$WORK/edit_echo"
   printf '%s\n' "${BENCH_EDIT_ECHO:-0}" > "$WORK/edit_echo_requested"
+fi
+
+# CAPTURE RECONCILIATION, both arms, before any verdict is read off this leg.
+#
+# A directory of bodies proves nothing alone: if the sink missed requests,
+# the bodies describe a DIFFERENT session from the one the usage numbers
+# came from. And the effort read from a body is the WIRE-VERIFIED level —
+# the thing this programme has never had for the arm without a durable
+# profile, which carried "requested, not verified" on every leg ever run.
+if [ "${BENCH_CAPTURE:-0}" = 1 ]; then
+  node --input-type=module -e "
+    import { readCapture, reconcile } from '$B/reconcile-capture.mjs';
+    import { readFileSync, writeFileSync } from 'node:fs';
+    let requests = null;
+    try {
+      const cfg = JSON.parse(readFileSync('$WORK/config.json', 'utf8'));
+      requests = cfg.model && typeof cfg.model.requests === 'number' ? cfg.model.requests : null;
+    } catch {}
+    const recs = readCapture('$WORK/capture');
+    const r = reconcile(recs, { requests, model: 'deepseek-flash', effort: '$BENCH_EFFORT' });
+    writeFileSync('$WORK/capture.json', JSON.stringify(r, null, 1) + '\n');
+    // the wire-verified effort is its own sidecar, beside effort_bound, so a
+    // reader never has to infer which arm's claim rests on what
+    writeFileSync('$WORK/effort_wire', (r.effortObserved ?? 'not-observed') + '\n');
+  " 2>/dev/null || { echo "reconcile-failed" > "$WORK/effort_wire"; echo '{\"ok\":false,\"problems\":[\"the reconciler did not run\"]}' > "$WORK/capture.json"; }
 fi
 
 if [ -f "$WORK/status" ]; then
