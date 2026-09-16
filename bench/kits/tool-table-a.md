@@ -55,8 +55,28 @@ selected, in 3,668 opportunities**.
 - **Control** — the default table as it ships: 7 tools.
 - **A** — the default table **without `delegate`**: 6 tools.
 
-The subagent extension remains loadable by configuration. **This is a
-question about the DEFAULT, not about the tool.**
+**THE ARM APPROXIMATES A DEFERRED DESIGN, NOT A REMOVAL.** The owner has
+ruled that `delegate` and `ask_user` are DEFAULT product capabilities and
+must never require manual configuration. The mechanism this round informs
+is therefore automatic deferred loading: the capability is always
+available, the model brings it into the table on demand through a small
+discovery tool (~200 characters against `delegate`'s 1,668), and the one
+extra request is paid only in the rare case it is used. A's arm is exactly
+that design's STEADY STATE when nothing has been loaded, which is why the
+arm is specified this way and why it does not need changing.
+
+**So the product decision after A is "defer" against "keep present". It is
+never "config".** Any report that phrases A's result as "remove
+`delegate`" is misreporting it.
+
+And the rarity is measured, not assumed. Over **96 real sessions on this
+machine: 5 sessions used `delegate`, 7 calls in total** — deep exploration
+of a package, a TypeScript code review, a completion audit, structural-debt
+analysis (3), a multi-file read. The bench's zero is the bench having no
+delegable subtask; the real sessions are the only evidence of real use, and
+they say it is rare AND substantial. A capability used in 5% of sessions
+should not sit in every request's table, and should not require anyone to
+configure it either.
 
 Everything else byte-identical: the same prompt, the same shell text, the
 same model, the same endpoint, `BENCH_EFFORT=high`, the same 24 turns, the
@@ -118,13 +138,18 @@ to do.
 
 ## The decision, written before the numbers exist
 
-- **SUPPORTED + guards** → propose removing `delegate` from the default
-  table. **The owner decides**; a proposal is not a release. The proposal
-  states, in its first line, that the bench has never had a delegable
-  subtask — "never selected here" is not "not useful".
+- **SUPPORTED + guards** → propose DEFERRING `delegate` — a discovery tool
+  in the default table, the capability loaded automatically on demand,
+  never configured by hand. **The owner decides**; a proposal is not a
+  release. The proposal states in its first line that the bench has never
+  had a delegable subtask, and that the owner's own sessions use it 7 times
+  in 96 — rare, real, and substantial every time.
 - **NOT SUPPORTED** → the default table is not what moves the thinking on
-  this task. `delegate` stays, and the reasoning gap keeps its open
-  candidates. It is not re-run with a looser bar.
+  this task. `delegate` stays present, the reasoning gap keeps its open
+  candidates, and the projection idea (read/list/search behind one
+  model-facing tool) is MOOT rather than pending: if removing an unused
+  tool moves nothing, tool count is not the lever. It is not re-run with a
+  looser bar.
 - **SUPPORTED but a guard fails** → both numbers reported, no default, no
   recommendation dressed as a finding.
 - **Any validity gate fails** → no verdict. Fix the instrument, re-run.
