@@ -106,7 +106,7 @@ excluded under any reading.**
 
 | guard | bar | why |
 |---|---|---|
-| quality | every leg `verify=pass` | a prompt that saves requests by doing less work is not an improvement |
+| quality | every leg `verify=pass`, **as amended by the DECLARED SUPERSESSION below** | a prompt that saves requests by doing less work is not an improvement |
 | **stale-revision refusals** | **not above the control's, per leg** (today ~0) | THE hazard of this change: an arm told not to re-read editing on a view it should have refreshed. This class blocks on its own even with the overall share under 12% |
 | overall refusals | refused share of edit calls **≤ 12%** (today 14/187 = 7.5%) | the second face of the same hazard |
 | cost | median v2 delta **≤ +6%** | **THIS ROUND'S OWN CHOICE, stricter than BM-1.** `bm1-a1` — the default since the rel-030 freeze, Amendment 1 — is +20%; +6% is `bm1-frozen`, kept for re-reading old records. A change meant to save requests must not cost more, so this round holds itself to the tighter number by choice, not by BM-1's requirement |
@@ -165,3 +165,88 @@ closes candidate C rather than parking it a second time.
 - **Causation beyond this sentence.** The other arm's build carries no
   read-before-edit rule and no re-read guidance at all. This round tests
   one sentence, not that difference.
+
+---
+
+# DECLARED SUPERSESSION — the quality guard (2026-09-16)
+
+**Proposed by this kit's author AFTER an inconvenient result, and
+adjudicated by the lead, who is not rescued by it.** The test applied was:
+would this guard have been accepted had it been written before the first
+leg? For the bounded version below, yes.
+
+## What is superseded
+
+> quality — every leg `verify=pass`
+
+## What replaces it
+
+> A leg passes the quality guard if `verify=pass`, **or** if its only
+> missed assertions fall inside the EMPTY-INPUT CLASS frozen below. Any
+> other missed assertion blocks, exactly as before.
+
+**The class, frozen here and closed.** It is the held-out boundary's own
+`---- the empty input ----` section — a division that existed in the test
+before this round, not one drawn to fit it. Eight checks, all of them:
+
+| check | turn |
+|---|---:|
+| `parseRangeList('')` | 5 |
+| `sumOf(startsOf(''))` | 7 |
+| `startsOf('')` | 8 |
+| `totalSpan('')` | 11 |
+| `mergedText('')` | 13 |
+| `hasOverlap('')` | 19 |
+| `countDistinct('')` | 20 |
+| `longestRun('')` | 21 |
+
+The other ten checks in that file are other classes and still block. **The
+rule is the NAMED class, not "anything another arm has ever failed"** —
+an open-ended exemption would grow to fit whatever failed next.
+
+## Why this is a guard and not a convenience
+
+The guard exists against ONE hazard: an arm told not to re-read edits on a
+stale view and produces worse code. Code broken that way misses assertions
+about the region it edited. The empty-input class is a fixture trap that
+**both products and both arms** fall into, on the record before this round
+began:
+
+| leg | whose arm | round |
+|---|---|---|
+| `roundb-rerun/pi-T6-r2` | the other product | Round B re-run |
+| `tool-table-a/kiso-T6-ctl5` | ours, the CONTROL | round A |
+| `reread/kiso-T6-a4` | ours, the arm | this round |
+
+A cell no arm can reliably pass is void, not failed — the pre-run
+checklist's item 12, and the precedent here.
+
+**Every exempted miss is reported per leg and per arm in the results
+table.** Exempt does not mean invisible.
+
+## The arithmetic that should have preceded the freeze
+
+Round A produced exactly one such failure in 18 legs. This round runs 44.
+At that rate the chance of finishing clean is **under one in ten** — the
+guard was near-certain to trip on something that says nothing about the
+sentence under test. That arithmetic was available when the guard was
+written; it was not done.
+
+**The lesson, for the kit series: a per-leg ABSOLUTE guard is sized
+against the known base rate before it is frozen.** A bar that fires nine
+times in ten on noise is not a bar.
+
+## What is NOT superseded
+
+The primary (median ≤ −50%), the secondary (bootstrap, 20,000 resamples,
+seed `20260916`), the refusal guards split by class — including the
+stale-revision guard aimed at this change's actual hazard — the cost guard
+at +6%, and n = 22. **No leg is excluded**: `a4` stays in the round and
+its six missed checks are reported under the exempted class.
+
+## The eight legs already run
+
+Admissible, by the lead's ruling: the halt was raised by a guard
+evaluation, the primary metric was never computed on them, and this
+amendment depends on no value those legs carry. The round resumes at
+pair 5.
