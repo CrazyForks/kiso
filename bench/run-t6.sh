@@ -261,6 +261,15 @@ CFG
       mkdir -p "$WORK/capture"
       set -- "$@" "KISO_DUMP_REQUESTS=$WORK/capture"
     fi
+    # ROUND A: the default table without `delegate`, through the product's
+    # OWN code path — the subagent extension's depth guard returns no tools
+    # at depth >= 1. One environment variable, the same binary, no shadowing
+    # extension and no config file, so the two arms differ in exactly one
+    # thing and neither is a build the product does not ship.
+    #
+    # The arm APPROXIMATES A DEFERRED DESIGN, not a removal: the owner has
+    # ruled the capability must never require manual configuration.
+    if [ "${BENCH_NO_DELEGATE:-0}" = 1 ]; then set -- "$@" "KISO_SUBAGENT_DEPTH=1"; fi
     KISO_ENV_PAIRS="$*"
     for P in 1 2 3 4; do
       over_budget && break
@@ -461,6 +470,20 @@ if [ "$TOOL" = "kiso" ]; then
   process.stdout.write(edits===0?"none":(saw>0?"on":"off"));
   ' "$WORK" 2>/dev/null || echo "unknown")
   printf '%s\n' "$EDIT_ECHO_OBSERVED" > "$WORK/edit_echo"
+  # WHICH TABLE THE LEG ACTUALLY CARRIED, read from its own captured bodies
+  # rather than from what the runner was asked to do. A leg labelled A whose
+  # table still carries `delegate` is not an A leg, and the label would make
+  # both arms agree because they were the same arm.
+  if [ "${BENCH_CAPTURE:-0}" = 1 ]; then
+    node --input-type=module -e "
+      import { readCapture } from '$B/reconcile-capture.mjs';
+      import { writeFileSync } from 'node:fs';
+      const recs = readCapture('$WORK/capture').filter((r) => r.body?.tools);
+      if (recs.length === 0) { writeFileSync('$WORK/tool_table', 'unknown\n'); process.exit(0); }
+      const names = (recs[0].body.tools ?? []).map((t) => t.function?.name ?? t.name).sort();
+      writeFileSync('$WORK/tool_table', names.join(',') + '\n');
+    " 2>/dev/null || printf 'unknown\n' > "$WORK/tool_table"
+  fi
   printf '%s\n' "${BENCH_EDIT_ECHO:-0}" > "$WORK/edit_echo_requested"
 fi
 
