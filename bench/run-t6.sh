@@ -483,6 +483,27 @@ if [ "$TOOL" = "kiso" ]; then
       const names = (recs[0].body.tools ?? []).map((t) => t.function?.name ?? t.name).sort();
       writeFileSync('$WORK/tool_table', names.join(',') + '\n');
     " 2>/dev/null || printf 'unknown\n' > "$WORK/tool_table"
+    # WHICH PROMPT THE LEG ACTUALLY CARRIED, on the same principle. The arm
+    # of the re-read round is one bullet of the system prompt, and the
+    # runner selects it by KISO_BIN — a build path, which is exactly the
+    # kind of label that can be wrong while every number still looks fine.
+    # This reads the system message off the leg's own first captured body.
+    node --input-type=module -e "
+      import { readCapture } from '$B/reconcile-capture.mjs';
+      import { writeFileSync } from 'node:fs';
+      const recs = readCapture('$WORK/capture').filter((r) => Array.isArray(r.body?.messages));
+      const sysOf = (r) => {
+        const m = r.body.messages.find((x) => x.role === 'system');
+        if (!m) return '';
+        return typeof m.content === 'string' ? m.content : (m.content ?? []).map((c) => c.text ?? '').join('');
+      };
+      const sys = recs.map(sysOf).find((t) => t.length > 0) ?? '';
+      const extended = /or one you changed\s*\n?\s*yourself through a confirmed edit/i.test(sys);
+      const published = /do not re-?read a file you already read unchanged/i.test(sys);
+      // 'unknown' when neither clause is present: a prompt that carries
+      // neither is not one of this round's two arms, whatever was launched.
+      writeFileSync('$WORK/prompt_arm', (extended ? 'exemption-extended' : published ? 'published' : 'unknown') + '\n');
+    " 2>/dev/null || printf 'unknown\n' > "$WORK/prompt_arm"
   fi
   printf '%s\n' "${BENCH_EDIT_ECHO:-0}" > "$WORK/edit_echo_requested"
 fi
