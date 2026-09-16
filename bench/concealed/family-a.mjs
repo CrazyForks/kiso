@@ -93,7 +93,12 @@ export function generateA(g, { turns = 8 } = {}) {
 	return {
 		family: "A",
 		favours: "ours, by history — this is the shape of every task this programme has run",
-		turns: contracts.map((c, i) => `${i + 1}. ${c.sentence}`),
+		// NO BAKED-IN NUMBERING. The runner feeds turns ONE AT A TIME, so a
+		// "3. " prefix arrives as noise the arm has to parse, belongs to no
+		// contract, and would make these instances present differently from
+		// the calibration tasks they are meant to sit beside. Numbering is
+		// the runner's business if it wants any.
+		turns: contracts.map((c) => c.sentence),
 		contracts,
 	};
 }
