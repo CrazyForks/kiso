@@ -87,15 +87,15 @@ const SHAPES = [
 	},
 ];
 
-export function generateE(g) {
-	const shape = g.pick(SHAPES);
+export function generateE(g, { shape } = {}) {
+	const chosen = shape === undefined ? g.pick(SHAPES) : SHAPES[shape % SHAPES.length];
 	const tok = token(g);
-	const built = shape.build(g, tok);
+	const built = chosen.build(g, tok);
 	return {
 		family: "E",
 		favours: "theirs, by design — fewer and larger steps is what this rewards",
-		shape: shape.id,
-		shapeFavours: shape.favours,
+		shape: chosen.id,
+		shapeFavours: chosen.favours,
 		turns: [built.ask],
 		files: built.files,
 		expect: built.expect,
@@ -120,3 +120,6 @@ export function verifierE(inst) {
 		reported: ["requests", "toolCalls", "askedAClarifyingQuestion"],
 	};
 }
+
+/** How many shapes this family has — the builder's quota needs it. */
+export const SHAPE_COUNT = SHAPES.length;

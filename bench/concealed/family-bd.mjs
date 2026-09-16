@@ -62,8 +62,8 @@ const DEFECTS = [
 	},
 ];
 
-export function generateBD(g) {
-	const d = g.pick(DEFECTS);
+export function generateBD(g, { shape } = {}) {
+	const d = shape === undefined ? g.pick(DEFECTS) : DEFECTS[shape % DEFECTS.length];
 	// EACH DEFECT CARRIES ITS OWN NAMES. Drawing from one pool produced
 	// `ordered([-1, 0, 2])` for a filter and `clampTo(...)` for a pair
 	// swap — the same defect I had already fixed in family A and then
@@ -116,3 +116,6 @@ export function verifierBD(inst) {
 	lines.push('console.log("ok");');
 	return lines.join("\n");
 }
+
+/** How many shapes this family has — the builder's quota needs it. */
+export const SHAPE_COUNT = DEFECTS.length;

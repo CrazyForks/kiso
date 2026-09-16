@@ -68,8 +68,8 @@ const DECOYS = [
 	},
 ];
 
-export function generateC(g) {
-	const t = g.pick(TASKS);
+export function generateC(g, { shape } = {}) {
+	const t = shape === undefined ? g.pick(TASKS) : TASKS[shape % TASKS.length];
 	const fn = g.pick(t.names);
 	const decoy = g.pick(DECOYS);
 	return {
@@ -102,3 +102,6 @@ export function verifierC(inst) {
 export function scopeOf(inst) {
 	return { named: [inst.namedFile], decoy: inst.decoy.file, rule: "measured, never gated" };
 }
+
+/** How many shapes this family has — the builder's quota needs it. */
+export const SHAPE_COUNT = TASKS.length;
