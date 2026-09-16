@@ -208,7 +208,7 @@ export interface RunUsage {
 
 /**
  * B area/v2a: the one-line status bar after a terminal, e.g.
- *   [turn 3 · in 12.4k out 1.8k · cache 9.2k · ctx ~14%]
+ *   [turn 3 · fresh 12.4k out 1.8k · cache 9.2k · ctx ~14%]
  * Denoising: unknown fields are OMITTED ENTIRELY (show what there is); a fully unknown
  * usage → null (the caller prints nothing); faux mode → [turn N · faux].
  * All data comes from usage events; ctx is the approximate estimate
@@ -219,7 +219,7 @@ export function renderStatusLine(turn: number, usage: RunUsage, ctxRatio: number
 	if (!usage.known) return null; // everything unknown — nothing worth showing
 	const parts: string[] = [];
 	if (usage.in !== null || usage.out !== null) {
-		const seg = `${usage.in !== null ? `in ${kUnit(usage.in)}` : ""}${usage.in !== null && usage.out !== null ? " " : ""}${usage.out !== null ? `out ${kUnit(usage.out)}` : ""}`;
+		const seg = `${usage.in !== null ? `fresh ${kUnit(usage.in)}` : ""}${usage.in !== null && usage.out !== null ? " " : ""}${usage.out !== null ? `out ${kUnit(usage.out)}` : ""}`;
 		parts.push(seg);
 	}
 	if (usage.cache !== null) parts.push(`cache ${kUnit(usage.cache)}`);
@@ -259,6 +259,16 @@ export interface RecapStats {
 	readonly edits?: number;
 	/** The turn's work BY TOOL, in first-call order (R3d). */
 	readonly byTool?: readonly [string, number][];
+	/** W22 (owner, 2026-09-14) — the TURN's usage: the SUM over the turn's
+	 *  model calls, never the last call's alone (the scope this field
+	 *  carried until W22, which made a nine-call turn report its ninth
+	 *  call and read as the turn's). `in` is the canonical FRESH count (E2)
+	 *  and renders as `fresh`, so the number says what it is: the input the
+	 *  turn bought at full price. The rest of its prompt was cache — which
+	 *  is why the field beside it is a ratio, not a raw sum: a sum over
+	 *  calls counts the same prefix once per call. An unmeasured call
+	 *  (`known: false`) makes the whole figure unknown, and the row then
+	 *  says nothing rather than a lower bound dressed as a total. */
 	readonly usage: RunUsage;
 	/** R-C item 4: the per-turn cache miss (min(prevIn, in) − cacheRead),
 	 *  passed only when above the noise floor — the re-sent-uncached
@@ -325,7 +335,7 @@ export function renderRecap(s: RecapStats): string {
 				: [];
 	const parts = [`took ${s.seconds}s`, ...work];
 	if (s.usage.known) {
-		const seg = `${s.usage.in !== null ? `in ${kUnit(s.usage.in)}` : ""}${s.usage.in !== null && s.usage.out !== null ? " " : ""}${s.usage.out !== null ? `out ${kUnit(s.usage.out)}` : ""}`;
+		const seg = `${s.usage.in !== null ? `fresh ${kUnit(s.usage.in)}` : ""}${s.usage.in !== null && s.usage.out !== null ? " " : ""}${s.usage.out !== null ? `out ${kUnit(s.usage.out)}` : ""}`;
 		if (seg !== "") parts.push(seg);
 		if (s.usage.cache !== null && s.usage.in !== null && (s.usage.in > 0 || s.usage.cache > 0)) {
 			// E2 (1.3.0, T5): the cache % divides by the TOTAL (in + cache) —

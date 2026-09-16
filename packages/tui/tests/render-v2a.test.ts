@@ -277,9 +277,9 @@ describe("v3 §02: the recap line (all fields derived locally — zero tokens)",
 		...u,
 	});
 
-	it("the full form: seconds · tools (edits) · in/out · cache % · ctx left %", () => {
+	it("the full form: seconds · tools (edits) · fresh/out · cache % · ctx left %", () => {
 		expect(renderRecap({ seconds: 47, tools: 3, edits: 1, usage: usage(), ctxLeftPct: 96 })).toBe(
-			"\u2726 took 47s · 3 tools (1 edit) · in 8.2k out 410 · cache 49% · ctx left ~96%\n", // 7954/(8200+7954)
+			"\u2726 took 47s · 3 tools (1 edit) · fresh 8.2k out 410 · cache 49% · ctx left ~96%\n", // 7954/(8200+7954)
 		);
 	});
 
@@ -302,10 +302,10 @@ describe("v3 §02: the recap line (all fields derived locally — zero tokens)",
 		// never exceed 100% (the old cache/in denominator rendered 923%).
 		// in 0 with cache > 0 is honest: everything came from cache → 100%.
 		expect(renderRecap({ seconds: 1, tools: 1, edits: 0, usage: usage({ in: 0 }), ctxLeftPct: null })).toBe(
-			"\u2726 took 1s · 1 tool · in 0 out 410 · cache 100%\n",
+			"\u2726 took 1s · 1 tool · fresh 0 out 410 · cache 100%\n",
 		);
 		expect(renderRecap({ seconds: 1, tools: 1, edits: 0, usage: usage({ cache: null }), ctxLeftPct: null })).toBe(
-			"\u2726 took 1s · 1 tool · in 8.2k out 410\n",
+			"\u2726 took 1s · 1 tool · fresh 8.2k out 410\n",
 		);
 	});
 
@@ -314,7 +314,7 @@ describe("v3 §02: the recap line (all fields derived locally — zero tokens)",
 		// the cached prefix. OLD formula: 1024/111 = 922.5% → "cache 923%".
 		// NEW: 1024/1135 = 90.2% → "cache 90%".
 		expect(renderRecap({ seconds: 1, tools: 1, edits: 0, usage: usage({ in: 111, cache: 1024 }), ctxLeftPct: null })).toBe(
-			"\u2726 took 1s · 1 tool · in 111 out 410 · cache 90%\n",
+			"\u2726 took 1s · 1 tool · fresh 111 out 410 · cache 90%\n",
 		);
 	});
 
@@ -338,19 +338,19 @@ describe("v3 §02: the recap line (all fields derived locally — zero tokens)",
 
 	it("k-units: 12345 → 12.3k, 800 → 800", () => {
 		expect(renderRecap({ seconds: 1, tools: 1, edits: 0, usage: usage({ in: 12345, out: 800 }), ctxLeftPct: null })).toBe(
-			"\u2726 took 1s · 1 tool · in 12.3k out 800 · cache 39%\n", // 7954/(12345+7954)
+			"\u2726 took 1s · 1 tool · fresh 12.3k out 800 · cache 39%\n", // 7954/(12345+7954)
 		);
 	});
 
 	it("R-C item 4: an above-floor cache miss appends the miss segment", () => {
 		expect(renderRecap({ seconds: 3, tools: 2, edits: 0, usage: usage({ in: 123456, cache: 82000 }), missed: 41000, ctxLeftPct: null })).toBe(
-			"\u2726 took 3s · 2 tools · in 123.5k out 410 · cache 40% · miss 41k\n",
+			"\u2726 took 3s · 2 tools · fresh 123.5k out 410 · cache 40% · miss 41k\n",
 		);
 	});
 
 	it("R-C item 4: a zero miss renders nothing — the historical bytes hold", () => {
 		expect(renderRecap({ seconds: 3, tools: 2, edits: 0, usage: usage(), missed: 0, ctxLeftPct: null })).toBe(
-			"\u2726 took 3s · 2 tools · in 8.2k out 410 · cache 49%\n",
+			"\u2726 took 3s · 2 tools · fresh 8.2k out 410 · cache 49%\n",
 		);
 	});
 });
