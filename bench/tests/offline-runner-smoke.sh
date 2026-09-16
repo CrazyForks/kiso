@@ -398,11 +398,19 @@ done
 
 # ---- the frozen criteria and the script that applies them must agree ---
 if [ -f "$B/kits/edit-echo-ab.md" ] && [ -f "$B/edit-echo-verdict.mjs" ]; then
-	agree=$(node "$B/tests/criteria-agree.mjs" "$B/kits/edit-echo-ab.md" "$B/edit-echo-verdict.mjs" 2>&1 || echo "the comparison itself failed")
+	agree=$(node "$B/tests/criteria-agree.mjs" "$B/kits/edit-echo-ab.md" "$B/edit-echo-verdict.mjs" edit-echo 2>&1 || echo "the comparison itself failed")
 	if [ "$agree" = agree ]; then
-		note ok "the verdict script's margins match the frozen kit"
+		note ok "the edit-echo verdict's margins match its frozen kit"
 	else
-		note RED "the verdict script and the frozen kit disagree: $agree"
+		note RED "the edit-echo verdict and its frozen kit disagree: $agree"
+	fi
+fi
+if [ -f "$B/kits/tool-table-a.md" ] && [ -f "$B/tool-table-verdict.mjs" ]; then
+	agree=$(node "$B/tests/criteria-agree.mjs" "$B/kits/tool-table-a.md" "$B/tool-table-verdict.mjs" tool-table 2>&1 || echo "the comparison itself failed")
+	if [ "$agree" = agree ]; then
+		note ok "round A's verdict margins match its frozen kit"
+	else
+		note RED "round A's verdict and its frozen kit disagree: $agree"
 	fi
 fi
 
