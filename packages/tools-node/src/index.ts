@@ -82,6 +82,12 @@ const DEFAULT_SHELL_TIMEOUT_MS = 30_000;
 // red line: every truncation names its continuation — the model always
 // has a path to the full content.
 const DEFAULT_READ_LINES = 200;
+/** The default window's SECOND bound, and the one lines cannot express: 200
+ *  lines of minified source is megabytes, 200 lines of prose is a few KB.
+ *  Whichever binds first wins, and the cut is always at a line boundary. An
+ *  explicit `limit` is the caller saying what they want and is not capped
+ *  here — the 100k output cap still applies to it. */
+const DEFAULT_READ_CHARS = 16_000;
 /** R3: how many files a search may read before it hands the event loop
  *  back. Small enough that the 200ms motion cadence never misses a beat,
  *  large enough that the yield costs nothing on a small tree. */
@@ -376,15 +382,19 @@ const INODE_SCAN_MS = 2_000;
 /** The "… N more lines" note — the actionable continuation: the exact
  *  line the next read must start at, so the model can always reach the
  *  full content in ranges (the red line). */
-function moreLinesNote(nextOffset: number, remaining: number): string {
-	return `\n… ${remaining} more ${remaining === 1 ? "line" : "lines"} (call again with offset=${nextOffset})`;
+function moreLinesNote(nextOffset: number, remaining: number, limit: number): string {
+	// BOTH parameters. Naming only `offset` was an instruction to read the
+	// rest of the file: with `limit` absent the read runs to EOF, so a model
+	// following its own continuation note defeated the window from the second
+	// read onward. Measured before the fix: 7.3% of real reads took that path.
+	return `\n… ${remaining} more ${remaining === 1 ? "line" : "lines"} (call again with offset=${nextOffset} limit=${limit})`;
 }
 
 export function readFileTool(opts: WorkspaceToolsOptions): Tool<{ path: string; offset?: number; limit?: number }> {
 	return defineTool<{ path: string; offset?: number; limit?: number }>({
 		name: "read_file",
 		description:
-			"Read a workspace file or a range (offset/limit; default: the first 200 lines, with a continuation note). The final [rev:X] line identifies the version read.",
+			"Read a workspace file or a range. Without `limit`: 200 lines or 16000 chars from `offset` (default 1), whichever binds, then a note naming the next offset and limit. The final [rev:X] line identifies the version read.",
 		parameters: {
 			type: "object",
 			properties: {
@@ -471,18 +481,40 @@ export function readFileTool(opts: WorkspaceToolsOptions): Tool<{ path: string; 
 						errorKind: "invalid_input",
 					};
 				}
-				const end = limit === undefined ? total : Math.min(start + limit - 1, total);
-				// DEFAULT: the head 200 lines; a larger file ends with the
-				// honest continuation note (small files ≤ 200 lines are
-				// byte-identical to the pre-token-round behavior).
+				// THE DEFAULT WINDOW applies whenever `limit` is ABSENT, from
+				// `offset ?? 1`. It used to apply only when BOTH were absent,
+				// so an offset alone read to the end of the file — and since
+				// the note named only `offset`, a model following its own
+				// continuation note left the window behind after one read.
 				let text: string;
 				let note = "";
-				if (offset === undefined && limit === undefined) {
-					text = total <= DEFAULT_READ_LINES ? content : parts.slice(0, DEFAULT_READ_LINES).join("\n");
-					if (total > DEFAULT_READ_LINES) note = moreLinesNote(DEFAULT_READ_LINES + 1, total - DEFAULT_READ_LINES);
+				if (limit === undefined) {
+					const lastLine = Math.min(start + DEFAULT_READ_LINES - 1, total);
+					const slice = parts.slice(start - 1, lastLine);
+					let body = slice.join("\n");
+					let shown = slice.length;
+					if (body.length > DEFAULT_READ_CHARS) {
+						const cut = body.lastIndexOf("\n", DEFAULT_READ_CHARS);
+						if (cut > 0) {
+							body = body.slice(0, cut);
+							shown = body.split("\n").length;
+						} else {
+							// No newline inside the budget: the first line alone
+							// is over it. One WHOLE line is the smallest honest
+							// answer — a cut mid-line is a lie about the file.
+							body = slice[0] ?? "";
+							shown = 1;
+						}
+					}
+					// The whole file from line 1 is returned VERBATIM, trailing
+					// newline included: `parts.join` would drop it.
+					text = start === 1 && shown === total ? content : body;
+					const next = start + shown;
+					if (next <= total) note = moreLinesNote(next, total - next + 1, DEFAULT_READ_LINES);
 				} else {
+					const end = Math.min(start + limit - 1, total);
 					text = parts.slice(start - 1, end).join("\n");
-					if (end < total) note = moreLinesNote(end + 1, total - end);
+					if (end < total) note = moreLinesNote(end + 1, total - end, limit);
 				}
 				// The output cap's cut must STAY actionable: cut at a line
 				// boundary and name the exact next offset (the generic cap()

@@ -45,6 +45,55 @@ describe("read_file scoped reads", () => {
 		expect(result.content).not.toContain("more lines");
 	});
 
+	// The read-window correctness fix. The default window used to apply only
+	// when BOTH offset and limit were absent, so `offset` alone read to the
+	// END OF FILE — and the continuation note named only `offset`, so a model
+	// following its own note literally defeated the window from the second
+	// read onward. Measured before the fix: 7.3% of real reads and 11.5% of
+	// bench reads took that path, returning a median of 207 lines and a
+	// maximum of 759.
+	it("offset WITHOUT limit takes the default window, not the rest of the file", async () => {
+		const root = tempRoot();
+		writeLines(root, "big.txt", 1000);
+		const result = await readFileTool({ workspaceRoot: root }).execute({ path: "big.txt", offset: 101 }, CTX);
+		expect(result).toMatchObject({ isError: false });
+		const body = stripRev(result.content).split("\n… ")[0]!;
+		expect(body.split("\n").filter((l) => l !== "")).toHaveLength(200);
+		expect(body.startsWith("line 101\n")).toBe(true);
+		expect(body).toContain("line 300");
+		expect(body).not.toContain("line 301");
+	});
+
+	it("the continuation note names BOTH parameters, and its offset is the true next line", async () => {
+		const root = tempRoot();
+		writeLines(root, "big.txt", 1000);
+		const result = await readFileTool({ workspaceRoot: root }).execute({ path: "big.txt", offset: 101 }, CTX);
+		expect(result.content).toContain("… 700 more lines (call again with offset=301 limit=200)");
+		// the note's own offset must be the next UNREAD line, not an estimate
+		const next = await readFileTool({ workspaceRoot: root }).execute({ path: "big.txt", offset: 301 }, CTX);
+		expect(stripRev(next.content).startsWith("line 301\n")).toBe(true);
+	});
+
+	it("the default window is also cut at 16k chars, and never mid-line", async () => {
+		const root = tempRoot();
+		// 200 lines of 200 chars is 40k — the char budget binds before the line budget
+		const wide = Array.from({ length: 400 }, (_, i) => `${i + 1}:${"x".repeat(198)}`).join("\n") + "\n";
+		writeFileSync(join(root, "wide.txt"), wide, "utf8");
+		const result = await readFileTool({ workspaceRoot: root }).execute({ path: "wide.txt" }, CTX);
+		const body = stripRev(result.content).split("\n… ")[0]!;
+		expect(body.length).toBeLessThanOrEqual(16_000);
+		// every delivered line is whole: each starts with its own number and is full width
+		for (const line of body.split("\n").filter((l) => l !== "")) {
+			// whole lines only: the full run of x's must be present, and the
+			// width varies with the line number's digits, so the PATTERN is
+			// the assertion, not a fixed length.
+			expect(line).toMatch(/^\d+:x{198}$/);
+		}
+		const shown = body.split("\n").filter((l) => l !== "").length;
+		expect(shown).toBeLessThan(200);
+		expect(result.content).toContain(`(call again with offset=${shown + 1} limit=200)`);
+	});
+
 	it("a large file defaults to the head 200 lines + the continuation note", async () => {
 		const root = tempRoot();
 		writeLines(root, "big.txt", 250);
@@ -53,14 +102,14 @@ describe("read_file scoped reads", () => {
 		expect(result.content).toContain("line 1");
 		expect(result.content).toContain("line 200");
 		expect(result.content).not.toContain("line 201");
-		expect(result.content).toContain("… 50 more lines (call again with offset=201)");
+		expect(result.content).toContain("… 50 more lines (call again with offset=201 limit=200)");
 	});
 
 	it("the note is singular for exactly one remaining line", async () => {
 		const root = tempRoot();
 		writeLines(root, "edge.txt", 201);
 		const result = await readFileTool({ workspaceRoot: root }).execute({ path: "edge.txt" }, CTX);
-		expect(result.content).toContain("… 1 more line (call again with offset=201)");
+		expect(result.content).toContain("… 1 more line (call again with offset=201 limit=200)");
 	});
 
 	it("offset/limit reads an exact range with its own continuation note", async () => {
@@ -71,7 +120,7 @@ describe("read_file scoped reads", () => {
 		expect(result.content).toContain("line 201");
 		expect(result.content).toContain("line 220");
 		expect(result.content).not.toContain("line 221");
-		expect(result.content).toContain("… 30 more lines (call again with offset=221)");
+		expect(result.content).toContain("… 30 more lines (call again with offset=221 limit=20)");
 	});
 
 	it("a range to EOF has no note", async () => {
@@ -86,11 +135,16 @@ describe("read_file scoped reads", () => {
 	it("offset alone and limit alone work (tail and head forms)", async () => {
 		const root = tempRoot();
 		writeLines(root, "big.txt", 250);
+		// `offset` alone is a WINDOW from that line, not a read to EOF: here
+		// only 50 lines remain, so the window ends at the file and says so by
+		// carrying no note.
 		const tail = await readFileTool({ workspaceRoot: root }).execute({ path: "big.txt", offset: 201 }, CTX);
 		expect(tail.content).toContain("line 201");
+		expect(tail.content).toContain("line 250");
+		expect(tail.content).not.toContain("more lines");
 		const head = await readFileTool({ workspaceRoot: root }).execute({ path: "big.txt", limit: 100 }, CTX);
 		expect(head.content).toContain("line 100");
-		expect(head.content).toContain("… 150 more lines (call again with offset=101)");
+		expect(head.content).toContain("… 150 more lines (call again with offset=101 limit=100)");
 	});
 
 	it("two segment reads reconstruct the full file (the model's path to the whole)", async () => {
@@ -135,19 +189,22 @@ describe("read_file scoped reads", () => {
 
 	it("the output-char cap cuts at a line boundary and names the next offset", async () => {
 		const root = tempRoot();
-		// 210 lines × 600 chars — the head-200 default exceeds the 100000 cap.
+		// 210 lines x 600 chars. The DEFAULT window would stop at 16000 chars
+		// long before the 100000 output cap, so the cap is now reached only
+		// through an explicit `limit` — which is the contract: an explicit
+		// limit is honoured as given, and the output cap is what bounds it.
 		writeFileSync(
 			join(root, "fat.txt"),
 			Array.from({ length: 210 }, (_, i) => `x`.repeat(600)).join("\n") + "\n",
 			"utf8",
 		);
-		const result = await readFileTool({ workspaceRoot: root }).execute({ path: "fat.txt" }, CTX);
+		const result = await readFileTool({ workspaceRoot: root }).execute({ path: "fat.txt", limit: 200 }, CTX);
 		expect(result).toMatchObject({ isError: false });
 		// 166 lines × 601 chars fit under the cap (the 167th starts past it):
 		// the cut lands on a line boundary and names the exact continuation.
 		expect(result.content).toContain("… [output capped at 100000 chars — continue with offset=167]");
 		// The file-level note follows — both continuations are in the result.
-		expect(result.content).toContain("… 10 more lines (call again with offset=201)");
+		expect(result.content).toContain("… 10 more lines (call again with offset=201 limit=200)");
 	});
 
 	it("a single line beyond the char cap is called out with the shell path (no loop)", async () => {
