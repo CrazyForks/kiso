@@ -614,8 +614,9 @@ Tool discipline:
 - Batch independent tool calls into one reply — they run in parallel.
 - search_text and list_dir are cheap — locate first, then read ranges
   with read_file offset/limit; never read a whole large file in one call.
-- Do not re-read a file you already read unchanged — rely on the earlier
-  result.
+- Do not re-read a file you already read unchanged, or one you changed
+  yourself through a confirmed edit — rely on the earlier result and
+  on the change you just made.
 - When a tool fails, read the error and adjust; do not repeat the same
   call blindly.
 
