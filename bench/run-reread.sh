@@ -16,7 +16,12 @@
 # Order alternates within each pair so that neither arm always runs first:
 # provider-side drift inside a pair would otherwise load onto one arm.
 set -eu
-PAIRS=${1:?usage: run-reread.sh <pairs>}
+PAIRS=${1:?usage: run-reread.sh <pairs> — the LAST pair index to run}
+# Resume point. A round halted mid-flight leaves a pair with one leg; that
+# pair is discarded rather than completed across the halt (interleaving
+# cancels same-period drift, and a pair whose halves straddle an hour-long
+# stop does not), so the resume starts at the discarded pair's index.
+FROM=${KISO_PAIR_FROM:-1}
 B="$(cd "$(dirname "$0")" && pwd)"
 : "${KISO_BIN_CTL:?set KISO_BIN_CTL to the published-prompt build}"
 : "${KISO_BIN_ARM:?set KISO_BIN_ARM to the changed-prompt build}"
@@ -44,7 +49,7 @@ run_leg() {
   fi
 }
 
-I=1
+I=$FROM
 while [ "$I" -le "$PAIRS" ]; do
   if [ $((I % 2)) -eq 1 ]; then FIRST=ctl; SECOND=arm; else FIRST=arm; SECOND=ctl; fi
   run_leg "$FIRST"  "$(leg_id "$FIRST"  "$I")"
@@ -53,5 +58,5 @@ while [ "$I" -le "$PAIRS" ]; do
 done
 
 echo
-echo "pairs requested: $PAIRS   void legs: $VOID"
+echo "pairs $FROM..$PAIRS   void legs: $VOID"
 [ "$VOID" -eq 0 ] || echo "A VOID LEG IS NOT A DATA POINT. The verdict script refuses the round rather than scoring around one."
