@@ -25,8 +25,38 @@ bare_home() {
 
 # assert_bare <arm> <home> — fail LOUDLY before a leg rather than produce a
 # result nobody can attribute.
+# A DECLARED injection is still reported, never waved through. The capture
+# round has to place ONE file in the other arm's home — a model store whose
+# baseUrl points at the recorder — and the honest way to do that is to tell
+# this gate about it, not to skip the gate. Every declared path is printed
+# into the leg's log, so the record says exactly what was placed; anything
+# NOT declared still fails the leg. Pass declarations as $3.. (paths
+# relative to the home).
 assert_bare() {
-	_arm=$1; _home=$2
+	_arm=$1; _home=$2; shift 2 || true
+	_declared=" $* "
+	for _d in $_declared; do
+		[ -n "$_d" ] && echo "DECLARED INJECTION: $_home/$_d (not bare, on purpose)" >&2
+	done
+	# ENUMERATE, do not wave through. The first version returned as soon as
+	# a declaration mentioned the directory, so a home carrying the declared
+	# file AND anything else beside it passed — the comment above claimed
+	# otherwise, which is the gap worth catching in one's own work first.
+	# Every file under the arm's forbidden roots must be declared BY PATH.
+	if [ -n "$(printf %s "$_declared" | tr -d ' ')" ]; then
+		_undeclared=""
+		for _root in .pi .kiso .claude .claude.json; do
+			[ -e "$_home/$_root" ] || continue
+			for _f in $(cd "$_home" && find "$_root" -type f 2>/dev/null); do
+				case " $_declared " in *" $_f "*) : ;; *) _undeclared="$_undeclared $_f" ;; esac
+			done
+		done
+		if [ -n "$_undeclared" ]; then
+			echo "NOT BARE: undeclared file(s) in $_home:$_undeclared" >&2
+			return 1
+		fi
+		return 0
+	fi
 	case "$_arm" in
 		pi)     [ ! -e "$_home/.pi" ] || { echo "NOT BARE: $_home/.pi exists" >&2; return 1; } ;;
 		claude) [ ! -e "$_home/.claude.json" ] || { echo "NOT BARE: $_home/.claude.json exists" >&2; return 1; }
