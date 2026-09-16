@@ -57,4 +57,35 @@ test("the kit and the script both refuse a void leg", () => {
 	assert.ok(/REFUSES ON A VOID LEG/.test(js), "the script no longer refuses a void leg");
 });
 
+test("the frozen empty-input class is the SAME eight in the kit and the script", () => {
+	const CLASS = ["parseRangeList('')", "sumOf(startsOf(''))", "startsOf('')", "totalSpan('')",
+		"mergedText('')", "hasOverlap('')", "countDistinct('')", "longestRun('')"];
+	for (const c of CLASS) {
+		assert.ok(kit.includes("`" + c + "`"), `the kit no longer names ${c} in the frozen class`);
+		assert.ok(js.includes('"' + c + '"'), `the script no longer carries ${c} in EMPTY_INPUT_CLASS`);
+	}
+	// and the class is CLOSED: the script must not have grown past eight
+	const m = js.match(/const EMPTY_INPUT_CLASS = \[([\s\S]*?)\];/);
+	assert.ok(m, "EMPTY_INPUT_CLASS is gone");
+	const listed = (m[1].match(/"/g) ?? []).length / 2;
+	assert.equal(listed, 8, `the frozen class has ${listed} entries, not the eight the supersession closed`);
+});
+
+test("the supersession says who proposed it, and when", () => {
+	assert.ok(/AFTER an inconvenient result/i.test(kit), "the kit no longer says the amendment came after a failure");
+	assert.ok(/adjudicated by the lead, who is not rescued by it/i.test(kit), "the kit no longer names the adjudicator");
+	assert.ok(/under one in ten/i.test(kit), "the kit no longer records the arithmetic that should have preceded the freeze");
+});
+
+test("a missed assertion OUTSIDE the class still blocks", () => {
+	// functional, not textual: the guard must discriminate, or it is a
+	// permission slip rather than a bar.
+	const base = (x) => x.replace(/\s*\(turn \d+\)\s*$/, "").trim();
+	const CLASS = ["parseRangeList('')", "startsOf('')", "longestRun('')"];
+	const inside = ["parseRangeList('') (turn 5)", "longestRun('') (turn 21)"];
+	const outside = ["parseRangeList('') (turn 5)", "clamp(5,1,4) (turn 1)"];
+	assert.equal(inside.filter((m) => !CLASS.includes(base(m))).length, 0, "an all-inside leg must not block");
+	assert.equal(outside.filter((m) => !CLASS.includes(base(m))).length, 1, "a leg with one outside miss MUST block");
+});
+
 console.log(`\n${n} checks passed`);

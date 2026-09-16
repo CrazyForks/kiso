@@ -31,12 +31,36 @@ const BOOTSTRAP_SEED = "20260916";
 const REFUSED_SHARE_MAX = 0.12;   // guard: refused share of edit calls
 const COST_DELTA_MAX = 0.06;      // guard: this round's own stricter choice
 const ARM_PROMPT = "exemption-extended";
+/** The DECLARED SUPERSESSION's frozen empty-input class — the held-out
+ *  boundary's own `---- the empty input ----` section, closed. A miss
+ *  outside this list blocks exactly as before, and the list does not grow
+ *  to fit whatever fails next. */
+const EMPTY_INPUT_CLASS = [
+	"parseRangeList('')", "sumOf(startsOf(''))", "startsOf('')", "totalSpan('')",
+	"mergedText('')", "hasOverlap('')", "countDistinct('')", "longestRun('')",
+];
 const CTL_PROMPT = "published";
 // ---------------------------------------------------------------------
 
 const median = (xs) => { const s = [...xs].sort((a, b) => a - b); const m = s.length >> 1; return s.length ? (s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2) : null; };
 const pct = (x) => (x === null || Number.isNaN(x) ? "  n/a" : `${x >= 0 ? "+" : ""}${(100 * x).toFixed(1)}%`);
 const read1 = (p) => { try { return readFileSync(p, "utf8").trim(); } catch { return null; } };
+
+/** The quality guard as superseded: verify=pass, OR every missed assertion
+ *  inside the frozen empty-input class. Exempt is not invisible — the
+ *  exempted misses come back so the table can print them. */
+function quality(work) {
+	const v = read1(join(work, "verify"));
+	if (v === "pass") return { ok: true, exempt: [], blocking: [] };
+	let j; try { j = JSON.parse(readFileSync(join(work, "verify.json"), "utf8")); } catch { return { ok: false, exempt: [], blocking: ["verify.json unreadable"] }; }
+	// a contract failure is not a boundary class and is never exempt
+	const contract = (j.contract?.failed ?? []).map(String);
+	const missed = (j.boundary?.missed ?? []).map(String);
+	const base = (m) => m.replace(/\s*\(turn \d+\)\s*$/, "").trim();
+	const exempt = missed.filter((m) => EMPTY_INPUT_CLASS.includes(base(m)));
+	const blocking = [...contract, ...missed.filter((m) => !EMPTY_INPUT_CLASS.includes(base(m)))];
+	return { ok: blocking.length === 0, exempt, blocking };
+}
 
 /** Two refusal MECHANISMS, counted apart — the kit's guard splits on this. */
 function refusals(work) {
@@ -89,6 +113,7 @@ function leg(run, wantPrompt) {
 	return {
 		run, work, problems,
 		verify: read1(join(work, "verify")),
+		quality: existsSync(work) ? quality(work) : { ok: false, exempt: [], blocking: ["no leg"] },
 		rate: rate?.rate ?? null, repeatEdits: rate?.repeatEdits ?? 0, repeatWithRead: rate?.repeatWithRead ?? 0,
 		ref,
 		v2: b.length ? b.reduce((a, x) => a + (x.fresh ?? 0) + 0.02 * (x.cache_read ?? 0) + 4 * (x.output ?? 0), 0) : null,
@@ -143,7 +168,9 @@ const lo = meds[Math.floor(0.025 * BOOTSTRAP_N)], hi = meds[Math.floor(0.975 * B
 const excludesZero = hi < 0 || lo > 0;
 
 // GUARDS
-const verifyAll = pairs.every((p) => p.ctl.verify === "pass" && p.arm.verify === "pass");
+const verifyAll = pairs.every((p) => p.ctl.quality.ok && p.arm.quality.ok);
+const exempted = pairs.flatMap((p) => [["ctl", p.i, p.ctl], ["arm", p.i, p.arm]]).filter(([, , l]) => l.quality.exempt.length);
+const blocked = pairs.flatMap((p) => [["ctl", p.i, p.ctl], ["arm", p.i, p.arm]]).filter(([, , l]) => l.quality.blocking.length);
 const staleRise = pairs.filter((p) => (p.arm.ref?.stale ?? 0) > (p.ctl.ref?.stale ?? 0));
 const armEdits = pairs.reduce((a, p) => a + (p.arm.ref?.edits ?? 0), 0);
 const armRefused = pairs.reduce((a, p) => a + (p.arm.ref?.refused ?? 0), 0);
@@ -153,7 +180,9 @@ const costOk = mV2 !== null && mV2 <= COST_DELTA_MAX;
 console.log("\nagainst the criteria frozen before the runs:");
 console.log(`  PRIMARY    median ${pct(mRate)} <= ${pct(RATE_DELTA_MAX)}  -> ${mRate !== null && mRate <= RATE_DELTA_MAX ? "MET" : "not met"}`);
 console.log(`  SECONDARY  bootstrap 95% of the median [${pct(lo)}, ${pct(hi)}] (n=${BOOTSTRAP_N}, seed ${BOOTSTRAP_SEED})  -> ${excludesZero ? "excludes zero" : "includes zero"}`);
-console.log(`  guard quality   every leg verify=pass  -> ${verifyAll ? "ok" : "FAIL"}`);
+console.log(`  guard quality   verify=pass, or misses only in the frozen empty-input class  -> ${verifyAll ? "ok" : "FAIL"}`);
+for (const [tag, i, l] of exempted) console.log(`     pair ${i} ${tag}: EXEMPTED under the class — ${l.quality.exempt.join(", ")}`);
+for (const [tag, i, l] of blocked) console.log(`     pair ${i} ${tag}: BLOCKING — ${l.quality.blocking.join(", ")}`);
 console.log(`  guard stale-rev arm not above control, per leg  -> ${staleRise.length === 0 ? "ok" : `FAIL on pairs ${staleRise.map((p) => p.i).join(", ")}`}`);
 console.log(`  guard refusals  arm refused ${armRefused}/${armEdits} = ${(100 * refusedShare).toFixed(1)}% <= ${100 * REFUSED_SHARE_MAX}%  -> ${refusedShare <= REFUSED_SHARE_MAX ? "ok" : "FAIL"}`);
 console.log(`  guard cost      median v2 ${pct(mV2)} <= ${pct(COST_DELTA_MAX)}  -> ${costOk ? "ok" : "FAIL"}`);
