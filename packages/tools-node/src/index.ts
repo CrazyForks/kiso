@@ -760,7 +760,11 @@ export function searchTextTool(opts: WorkspaceToolsOptions): Tool<{ pattern: str
 			// the deadline and the abort both TERMINATE. A catastrophic regex used
 			// to block this loop — no budget check, timer or abort could run.
 			const outcome = await runSearchWorker(
-				{ token: 0, root: searchRootReal, single, pattern, flags, excluded, maxFileBytes, maxFiles, deadline, maxMatches: MAX_SEARCH_MATCHES, sniffBytes: BINARY_SNIFF_BYTES },
+				// The workspace root is realpath'd with the SAME helper the search
+				// root uses: `full` is walked from a realpath'd root, and making
+				// a path relative between a resolved and an unresolved base
+				// yields `../..` the moment a symlink sits between them.
+				{ token: 0, root: searchRootReal, workspaceRoot: realOrSelf(opts.workspaceRoot), single, pattern, flags, excluded, maxFileBytes, maxFiles, deadline, maxMatches: MAX_SEARCH_MATCHES, sniffBytes: BINARY_SNIFF_BYTES },
 				deadline,
 				ctx.signal,
 			);

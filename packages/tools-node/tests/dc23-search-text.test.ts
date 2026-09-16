@@ -23,7 +23,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { searchTextTool } from "../src/index.js";
+import { readFileTool, searchTextTool } from "../src/index.js";
 
 function workspace() {
 	const root = mkdtempSync(join(tmpdir(), "kiso-dc23-"));
@@ -81,3 +81,36 @@ describe("DC-23 — a file is a place text lives", () => {
 		expect(loose.content).toContain("a.ts:1:"); // the default is unchanged
 	});
 });
+
+describe("ACI-1 — a search result can be fed to read_file unchanged", () => {
+	// The friction this closes: search_text emitted ABSOLUTE paths and
+	// read_file refuses them ("absolute paths are not allowed — use
+	// workspace-relative paths"), so every hit had to be rewritten by hand
+	// before it could be read.
+	it("paths are relative to the WORKSPACE root, even when the search is rooted below it", async () => {
+		const root = mkdtempSync(join(tmpdir(), "kiso-aci1-"));
+		mkdirSync(join(root, "packages", "runtime", "src"), { recursive: true });
+		writeFileSync(join(root, "packages", "runtime", "src", "run.ts"), "const needleACI = 1;\n", "utf8");
+		const res = await searchTextTool({ workspaceRoot: root }).execute(
+			{ pattern: "needleACI", path: "packages/runtime" },
+			ctx,
+		);
+		expect(res).toMatchObject({ isError: false });
+		// NOT "src/run.ts" (relative to the search root) and NOT absolute:
+		// the path read_file would accept.
+		expect(res.content).toContain("packages/runtime/src/run.ts:1:");
+		expect(res.content).not.toContain(root);
+	});
+
+	it("the path a search returns is one read_file accepts, end to end", async () => {
+		const root = mkdtempSync(join(tmpdir(), "kiso-aci1-"));
+		mkdirSync(join(root, "deep", "nest"), { recursive: true });
+		writeFileSync(join(root, "deep", "nest", "target.txt"), "alpha\nbeta needleACI2\ngamma\n", "utf8");
+		const hit = await searchTextTool({ workspaceRoot: root }).execute({ pattern: "needleACI2" }, ctx);
+		const cited = /^([^\s:]+):(\d+):/m.exec(hit.content)!;
+		// hand it straight back, no rewriting
+		const read = await readFileTool({ workspaceRoot: root }).execute({ path: cited[1]! }, ctx);
+		expect(read).toMatchObject({ isError: false });
+		expect(read.content).toContain("beta needleACI2");
+	});
+})
