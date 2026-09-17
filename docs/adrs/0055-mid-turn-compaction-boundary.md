@@ -50,10 +50,33 @@ settled round**. Never the round in flight. Pairing and do-not-compact
 rules are unchanged.
 
 **This number is not measured, and the ADR says so rather than implying
-otherwise.** It is the point where today's policy number and the memo's
-suggestion coincide — a defensible starting place, not a finding. The
-scaled instrument tunes it, and until it does, the number carries no
-authority beyond "we had to pick one".
+otherwise.** It has a cost model behind it (below) and the model has
+assumptions in front of it — the number is a stated position, not a
+finding. It is a **knob with a default**, tuned post-launch. The section
+"Why 400K" says exactly what the model does and does not establish,
+including that 400K is not the cheapest threshold under any assumption
+tested.
+
+### 1b. The summarisation request must be prefix-identical
+
+**REQUIREMENT, not an optimisation.** The summarisation call must be
+prefix-identical to the session's own request up to the boundary — same
+system prompt, same tool table, same messages, with the summarise
+instruction appended at the **END**. Then the covered range bills at the
+cache-hit price.
+
+A summary request built any other way re-bills the whole covered range at
+the miss price. At a 400K threshold that is
+`400,000 × (0.15 − 0.003) / 1M = $0.0588` — **about six cents per
+compaction, more than everything else the compaction costs combined.** A
+compaction that costs more than the context it saves is not a saving.
+
+It is also the easiest thing here to get wrong invisibly: a summary
+request assembled "cleanly" from scratch looks more correct and costs
+twenty times as much, with nothing in any log saying so. So it gets a
+gate that reads the money rather than the shape: **in the request dump,
+the summary call's cached-token count ≈ the covered range.** A prefix
+that diverged shows up as a cached count near zero.
 
 ### 2. One reserve guard
 
@@ -93,6 +116,58 @@ autonomous runs — is the one least likely to be watching.
 Overflow recovery and the reserve guard are the ONLY new control paths in
 the loop. That is the whole surface.
 
+## Why 400K — a cost model, and what in it is an assumption
+
+**Assumptions, named as assumptions.** DeepSeek off-peak prices (cache
+hit 0.003 / miss 0.15 / output 0.6 per M tokens, the rates REG-1 recorded
+with their vendor source); 300
+requests of 3K new tokens each; a 40K tail kept across a compaction; and
+per compaction, a summary written out, one cache break on the next
+request, and two re-reads. None of these are measured. They are a stated
+position about a shape of session.
+
+Total context cost under that model, output excluded:
+
+| threshold | cost | compactions |
+|---|---|---|
+| 100K | $0.36 | 14 |
+| 200K | $0.30 | 5 |
+| 300K | $0.31 | 3 |
+| **400K** | **$0.34** | **2** |
+| 600K | $0.39 | 1 |
+| never | **$0.54** | 0 |
+
+**Reproduced independently before adoption.** Rebuilt from the
+assumptions above, the curve lands at $0.539 / $0.389 / $0.342 for never
+/ 600K / 400K — the same to the cent — and diverges only at 100K
+($0.42, 15 compactions), where the result depends most on the two
+quantities the model does not state: how long a summary is and how much
+gets re-read after one.
+
+**And that divergence is the finding, so it is recorded rather than
+smoothed.** Sweeping summary length (1K–8K) against re-read volume
+(5K–50K), across every combination:
+
+- **never compacting is the most expensive, always.** That conclusion does
+  not depend on any assumption here.
+- **the cheapest threshold is never 400K.** It sits between 150K and
+  300K, most often 200K.
+- **400K costs between +2% and +19% more than the cheapest**, and which
+  end of that range applies is decided by ONE unmeasured quantity: how
+  much is re-read after a compaction. Cheap re-reads make 400K expensive;
+  expensive re-reads flatten the curve and make it nearly free.
+
+So the honest statement of the decision: **400K is chosen for quality, not
+cost.** Fewer summaries mean less information decay, and the cost of
+buying that is somewhere between two and nineteen percent of the context
+bill. Saying "400K is the upper end of a flat region" would be true only
+under the assumptions that flatten it.
+
+What makes this tractable rather than a matter of taste: the quantity the
+choice turns on — post-compaction re-read volume — **is measurable**, on
+the same scaled instrument, without a new one. It is the first thing to
+measure post-launch, and it is what would move this number.
+
 ## How it will be measured, and what the measurement can and cannot say
 
 **Functional first, effects reported.** The gate is behaviour, not
@@ -107,7 +182,10 @@ improvement:
 5. no compaction ever lands **inside** a round that has an outstanding
    tool call or a stream in flight;
 6. with the threshold never crossed and no overflow, behaviour is
-   **identical to today's**.
+   **identical to today's**;
+7. the summary call's **cached-token count ≈ the covered range**, read
+   from the request dump — the prefix-identity requirement, gated on the
+   money rather than on the shape of the request.
 
 Those are yes/no and are the shipping condition. (6) is the one most
 easily skipped and the one that protects every user this change is not
@@ -146,6 +224,11 @@ sized to detect a small one.
   passes and real sessions still lose work at a settled round, the
   boundary is wrong and the definition — not the thresholds — is what must
   change.
+- **A measurement of post-compaction re-read volume.** The cost model
+  says the choice of 400K over ~200K is worth between +2% and +19%, and
+  that this one quantity decides which. Measure it and the threshold
+  either stands on evidence or moves; it is the first thing to measure
+  post-launch and the cheapest.
 - **A measured cost regression that clears the noise.** Not a number
   inside the interval; one that a properly sized round separates from
   zero.
