@@ -92,8 +92,8 @@ not another recalibration)
   mandated, representation not (no framework until a fourth
   implementation or a real divergence); new projections ship with a
   voided-range admissibility test.
-- 0055 — A settled round is a legal compaction boundary — DRAFT,
-  2026-09-17, under review, then the owner's ratification. Verified in
+- 0055 — A settled round is a legal compaction boundary — **Accepted**,
+  2026-09-17, ratified by the owner. Verified in
   the tree: summary compaction cuts only at user turns, the auto-compact
   check returns while a run is in flight, `context_overflow` is
   `retryable: false`, `checkpointBoundarySeq` is called by nothing, and
@@ -104,8 +104,8 @@ not another recalibration)
   over MEASURED session shapes; five of six real shapes never reach any
   threshold, so it rests on one observed session in three hundred and
   says so.
-- 0056 — One resident line per MCP server, or one proxy tool — DRAFT,
-  2026-09-17, under review, then the owner's ratification. The entire
+- 0056 — One resident line per MCP server, or one proxy tool — **Accepted**,
+  2026-09-17, ratified by the owner. The entire
   built-in tool surface measures 3,772 B (~943 tokens) — the denominator
   that makes deferral worth considering at all, and it is not yet known
   what a real server weighs. Two designs are written down (deferred

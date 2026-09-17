@@ -1,7 +1,8 @@
 # ADR-0056: MCP servers get one resident line, not every schema, above a declared budget
 
-- **Status:** DRAFT — for the lead's review, then the owner's ratification.
-  Nothing is built.
+- **Status:** **Accepted** — reviewed by the lead, then ratified by the
+  owner on 2026-09-17 in their own words. Nothing is built yet; the
+  decision is recorded and the code follows its own round.
 - **Date:** 2026-09-17
 - **Layer:** `extensions/mcp` only. No kernel change, no change to the
   built-in tools.

@@ -1,7 +1,8 @@
 # ADR-0055: A settled round is a legal compaction boundary — a long run must not end at the window
 
-- **Status:** DRAFT — for the lead's review, then the owner's ratification.
-  Nothing is built.
+- **Status:** **Accepted** — reviewed by the lead, then ratified by the
+  owner on 2026-09-17 in their own words. Nothing is built yet; the
+  decision is recorded and the code follows its own round.
 - **Date:** 2026-09-17
 - **Layer:** the kernel loop's compaction path and the CLI's auto-compact
   check. A behaviour change, gated by the 0.38.0-line ceremony.
