@@ -1,3 +1,4 @@
+import { elapsedLabel } from "@vincemakes/kiso-tui-cells";
 /**
  * Event rendering for the terminal. Pure (testable): given the render
  * input, produce the lines a human sees. Colors are raw ANSI — no
@@ -333,7 +334,7 @@ export function renderRecap(s: RecapStats): string {
 			: s.tools !== undefined && s.tools > 0
 				? [`${s.tools} tool${s.tools === 1 ? "" : "s"}${edits > 0 ? ` (${edits} edit${edits === 1 ? "" : "s"})` : ""}`]
 				: [];
-	const parts = [`took ${s.seconds}s`, ...work];
+	const parts = [`took ${elapsedLabel(s.seconds)}`, ...work];
 	if (s.usage.known) {
 		const seg = `${s.usage.in !== null ? `fresh ${kUnit(s.usage.in)}` : ""}${s.usage.in !== null && s.usage.out !== null ? " " : ""}${s.usage.out !== null ? `out ${kUnit(s.usage.out)}` : ""}`;
 		if (seg !== "") parts.push(seg);

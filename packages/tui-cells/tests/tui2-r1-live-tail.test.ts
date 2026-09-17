@@ -168,7 +168,7 @@ describe("TUI2-R1 T-V3 — the running shell's live tail", () => {
 		// a non-shell tool takes the same window — grown from its content,
 		// and with no gestures on its status row, because it has none.
 		const listed = render(running({ name: "list_dir", input: ".", inputFull: JSON.stringify({ path: "." }), resultText: "a.ts\nb.ts" }));
-		expect(listed).toEqual(["● list  .", "  └ a.ts", "    b.ts", "    12s"]);
+		expect(listed).toEqual(["\u25cf list  (root)" /* was "list  ." — an explicit "." now reads as (root), owner request 2026-09-17 */, "  └ a.ts", "    b.ts", "    12s"]);
 	});
 
 	// DECLARED REVERSAL (R9 P2 / D4): completion no longer collapses. The
