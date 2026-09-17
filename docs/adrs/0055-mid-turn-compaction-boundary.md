@@ -45,7 +45,7 @@ a tier system.
 
 ### 1. One threshold
 
-When the context crosses `min(0.5 × window, 300K)`, compact at the **next
+When the context crosses `min(0.5 × window, 400K)`, compact at the **next
 settled round**. Never the round in flight. Pairing and do-not-compact
 rules are unchanged.
 
@@ -105,8 +105,9 @@ than a summary, it already works, and it is the only thing that reaches
 inside a turn today; this ADR gives it a companion for the case it cannot
 reach, and takes nothing away.
 
-**The recent raw tail is kept BY TOKENS (~20K), never by rounds**, and
-never includes the round in flight. Rounds vary in size by an order of
+**The recent raw tail is kept BY TOKENS and scales with the window —
+`min(0.1 × window, 100K)`** — never by rounds, and never including the
+round in flight. Rounds vary in size by an order of
 magnitude; a tail measured in rounds keeps an unknown amount of context.
 
 **Default ON.** A relief that must be discovered and enabled is a relief
@@ -116,7 +117,7 @@ autonomous runs — is the one least likely to be watching.
 Overflow recovery and the reserve guard are the ONLY new control paths in
 the loop. That is the whole surface.
 
-## Why 300K — a cost model, a rule, and a count
+## Why 400K — a cost model, a rule, a count, and a measured cache
 
 **Assumptions, named as assumptions.** DeepSeek off-peak prices (cache
 hit 0.003 / miss 0.15 / output 0.6 per M tokens, the rates REG-1 recorded
@@ -281,10 +282,84 @@ It does mean three things must be said plainly:
   it is confounded, and a cleaner answer needs the instrument, not the
   logs.
 
-The default is **300K**, produced by the stated rule on measured shapes,
-with the assumption list attached and the knob available. No further
-iteration on the number until something is measured: post-compaction
-re-read volume, and a wider sample of long autonomous runs.
+### The last two assumptions, also measured
+
+The model priced the carried prefix at the cache-HIT rate, i.e. assumed a
+100% hit ratio. The vendor's own documentation says the cache is
+best-effort with no guaranteed hit rate, and `usage` reports the split —
+so it was counted rather than assumed.
+
+| | requests | token-weighted p_hit | expected input price |
+|---|---|---|---|
+| interactive sessions | 937 | **0.9424** | **$0.0115 / M** |
+| autonomous legs | 14,821 | **0.9812** | **$0.0058 / M** |
+| *what the model assumed* | — | *1.0* | *$0.0030 / M* |
+
+The real price of carried context is **two to four times** what the model
+charged it.
+
+**Cold starts are not the cause and barely exist.** Inter-request gaps in
+real sessions: median 4s, p90 23s; **0.58% exceed an hour** and none
+exceeds a day, against a vendor cache cleared in "hours to days". And the
+gap before a miss (4.7s median) is indistinguishable from the gap before a
+hit (3.8s) — **misses track prefix CHANGE, not idle time.** That is the
+direct evidence for the prefix-identity requirement above: the cache is
+lost when we change the prefix, and compaction is the largest thing that
+changes it.
+
+**The raw tail scales with the window**: `tail = min(0.1 × window, 100K)`.
+A large window should buy headroom for big observations and a generous
+recent tail — TRACE requires recent state to survive — not the carrying of
+stale exploration on every request. At the hit price a 100K tail costs
+about $0.0003 per request more than a 40K one.
+
+**Break-even per compaction**, stated rather than implied — requests
+before a compaction pays for its ~$0.012:
+
+| p_hit | 900K→100K | 300K→100K | 200K→100K |
+|---|---|---|---|
+| 1.0 (assumed) | 6 | 21 | 41 |
+| 0.9812 (legs) | 3 | 11 | 21 |
+| 0.9424 (interactive) | 2 | 6 | 11 |
+
+### What the rule returns now, and the finding that outranks it
+
+Minimax over the measured shapes, with the 100K tail, at each p_hit:
+
+| p_hit | 200K | 300K | 400K | 600K | selects |
+|---|---|---|---|---|---|
+| 1.0 *(assumed)* | 54.2% | 22.6% | 7.3% | 3.7% | **600K** |
+| 0.9812 *(legs)* | 23.0% | 7.3% | **5.8%** | 17.9% | **400K** |
+| 0.9424 *(interactive)* | **3.4%** | 14.0% | 18.2% | 40.0% | **200K** |
+
+Both p_hit values are real measurements of real populations, and **the
+answer moves across the whole candidate range between them.**
+
+The tie is broken by a principle rather than a preference: **the p_hit
+that matters is the one from the population where the threshold actually
+fires.** No interactive session in the measured corpus ever reaches 200K —
+0 of 93 — so the threshold never fires for them and their hit ratio has no
+bearing on choosing it. Every cost consequence of this number is borne by
+long autonomous runs, whose measured p_hit is 0.9812.
+
+**The default is 400K.**
+
+### The finding that outranks the number
+
+This is the third independent refinement of the same model — better rule,
+measured shapes, measured cache — and it produced a third different
+answer: 200K, then 300K, then 400K. Each refinement was correct and each
+moved the result somewhere else in the band.
+
+**That is the result.** The model bounds a region — 200K to 600K, with
+never-compacting worse than every point in it — and does not identify a
+point within it. The default is the least-bad choice under the best
+parameters currently measured, from the population that bears the cost.
+It is a knob, it rests on one observed session above 400K out of 300, and
+no further arithmetic on these logs will settle it.
+
+Closed until the post-launch measurements: post-compaction re-read volume,
+and a wider sample of long autonomous runs.
 
 ## How it will be measured, and what the measurement can and cannot say
 
