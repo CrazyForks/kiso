@@ -125,6 +125,34 @@ export interface ModelMetadataEntry {
 	readonly pricing: ModelPricing | null;
 }
 
+/**
+ * REG-1 — the OFF-PEAK rates, read from the vendor's pricing table on
+ * 2026-09-17. The table carries TWO sets: off-peak and peak, the peak
+ * rates exactly double, and peak is 01:00-04:00 and 06:00-10:00 UTC
+ * Mon-Fri. `ModelPricing` has one set of rates and no period, so the
+ * OFF-PEAK numbers are the row's and the doubling is stated here rather
+ * than by inventing a field the type does not have. A bill computed from
+ * this row during peak hours is half the truth, and that is the honest
+ * shape of a one-rate type against a two-rate vendor.
+ */
+const DEEPSEEK_FLASH_PRICING: ModelPricing = {
+	inputPerM: 0.15,
+	outputPerM: 0.6,
+	cacheReadPerM: 0.003,
+	cacheWritePerM: 0,
+	asOf: "2026-09-17",
+	source: "https://api-docs.deepseek.com/quick_start/pricing/",
+};
+
+const DEEPSEEK_PRO_PRICING: ModelPricing = {
+	inputPerM: 0.66,
+	outputPerM: 1.98,
+	cacheReadPerM: 0.022,
+	cacheWritePerM: 0,
+	asOf: "2026-09-17",
+	source: "https://api-docs.deepseek.com/quick_start/pricing/",
+};
+
 const DEEPSEEK_PRICING: ModelPricing = {
 	// The E2-frozen rates (pricing table v1, freeze date 2026-08-13),
 	// re-homed here with their provenance made explicit. The caveat
@@ -303,8 +331,26 @@ const ENTRIES: readonly ModelMetadataEntry[] = [
 		// stays null until read from the live billing page and dated.
 		model: "deepseek-v4-flash",
 		providerId: "deepseek",
+		// REG-1: RETIRED, and the vendor says so in footnote (1) of the
+		// pricing table: "The legacy names deepseek-v4-flash and
+		// deepseek-v4-flash-vision-exp are still accepted, but the
+		// corresponding models have been retired, their requests are served
+		// by the DeepSeek-V4.1-Flash model and billed at the Flash price."
+		// Still accepted is not still supported: a config naming it works
+		// today on borrowed time, which is why the row stays (removing it
+		// would break configs that run) and is marked (so the product can
+		// say the word it has the evidence for).
+		deprecated: { asOf: "2026-09-17", source: "https://api-docs.deepseek.com/quick_start/pricing/" },
 		endpoint: "https://api.deepseek.com",
-		capabilities: { contextWindow: null, maxOutputTokens: null, promptCaching: "automatic", reasoning: {
+		// REG-1, 2026-09-17: the window and max output are READ from the
+		// vendor's pricing table (https://api-docs.deepseek.com/quick_start/pricing/)
+		// — "CONTEXT LENGTH 1M", "MAX OUTPUT MAXIMUM: 384K". A dated vendor
+		// statement is this registry's contract and every other row lives on
+		// it; holding DeepSeek to a stricter "nobody measured it" standard
+		// left the window null, and a null window sends the CLI to its
+		// 200,000 fallback — so the product compacted a 1M model at 100,000
+		// tokens, a tenth of its capacity, while sounding principled.
+		capabilities: { contextWindow: 1_000_000, maxOutputTokens: 384_000, promptCaching: "automatic", reasoning: {
 			emitsThinkingStream: true,
 			thinking: { modes: ["enabled", "disabled"], default: "enabled" },
 			// `none` added 2026-09-14 from a live probe. The three natives were
@@ -334,7 +380,7 @@ const ENTRIES: readonly ModelMetadataEntry[] = [
 		}, inputModalities: null },
 		capabilitiesAsOf: "2026-08-26",
 		capabilitiesSource: "https://api-docs.deepseek.com/guides/thinking_mode",
-		pricing: null,
+		pricing: DEEPSEEK_FLASH_PRICING,
 	},
 	{
 		// Astra F5: THE VENDOR'S CURRENT RECOMMENDED NAME, registered so that
@@ -359,7 +405,15 @@ const ENTRIES: readonly ModelMetadataEntry[] = [
 		model: "deepseek-flash",
 		providerId: "deepseek",
 		endpoint: "https://api.deepseek.com",
-		capabilities: { contextWindow: null, maxOutputTokens: null, promptCaching: "automatic", reasoning: {
+		// REG-1, 2026-09-17: the window and max output are READ from the
+		// vendor's pricing table (https://api-docs.deepseek.com/quick_start/pricing/)
+		// — "CONTEXT LENGTH 1M", "MAX OUTPUT MAXIMUM: 384K". A dated vendor
+		// statement is this registry's contract and every other row lives on
+		// it; holding DeepSeek to a stricter "nobody measured it" standard
+		// left the window null, and a null window sends the CLI to its
+		// 200,000 fallback — so the product compacted a 1M model at 100,000
+		// tokens, a tenth of its capacity, while sounding principled.
+		capabilities: { contextWindow: 1_000_000, maxOutputTokens: 384_000, promptCaching: "automatic", reasoning: {
 			emitsThinkingStream: true,
 			thinking: { modes: ["enabled", "disabled"], default: "enabled" },
 			// `none` added 2026-09-14 from a live probe. The three natives were
@@ -389,13 +443,21 @@ const ENTRIES: readonly ModelMetadataEntry[] = [
 		}, inputModalities: null },
 		capabilitiesAsOf: "2026-09-12",
 		capabilitiesSource: "https://api-docs.deepseek.com/quick_start/pricing/",
-		pricing: null,
+		pricing: DEEPSEEK_FLASH_PRICING,
 	},
 	{
 		model: "deepseek-v4-pro",
 		providerId: "deepseek",
 		endpoint: "https://api.deepseek.com",
-		capabilities: { contextWindow: null, maxOutputTokens: null, promptCaching: "automatic", reasoning: {
+		// REG-1, 2026-09-17: the window and max output are READ from the
+		// vendor's pricing table (https://api-docs.deepseek.com/quick_start/pricing/)
+		// — "CONTEXT LENGTH 1M", "MAX OUTPUT MAXIMUM: 384K". A dated vendor
+		// statement is this registry's contract and every other row lives on
+		// it; holding DeepSeek to a stricter "nobody measured it" standard
+		// left the window null, and a null window sends the CLI to its
+		// 200,000 fallback — so the product compacted a 1M model at 100,000
+		// tokens, a tenth of its capacity, while sounding principled.
+		capabilities: { contextWindow: 1_000_000, maxOutputTokens: 384_000, promptCaching: "automatic", reasoning: {
 			emitsThinkingStream: true,
 			thinking: { modes: ["enabled", "disabled"], default: "enabled" },
 			// `none` added 2026-09-14 from a live probe. The three natives were
@@ -425,7 +487,7 @@ const ENTRIES: readonly ModelMetadataEntry[] = [
 		}, inputModalities: null },
 		capabilitiesAsOf: "2026-08-26",
 		capabilitiesSource: "https://api-docs.deepseek.com/guides/thinking_mode",
-		pricing: null,
+		pricing: DEEPSEEK_PRO_PRICING,
 	},
 	{
 		model: "gpt-4o",
