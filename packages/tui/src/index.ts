@@ -153,4 +153,7 @@ export {
 // TUI2-R1 (D): the keys sheet + THE key table — one source for the ?
 // overlay and /help's keys row.
 export { resolveGround, type Ground } from "@vincemakes/kiso-tui-cells";
+// one duration form: the CLI's own surfaces label a settled duration the
+// way a settled card does, rather than writing a second one.
+export { settledLabel } from "@vincemakes/kiso-tui-cells";
 export { KEY_BINDINGS, PANEL_KEYS_ROW, displayVerb, extensionsBannerText, helpRows, keysHelpRow, keysSheetRows, unansweredAskView, type BannerExtension, type KeyBinding } from "./strings.js";

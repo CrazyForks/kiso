@@ -4,7 +4,7 @@
  * the context (the chain, the run state, the prompt arming).
  */
 
-import { contextRows, contextUnavailableRows, displayVerb, escapeTerminal, helpRows, kUnit, modePickView, modelPickView, palette, type PickOption, type PickResult } from "@vincemakes/kiso-tui";
+import { contextRows, contextUnavailableRows, displayVerb, escapeTerminal, helpRows, kUnit, modePickView, modelPickView, palette, settledLabel, type PickOption, type PickResult } from "@vincemakes/kiso-tui";
 import { newSessionId } from "./session-id.js";
 import { buildAdapter, lookupModelMetadata, resolveContinuationScope, resolveReasoning } from "@vincemakes/kiso-runtime/internal";
 import type { AgentSession } from "@vincemakes/kiso-runtime";
@@ -790,11 +790,11 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 					// (the estimate BEFORE vs AFTER — the same chars/4
 					// proxy the status bar shows, marked ~), and the time.
 					const ctxAfter = Math.round(ctx.estimateCtx() * 100);
-					const elapsed = compactStart > 0 ? ((Date.now() - compactStart) / 1000).toFixed(1) : "?";
+					const elapsed = compactStart > 0 ? settledLabel((Date.now() - compactStart) / 1000) : "?s";
 					// a non-null result implies onStart ran — the "?" is
 					// reachable only at the type level
 					body.notice(
-						`[/compact] ✦ compacted · ${compactInfo?.rounds ?? "?"} rounds → 1 summary · saved ~${kUnit(result.savedTokens)} · ctx ${ctxBefore ?? "?"}% → ${ctxAfter}% · ${elapsed}s`,
+						`[/compact] ✦ compacted · ${compactInfo?.rounds ?? "?"} rounds → 1 summary · saved ~${kUnit(result.savedTokens)} · ctx ${ctxBefore ?? "?"}% → ${ctxAfter}% · ${elapsed}`,
 					);
 				}
 			} catch (err) {

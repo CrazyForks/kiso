@@ -768,7 +768,7 @@ class ToolExecution implements Component {
 				out.push(...toolBlockBody(c, W, ctx));
 				return out;
 			}
-			const elapsed = c.startedAt !== null && c.doneAt !== null ? ((c.doneAt - c.startedAt) / 1000).toFixed(1) : "?";
+			const elapsed = c.startedAt !== null && c.doneAt !== null ? settledLabel((c.doneAt - c.startedAt) / 1000) : "?s";
 			// TUI2-R1.5 ⑤ (VD-6): the line count is stated EXACTLY ONCE. Every
 			// read card carried it twice — `(2 lines, 0.0s) · 2 lines · ctrl+o
 			// expands` — because the parens and the suffix were written by
@@ -851,7 +851,7 @@ class ToolExecution implements Component {
 				// The tier ladder is what gives way; the key never is.
 				const keySuffix = c.expanded ? ` · ${COLLAPSE_ROW}` : "";
 				const words = pickTier(
-					[join(meta, counted, `${elapsed}s`, attr), join(meta, counted, `${elapsed}s`), join(meta, `${elapsed}s`), meta],
+					[join(meta, counted, elapsed, attr), join(meta, counted, elapsed), join(meta, elapsed), meta],
 					W - visibleWidth(noteIndent()) - keySuffix.length,
 				);
 				// DC-50 / R14 — ONE CARD, ONE SKELETON, expanded or not.
@@ -907,7 +907,7 @@ class ToolExecution implements Component {
 			// ("compil 1s"). The head is cut against the room the duration
 			// leaves; the duration then rides the row, always legible.
 			const elapsed = c.startedAt !== null ? Math.max(1, Math.round((ctx.now - c.startedAt) / 1000)) : 1;
-			const dur = ` · ${elapsed}s`;
+			const dur = ` · ${elapsedLabel(elapsed)}`;
 			// R3 (design §5.2): a running command BREATHES — one glyph, seven
 			// greys, bottoming out on the ground's dim token (§2.2 applies
 			// mid-animation, not just at rest). The quadrant spinner it
@@ -1079,17 +1079,17 @@ function settledHeadText(verbCol: string, target: string, meta: string, attr: st
 	// first, then the count, and the core — what happened and how long it
 	// took — is never cut open; below that the target itself truncates.
 	const join = (...xs: string[]): string => xs.filter((x) => x !== "").join(" · ");
-	const core = join(meta, counted, `${elapsed}s`);
-	const withAttr = join(meta, counted, `${elapsed}s`, attr.replace(" · ", ""));
+	const core = join(meta, counted, elapsed);
+	const withAttr = join(meta, counted, elapsed, attr.replace(" · ", ""));
 	const lead = `${verbCol} `;
 	const row = (tail: string): string => `${lead}${target}${tail === "" ? "" : ` · ${tail}`}`;
 	// 1. everything; 2. the attribution gives way; 2b. the COUNT gives
 	//    way next (pin 4), where the suffix is not already carrying it —
 	//    the target whole through all three
-	const whole = firstFit([row(withAttr), row(core), row(join(meta, `${elapsed}s`))], room);
+	const whole = firstFit([row(withAttr), row(core), row(join(meta, elapsed))], room);
 	if (whole !== null) return whole;
 	// 3. the target truncates, the core stays whole
-	const stem = join(meta, `${elapsed}s`);
+	const stem = join(meta, elapsed);
 	const budget = room - visibleWidth(lead) - visibleWidth(stem) - 4; // the ellipsis + " · "
 	if (budget >= 1) return `${lead}${widthCut(target, budget)}… · ${stem}`;
 	// 4. DC-48 — the ELAPSED still rides, and the target takes what is
@@ -1098,7 +1098,7 @@ function settledHeadText(verbCol: string, target: string, meta: string, attr: st
 	//    no bracket to leave open, so the reason retired with the
 	//    parentheses and pin 4's own rule applies at every width: what
 	//    happened and how long it took is never cut away.
-	const floor = `${elapsed}s`;
+	const floor = elapsed;
 	const left = room - visibleWidth(lead) - visibleWidth(floor) - 4; // the ellipsis + " · "
 	if (left >= 1) return `${lead}${widthCut(target, left)}… · ${floor}`;
 	return `${lead}${widthCut(target, Math.max(1, room - visibleWidth(lead)))}`;
@@ -1958,6 +1958,22 @@ export function formatDuration(totalSeconds: number): string {
  *  ticking. */
 export function elapsedLabel(totalSeconds: number): string {
 	return duration(totalSeconds, true);
+}
+
+/** The SETTLED call's duration — R13's grammar (`exit 0 · 90 lines ·
+ *  0.4s`). A finished call knows its length to a tenth, which is
+ *  information a running clock cannot have and a finished one should not
+ *  throw away: under a minute the tenth stays.
+ *
+ *  Past a minute the tenth stops being the interesting digit and the
+ *  live label takes over — a twelve-minute call settled as `734.2s`, the
+ *  same unreadable four-figure count the status row had. NOTHING under a
+ *  minute moves, which is every duration the suite pinned before this.
+ *  The suffix is part of the label (the live form's already is), so no
+ *  caller appends its own `s`. */
+export function settledLabel(totalSeconds: number): string {
+	const tenths = Math.max(0, Math.round(totalSeconds * 10) / 10);
+	return tenths < 60 ? `${tenths.toFixed(1)}s` : elapsedLabel(tenths);
 }
 
 /**
