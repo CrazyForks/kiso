@@ -495,7 +495,7 @@ gate: build → typecheck → tests → size → pack → API surface → hero �
 whitespace → CJK → versions → PTY manifest → dist inventory → bench repro →
 bench tests → bytes → `git diff --check` → consumer smoke tiers → demo.
 **3,120 tests green in 426 files** (2,468 unit, 652 PTY), 6 incident fixtures
-on the real runtime, 39 ADRs.
+on the real runtime, 40 ADRs.
 
 ## Why another one
 
