@@ -342,9 +342,11 @@ const ENTRIES: readonly ModelMetadataEntry[] = [
 		// say the word it has the evidence for).
 		deprecated: { asOf: "2026-09-17", source: "https://api-docs.deepseek.com/quick_start/pricing/" },
 		endpoint: "https://api.deepseek.com",
-		// REG-1, 2026-09-17: the window and max output are READ from the
-		// vendor's pricing table (https://api-docs.deepseek.com/quick_start/pricing/)
-		// — "CONTEXT LENGTH 1M", "MAX OUTPUT MAXIMUM: 384K". A dated vendor
+		// REG-1: the window and max output are READ from the vendor's pricing
+		// table — "CONTEXT LENGTH 1M", "MAX OUTPUT MAXIMUM: 384K". The date
+		// and page live in `capabilitiesAsOf` / `capabilitiesSource`, which
+		// exist for exactly this; the reasoning block carries its own pair
+		// and already cited the same page. A dated vendor
 		// statement is this registry's contract and every other row lives on
 		// it; holding DeepSeek to a stricter "nobody measured it" standard
 		// left the window null, and a null window sends the CLI to its
@@ -378,8 +380,8 @@ const ENTRIES: readonly ModelMetadataEntry[] = [
 			asOf: "2026-08-26",
 			source: "https://api-docs.deepseek.com/guides/thinking_mode",
 		}, inputModalities: null },
-		capabilitiesAsOf: "2026-08-26",
-		capabilitiesSource: "https://api-docs.deepseek.com/guides/thinking_mode",
+		capabilitiesAsOf: "2026-09-17",
+		capabilitiesSource: "https://api-docs.deepseek.com/quick_start/pricing/",
 		pricing: DEEPSEEK_FLASH_PRICING,
 	},
 	{
@@ -405,9 +407,11 @@ const ENTRIES: readonly ModelMetadataEntry[] = [
 		model: "deepseek-flash",
 		providerId: "deepseek",
 		endpoint: "https://api.deepseek.com",
-		// REG-1, 2026-09-17: the window and max output are READ from the
-		// vendor's pricing table (https://api-docs.deepseek.com/quick_start/pricing/)
-		// — "CONTEXT LENGTH 1M", "MAX OUTPUT MAXIMUM: 384K". A dated vendor
+		// REG-1: the window and max output are READ from the vendor's pricing
+		// table — "CONTEXT LENGTH 1M", "MAX OUTPUT MAXIMUM: 384K". The date
+		// and page live in `capabilitiesAsOf` / `capabilitiesSource`, which
+		// exist for exactly this; the reasoning block carries its own pair
+		// and already cited the same page. A dated vendor
 		// statement is this registry's contract and every other row lives on
 		// it; holding DeepSeek to a stricter "nobody measured it" standard
 		// left the window null, and a null window sends the CLI to its
@@ -441,7 +445,7 @@ const ENTRIES: readonly ModelMetadataEntry[] = [
 			asOf: "2026-09-12",
 			source: "https://api-docs.deepseek.com/quick_start/pricing/",
 		}, inputModalities: null },
-		capabilitiesAsOf: "2026-09-12",
+		capabilitiesAsOf: "2026-09-17",
 		capabilitiesSource: "https://api-docs.deepseek.com/quick_start/pricing/",
 		pricing: DEEPSEEK_FLASH_PRICING,
 	},
@@ -449,9 +453,11 @@ const ENTRIES: readonly ModelMetadataEntry[] = [
 		model: "deepseek-v4-pro",
 		providerId: "deepseek",
 		endpoint: "https://api.deepseek.com",
-		// REG-1, 2026-09-17: the window and max output are READ from the
-		// vendor's pricing table (https://api-docs.deepseek.com/quick_start/pricing/)
-		// — "CONTEXT LENGTH 1M", "MAX OUTPUT MAXIMUM: 384K". A dated vendor
+		// REG-1: the window and max output are READ from the vendor's pricing
+		// table — "CONTEXT LENGTH 1M", "MAX OUTPUT MAXIMUM: 384K". The date
+		// and page live in `capabilitiesAsOf` / `capabilitiesSource`, which
+		// exist for exactly this; the reasoning block carries its own pair
+		// and already cited the same page. A dated vendor
 		// statement is this registry's contract and every other row lives on
 		// it; holding DeepSeek to a stricter "nobody measured it" standard
 		// left the window null, and a null window sends the CLI to its
@@ -485,8 +491,8 @@ const ENTRIES: readonly ModelMetadataEntry[] = [
 			asOf: "2026-08-26",
 			source: "https://api-docs.deepseek.com/guides/thinking_mode",
 		}, inputModalities: null },
-		capabilitiesAsOf: "2026-08-26",
-		capabilitiesSource: "https://api-docs.deepseek.com/guides/thinking_mode",
+		capabilitiesAsOf: "2026-09-17",
+		capabilitiesSource: "https://api-docs.deepseek.com/quick_start/pricing/",
 		pricing: DEEPSEEK_PRO_PRICING,
 	},
 	{
