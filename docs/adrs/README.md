@@ -92,6 +92,28 @@ not another recalibration)
   mandated, representation not (no framework until a fourth
   implementation or a real divergence); new projections ship with a
   voided-range admissibility test.
+- 0055 — A settled round is a legal compaction boundary — DRAFT,
+  2026-09-17, under review, then the owner's ratification. Verified in
+  the tree: summary compaction cuts only at user turns, the auto-compact
+  check returns while a run is in flight, `context_overflow` is
+  `retryable: false`, `checkpointBoundarySeq` is called by nothing, and
+  microcompact (tool results only) is the sole mid-run relief — so
+  compaction is unreachable from inside a turn. A1b v1 is one threshold
+  firing at the next settled round, one reserve guard before the send,
+  one recovery that retries once. The default came from minimax regret
+  over MEASURED session shapes; five of six real shapes never reach any
+  threshold, so it rests on one observed session in three hundred and
+  says so.
+- 0056 — One resident line per MCP server, or one proxy tool — DRAFT,
+  2026-09-17, under review, then the owner's ratification. The entire
+  built-in tool surface measures 3,772 B (~943 tokens) — the denominator
+  that makes deferral worth considering at all, and it is not yet known
+  what a real server weighs. Two designs are written down (deferred
+  schemas with `load_tools`; one proxy tool) with the proxy recommended:
+  constant rent, zero cache breaks, no budget question, paid for with no
+  native argument validation. Withdrawn rather than tuned if real servers
+  turn out small, and it waits on the skills behaviour check, whose
+  architecture it would otherwise inherit untested.
 
 Old ADRs are kept verbatim — decision history is the point of the
 discipline; superseded records carry the marker in their own Status line,
