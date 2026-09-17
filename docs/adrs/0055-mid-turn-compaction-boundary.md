@@ -30,6 +30,7 @@ definition was the easy half.
 | window overflow | ends the run, `context_overflow`, **`retryable: false`** — `packages/core/src/kernel/loop.ts:980` |
 | `checkpointBoundarySeq` | exists, and **nothing in the tree calls it** — verified across `packages/*/src`, `apps/*/src`, `extensions/*/src` |
 | microcompact | fires inside the loop on a token estimate — `loop.ts:565` — and clears **tool results only** |
+| the auto-compact trigger's NUMBER | a **chars/4 projection** — `autoCompactRatio` → `estimateCtxRatio`, `JSON.stringify(session.projected()).length / 4 / window` (`chat.ts:169`, `:202`) — never the provider's own count |
 
 **So a single long autonomous run has exactly one relief between it and a
 hard stop, and that one only drops tool results.** Every other mechanism
@@ -57,6 +58,58 @@ finding. It is a **knob with a default**, tuned post-launch. The section
 "Why 400K" says exactly what the model does and does not establish,
 including that 400K is not the cheapest threshold under any assumption
 tested.
+
+### 1a. What the number is measured against
+
+The threshold above and the reserve guard below are both comparisons, and
+this ADR fixes what they compare.
+
+**When the last settled round reported usage, that is the number.** The
+provider states the size of the prompt it actually read; an estimate is a
+guess about the same quantity, and where the fact exists the guess has no
+standing. Two comments in the tree already reserve this move for A1b, by
+name: `request-budget.ts:18` ("the auto-compact policy keeps its own
+number — moving it is A1b's") and `chat.ts:200` ("the pre-A1a estimate,
+unchanged this round, named so a gate can pin that it did not move").
+
+**The number is the CANONICAL total, never the raw usage fields.** It is
+`canonicalizeUsage(...)` followed by `c.input + c.cacheRead +
+(c.cacheWrite ?? 0)` — the `total` that `usageFromEvent` already computes
+at `chat.ts:271`.
+
+This is not a stylistic preference about which helper to call. The raw
+`usage` event is MIXED-CONVENTION across adapters, and has been since both
+were written:
+
+| adapter | what `inputTokens` carries |
+|---|---|
+| openai-compat | `prompt_tokens`, which **already includes** the cached part reported separately as `cacheRead` |
+| anthropic | `input_tokens`, which **excludes** cache reads (`cache_read_input_tokens` is its own field) |
+
+So `inputTokens + cacheRead` — the obvious reading, and the one this ADR
+was first drafted with — double-counts every cached token on
+openai-compat, and omits `cacheWrite` on both. On a long cached session
+the cached part IS most of the prompt, so the threshold would fire far
+early on exactly the runs A1b exists to make cheaper. The declared-
+behaviour block above `usageFromEvent` is where that convention split is
+written down (the E2 1.3.0 / R2a-1 ruling, 2026-08-13); it is the
+accounting boundary, and A1b is a consumer of it rather than a fourth
+convention.
+
+**The estimate stays, as the fallback.** No known usage exists before the
+first request of a session, after a turn that errored before reporting,
+or whenever an adapter sends `known: false`. There the chars/4 projection
+governs, exactly as today — a policy needs a number.
+
+**A usage event survives the compaction that invalidates it.** The last
+usage describes the PRE-compaction prompt; nothing re-reports until the
+next request returns. Read naively it clears the threshold again the
+instant the compaction finishes, and the run compacts in a loop. So a
+usage event recorded at or before a compaction boundary is STALE and does
+not govern: until a later one lands, the estimate does.
+
+This changes no number in this ADR. It changes what the number is
+compared against.
 
 ### 1b. The summarisation request must be prefix-identical
 
@@ -393,6 +446,30 @@ resolve an effect under about 20%.** Two ceremonies of the same change
 disagreed by 22 points. So a cost number from this round will be reported
 with its interval and will not be claimed as a win, and the round is not
 sized to detect a small one.
+
+## The shape this is measured against
+
+The reference implementation does the same thing with three differences
+worth stating, because two of them are choices and one is a weakness:
+
+| | the reference | A1b |
+|---|---|---|
+| default | on | on |
+| the number | provider-reported context size of the last assistant message, message-size estimate as fallback, with a stale-usage guard | the same, via the canonical total (§1a) |
+| when it is checked | at the end of a turn — after the tool loop, before the next prompt | at **every settled round inside the run** |
+| overflow | compact, then retry automatically | compact at the last settled round, retry **once** (§3) |
+
+The first two rows are why §1a is written the way it is: the source of
+the number is a solved problem elsewhere and there is no reason to solve
+it differently.
+
+The third row is the whole point of this ADR and the one place the two
+shapes disagree. A check that runs between turns cannot help a run that
+never reaches the end of a turn, which is the failure described at the
+top of this document. Checking at every settled round is strictly the
+stronger position, and it is the position that costs something — it is
+why §1b (prefix identity) and §2 (the reserve guard) have to exist at
+all.
 
 ## What this ADR does not decide
 
