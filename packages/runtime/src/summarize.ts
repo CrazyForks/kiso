@@ -242,12 +242,68 @@ export interface SummarizeConversationResult {
 	readonly usage: RawUsage | null;
 }
 
+/** A thrown value the adapter CLASSIFIED — `{ code, retryable, message }`
+ *  (ADR-0005 rule 1). The core's own guard is private, and this asks a
+ *  narrower question than that one: is this a failure someone already
+ *  decided is worth trying again. A validation rejection below is a plain
+ *  `Error` and can never match, which is the separation E6 (b) wants —
+ *  "the model wrote a bad summary" is not retried, ever. */
+function retryableStructured(err: unknown): boolean {
+	if (err === null || typeof err !== "object") return false;
+	const e = err as { code?: unknown; retryable?: unknown; message?: unknown };
+	return typeof e.code === "string" && typeof e.message === "string" && e.retryable === true;
+}
+
+/** How long to wait before the one retry. The provider's own ask when it
+ *  made one and it is short enough to be worth honouring; otherwise a
+ *  token pause — the failure this exists for is a dropped stream, not a
+ *  rate limit, and an immediate second attempt is the right response to
+ *  a socket that died. */
+function retryWaitMs(err: unknown): number {
+	const asked = (err as { retryAfterMs?: unknown }).retryAfterMs;
+	return typeof asked === "number" && Number.isFinite(asked) && asked >= 0 && asked <= 60_000 ? asked : 250;
+}
+
 /**
- * The one-shot summary call. Collects the adapter's text deltas into the
- * summary; usage/stop pass through untouched. Throws when the model
- * produced no text — the caller reports it and nothing is persisted.
+ * The summary call, with ONE retry.
+ *
+ * 0.39.1: `/compact` had no retry at all. The kernel owns retries
+ * (ADR-0005) and this path does not go through the kernel — it calls the
+ * adapter directly — so a gateway that drops a 95k-token summary stream
+ * failed `/compact` every single time, with an honest message and no way
+ * forward. The adapter classifies that as a retryable `network` failure
+ * (the transport-failure-after-headers class); here is the only place
+ * that can act on it.
+ *
+ * ONE retry, not a loop, and not the kernel's budget: a summary re-pays
+ * its whole input, which on the sessions that need compacting is the
+ * most expensive request the session makes. A permanent error still
+ * throws on the first attempt — the retry is keyed on the classification
+ * the adapter already made, never on the fact that something failed.
  */
 export async function summarizeConversation(options: SummarizeConversationOptions): Promise<SummarizeConversationResult> {
+	// Asked as a CALL, twice, because `aborted` is a readonly property and
+	// the narrowing from the first read would otherwise be carried across
+	// the await — where the whole point is that it can have changed.
+	const aborted = (): boolean => options.signal?.aborted === true;
+	try {
+		return await summaryAttempt(options);
+	} catch (err) {
+		// The caller's cancel is the caller's: an aborted `/compact` must
+		// not spend a second call on its way out.
+		if (!retryableStructured(err) || aborted()) throw err;
+		await new Promise((r) => setTimeout(r, retryWaitMs(err)));
+		if (aborted()) throw err;
+		return await summaryAttempt(options);
+	}
+}
+
+/**
+ * ONE attempt. Collects the adapter's text deltas into the summary;
+ * usage/stop pass through untouched. Throws when the model produced no
+ * text — the caller reports it and nothing is persisted.
+ */
+async function summaryAttempt(options: SummarizeConversationOptions): Promise<SummarizeConversationResult> {
 	const { adapter, model, messages } = options;
 	let text = "";
 	let usage: RawUsage | null = null;

@@ -261,6 +261,15 @@ describe("ADR-0044 cli: /compact on a real PTY", () => {
 		expect(ctxs.length).toBeGreaterThanOrEqual(2);
 		expect(ctxs.at(-1)!).toBeLessThan(ctxs[0]!);
 
+		// 0.39.1 — the boundary row is ON SCREEN, under the recap, and says
+		// the SAME seq the durable record does. Before this it was written
+		// by nothing: `summarized` is appended off-loop, so the one `case`
+		// that could draw it had no caller and the log's boundary had no
+		// rendering anywhere.
+		expect(plain).toContain("[summarized up to seq 14]");
+		// …and it is BELOW the recap, not somewhere above it.
+		expect(plain.indexOf("[summarized up to seq 14]")).toBeGreaterThan(plain.indexOf("[/compact] ✦ compacted"));
+
 		// The summarized event is on disk, keyed to the covered boundary:
 		// 9 rounds total (8 seed inputs at 0..21 + the go turn at 22) →
 		// K=4 kept → covered rounds 1-5, boundary = the event before the
