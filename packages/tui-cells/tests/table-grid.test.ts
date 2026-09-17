@@ -45,11 +45,17 @@ const ASCII = [
 	"| search_text | search the corpus, honouring .gitignore and skipping the credential set | wrapped row |",
 ].join("\n");
 
+// Escaped, not literal: the tracked tree is CJK-free (CLAUDE.md), and the
+// existing table cases in tui2-md-table.test.ts escape for the same reason.
+// The cells are wide-character headers and one long wide sentence,
+// chosen so a width error shows up against the rails. (And yes: the first
+// draft of THIS comment named them in the characters themselves and the
+// gate caught that too.)
 const CJK = [
-	"| 工具 | 用途 | 备注 |",
+	"| \u5de5\u5177 | \u7528\u9014 | \u5907\u6ce8 |",
 	"|---|---|---|",
-	"| 读文件 | 读一个文件或一段范围 | 默认 200 行 |",
-	"| 搜索 | 列出一个目录的条目,给了 glob 就递归搜索整棵树 | 中日韩行 |",
+	"| \u8bfb\u6587\u4ef6 | \u8bfb\u4e00\u4e2a\u6587\u4ef6\u6216\u4e00\u6bb5\u8303\u56f4 | \u9ed8\u8ba4 200 \u884c |",
+	"| \u641c\u7d22 | \u5217\u51fa\u4e00\u4e2a\u76ee\u5f55\u7684\u6761\u76ee,\u7ed9\u4e86 glob \u5c31\u9012\u5f52\u641c\u7d22\u6574\u68f5\u6811 | \u4e2d\u65e5\u97e9\u884c |",
 ].join("\n");
 
 const LADDER = [88, 80, 72, 64, 56, 48];
