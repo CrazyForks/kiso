@@ -3,7 +3,7 @@
  "Add isBetween(n, lo, hi) to src/range.js and export it: true when lo <= n <= hi.",
  "Add maxOf(values) to src/range.js and export it: the maximum of an array of numbers, or null when the array is empty.",
  "Add formatRange(a, b) to src/range.js and export it: returns the string 'a-b' with a <= b.",
- "Add parseRangeList(text) to src/range.js and export it: split text on commas, parse each part with parseRange, and SKIP parts that do not parse. A part parses only if it is of the form a-b with a number on each side; parseRange cannot report failure, so the check is yours. No range for a part that does not parse, and no exception.",
+ "Add parseRangeList(text) to src/range.js and export it: split text on commas and turn each part into a range, SKIPPING parts that do not parse. A part parses when every piece of it, split on '-', is a number: 'bad' and '' do not parse. A part that is a single number is the one-point range n-n; a part a-b uses parseRange. parseRange cannot report failure, so the check is yours. No range for a part that does not parse, and no exception.",
  "Add minOf(values) to src/range.js and export it: the minimum of an array of numbers, or null when the array is empty.",
  "Add sumOf(values) to src/range.js and export it: the sum of an array of numbers (0 when empty).",
  "Add startsOf(text) to src/range.js and export it: the array of start values of parseRangeList(text).",
