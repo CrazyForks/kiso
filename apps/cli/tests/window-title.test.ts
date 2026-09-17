@@ -43,8 +43,11 @@ describe("the window title text", () => {
 	it("the cut counts wide characters as two cells, never as one", () => {
 		// 30 double-width characters are 60 cells: the cut lands inside them.
 		// A title measured in code points would have let all 30 through and
-		// overflowed the tab by 20 columns.
-		const out = windowTitleText([ev("漢".repeat(30))], "kiso");
+		// overflowed the tab by 20 columns. Written as an ESCAPE, not as the
+		// character: the tracked tree is English and the CJK gate scans it,
+		// and a width fixture is the one place where the realistic input IS
+		// a wide script. The escape is the same code point, spelled ASCII.
+		const out = windowTitleText([ev("\u6f22".repeat(30))], "kiso");
 		const shown = out.slice("kiso — ".length, -" — kiso".length);
 		expect([...shown].length).toBe(20); // 19 wide + the mark
 		expect(shown.endsWith("…")).toBe(true);
