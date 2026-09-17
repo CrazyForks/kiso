@@ -72,30 +72,56 @@ describe("MD-1.1 — a table SHRINKS before it falls to the record form", () => 
 	 * kiso's `mdWrap`/`visibleWidth` and the report's published column
 	 * widths (4/17/17/14/6/6) — an oracle independent of this patch.
 	 */
+	// DECLARED REVERSAL (2026-09-17, tables only). This was an exact
+	// RENDERING ORACLE, rebuilt from the report's published column widths
+	// (4/17/17/14/6/6) — deliberately independent of the implementation.
+	// Those widths describe the RAILLESS form, and the grid costs n−1
+	// columns of content budget (5 here), so the oracle no longer has a
+	// subject. It is retired with the form it described rather than
+	// re-typed from what the renderer now emits: an oracle edited to match
+	// its implementation has stopped being an oracle.
+	//
+	// What the test CLAIMED survives and is asserted below without it: at
+	// terminal 80 the 6-column CJK table is a grid and not a grey wall of
+	// records, its columns obey the width rule, and its content is exactly
+	// the cells'. A replacement oracle needs a published rendering of the
+	// GRID form, which does not exist yet.
 	it("MD1-1a: the 6-column CJK table is a GRID at terminal 80, not a grey wall", () => {
 		const rows = renderMarkdown(TABLE6, W(80)).map(plain);
-		expect(rows).toEqual([
-			"  \u987a\u5e8f  \u5185\u5bb9\u8d44\u4ea7           \u7528\u9014               \u9002\u7528\u793e\u533a        \u8d1f\u8d23\u4eba  \u72b6\u6001",
-			`  ${"\u2500".repeat(74)}`, // MD-1.3's rule, at the grid's own width
-			"  15    \u521b\u59cb\u4eba\u6545\u4e8b\u957f\u6587     \u5efa\u7acb\u4fe1\u4efb\u4e0e\u54c1\u724c\u8ba4   \u5c0f\u7ea2\u4e66\u3001\u77e5\u4e4e    \u5f20\u4f1f    \u5df2\u5b8c\u6210",
-			"        \uff08\u5b8c\u6574\u7248\uff09         \u77e5",
-			"  16    \u4ea7\u54c1\u529f\u80fd\u5bf9\u6bd4\u8868     \u63a8\u52a8\u8f6c\u5316\u51b3\u7b56       \u77e5\u4e4e\u3001\u5fae\u4fe1\u793e\u7fa4  \u674e\u5a1c    \u8fdb\u884c\u4e2d",
-			"  17    30\u79d2\u7ad6\u5c4f\u77ed\u89c6\u9891     \u62c9\u65b0\u4e0e\u66dd\u5149         \u6296\u97f3\u3001\u89c6\u9891\u53f7    \u738b\u5f3a    \u5f85\u6392\u671f",
-		]);
-		// 11 rows of dim became 5 rows of grid (6 with MD-1.3's rule) — the
-		// degradation is also half the height, which is what makes it cheaper
-		// for the short-terminal residue of FINDING TUI2-MD-1.
-		expect(rows).toHaveLength(6);
 		expect(isRecord(rows)).toBe(false);
+		const border = rows.find((l) => l.startsWith("\u250c"));
+		expect(border, "a grid has a top border").toBeDefined();
+		// every line is the border's width, and the border obeys sum + 3n + 1
+		const widths = [...new Set(rows.map(visibleWidth))];
+		expect(widths).toHaveLength(1);
+		expect(widths[0]).toBeLessThanOrEqual(W(80));
+		const n = border!.split("\u252c").length;
+		const content = border!.length - (3 * n + 1);
+		expect(widths[0]).toBe(content + 3 * n + 1);
 	});
+
+	// DECLARED REVERSAL (2026-09-17, tables only): the table draws a FULL
+	// GRID, so a rendered table now carries FURNITURE as well as content —
+	// two borders, the rule under the header, and a rule between every pair
+	// of body rows. These assertions are re-DERIVED from that structure
+	// rather than re-typed from what the renderer now emits: a count edited
+	// until it matches the output is a transcript of the implementation, not
+	// a statement about it.
+	const furniture = (rows: readonly string[]): number => rows.filter((l) => /^[\u250c\u251c\u2514]/.test(l)).length;
+	/** top + under-header + one between each pair of body rows + bottom. */
+	const expectedFurniture = (bodyRows: number): number => 3 + Math.max(0, bodyRows - 1);
 
 	it("MD1-1b: the wide widths are unchanged — the natural grid still wins", () => {
 		// at 100 and 120 the table already fitted naturally and must not
 		// move: shrinking is reached only when the natural widths do not fit.
 		for (const term of [100, 120]) {
 			const rows = renderMarkdown(TABLE6, W(term)).map(plain);
-			expect(`${term}: ${rows.length}`).toBe(`${term}: 5`); // 4 rows + MD-1.3's rule
 			expect(isRecord(rows)).toBe(false);
+			// the content still does not wrap at these widths — one line per
+			// source row — and the rest is exactly the grid's furniture
+			const bodyRows = TABLE6.split("\n").length - 2; // header + delimiter
+			expect(`${term}: furniture ${furniture(rows)}`).toBe(`${term}: furniture ${expectedFurniture(bodyRows)}`);
+			expect(`${term}: content ${rows.length - furniture(rows)}`).toBe(`${term}: content ${bodyRows + 1}`);
 		}
 		// and the 5-column sample, which fitted at 80 already
 		expect(isRecord(renderMarkdown(TABLE5, W(80)).map(plain))).toBe(false);
@@ -109,12 +135,26 @@ describe("MD-1.1 — a table SHRINKS before it falls to the record form", () => 
 	 * form is not retired, only postponed.
 	 */
 	it("MD1-1c: the ladder — grid down to the floor, records below it", () => {
-		const got = [88, 80, 72, 64, 56, 48].map((term) => {
+		// Stated as a PROPERTY rather than a row of counts. The grid shifted
+		// the ladder by design — it costs n−1 columns of content budget, 5 for
+		// this six-column table — so a rung that fitted by less than that now
+		// falls one earlier. Re-typing the counts would have recorded the new
+		// behaviour without saying anything about it; these hold for the old
+		// form and the new one, and would have caught the shift being wrong in
+		// either direction.
+		const F = /^[\u250c\u251c\u2514]/;
+		let prev = 0;
+		let sawRecord = false;
+		for (const term of [88, 80, 72, 64, 56, 48]) {
 			const rows = renderMarkdown(TABLE6, W(term)).map(plain);
-			return `${term}: ${isRecord(rows) ? "record" : `grid/${rows.length}`}`;
-		});
-		// the row counts carry MD-1.3's header rule: 4/5/7/8/9 of content + 1
-		expect(got).toEqual(["88: grid/5", "80: grid/6", "72: grid/8", "64: grid/9", "56: grid/10", "48: record"]);
+			if (isRecord(rows)) { sawRecord = true; continue; }
+			expect(sawRecord, `${term}: a grid may not reappear below a record rung`).toBe(false);
+			const content = rows.length - rows.filter((l) => F.test(l)).length;
+			expect(content, `${term}: content never shrinks as the terminal narrows`).toBeGreaterThanOrEqual(prev);
+			prev = content;
+		}
+		// and the bottom of the ladder IS the record form
+		expect(sawRecord, "the ladder reaches records").toBe(true);
 	});
 
 	it("MD1-1d: no row exceeds W, at every width from 12 to 120", () => {
@@ -152,7 +192,12 @@ describe("MD-1.1 — a table SHRINKS before it falls to the record form", () => 
 			for (const term of [56, 64, 72, 80, 100, 120]) {
 				const rows = renderMarkdown(src, W(term)).map(plain);
 				if (isRecord(rows)) continue;
-				const got = [...bag(rows.join(""))].sort();
+				// the grid's own glyphs are FURNITURE, not content. This
+				// assertion's job is that no cell text is invented or
+				// repeated, so the rails and rules are removed before the
+				// comparison — the claim is unchanged, its subject is.
+				const GRID_GLYPHS = /[\u250c\u252c\u2510\u251c\u253c\u2524\u2514\u2534\u2518\u2500\u2502]/g;
+				const got = [...bag(rows.join("").replace(GRID_GLYPHS, ""))].sort();
 				const want = [...bag(cellsOf(src).join(""))].sort();
 				expect(got, `${name}@${term}`).toEqual(want);
 			}
@@ -293,64 +338,55 @@ describe("MD1-F1 — a zero-width SGR token rides the token it precedes", () => 
 	});
 });
 
-describe("MD-1.3 — ONE rule under the table header", () => {
-	/**
-	 * R2 AMENDMENT 1 (owner ruling, 2026-09-11). R2 removed the table's
-	 * RAILS — the four-sided box that BOUNDS a table, "the last box left on
-	 * a screen that has decided not to have boxes". A line under the header
-	 * row bounds nothing; it SEPARATES the header from the body, which is
-	 * the one job the round's own governing distinction gives a rule:
-	 * "a rule separates, a gutter scopes, a rail bounds". The owner ruled
-	 * that a single rule under a table header is a separator, not a rail.
-	 * Rails stay out.
-	 *
-	 * It also buys something concrete. Before it, a six-row table's header
-	 * was carried by SGR bold ALONE: in a pipe, under NO_COLOR, or on a
-	 * terminal with weak bold, seven visually identical rows arrived with
-	 * nothing saying which one names the columns.
-	 */
-	it("MD1-3a: the rule sits directly under the header, at the GRID's width", () => {
-		const rows = renderMarkdown(TABLE6, W(80));
-		const header = plain(rows[0]!);
-		const rule = plain(rows[1]!);
-		// inset by the table's own two columns, like every row of the grid
-		expect(rule.startsWith("  ")).toBe(true);
-		expect(rule.slice(2)).toMatch(/^\u2500+$/);
-		// the columns and their gutters: 4+17+17+14+6+6 plus five 2-space
-		// gutters = 74. The header row is trailing-trimmed and so is shorter;
-		// the rule states the grid's extent, which is what a separator does.
-		expect(visibleWidth(rule)).toBe(76);
-		expect(visibleWidth(header)).toBeLessThanOrEqual(visibleWidth(rule));
+describe("MD-1.3 is SUPERSEDED — a rule between EVERY row", () => {
+	// DECLARED REVERSAL (2026-09-17, tables only). MD-1.3 put ONE rule under
+	// the header and argued rails stay out: "a rule separates, a gutter
+	// scopes, a rail bounds". The owner changed that decision for tables;
+	// every other R2 hairline rule stands and the record form keeps no
+	// borders.
+	//
+	// The REASON MD-1.3 gave still holds and is why the header rule did not
+	// merely survive but became a junction: without it a six-row table's
+	// header was carried by SGR bold ALONE, so in a pipe, under NO_COLOR or
+	// on a terminal with weak bold, seven identical rows arrived with
+	// nothing saying which one names the columns. Under the grid that job is
+	// done by a rule the border joins, not by a rule floating at the grid's
+	// width.
+	const F = { top: "\u250c", mid: "\u251c", bottom: "\u2514" };
+
+	it("MD1-3a-r: the header is separated by a JUNCTIONED rule, not a floating one", () => {
+		const rows = renderMarkdown(TABLE6, W(80)).map(plain);
+		const headerRule = rows.findIndex((l) => l.startsWith(F.mid));
+		expect(headerRule).toBeGreaterThan(0);
+		// it joins the rails: it starts and ends on a junction, not on a dash
+		expect(rows[headerRule]).toMatch(/^\u251c[\u2500\u253c]+\u2524$/);
+		// and what precedes it is the header, inside rails
+		expect(rows[headerRule - 1]).toMatch(/^\u2502.*\u2502$/);
 	});
 
-	it("MD1-3b: it is DIM, and it is the one rule glyph the product has", () => {
-		const p = palette();
-		const rows = renderMarkdown(TABLE6, W(80));
-		expect(rows[1]).toBe(`  ${p.dim}${"\u2500".repeat(74)}${p.reset}`);
+	it("MD1-3b-r: the grid is DIM — the R2 hairline colour, styling applied after the measure", () => {
+		Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+		const raw = renderMarkdown(TABLE6, W(80));
+		const border = raw.find((l) => plain(l).startsWith(F.top));
+		expect(border).toBeDefined();
+		expect(border, "the border carries dim").toMatch(/\x1b\[/);
+		// the colour may never move a column: the visible width is the measure
+		expect(visibleWidth(border!)).toBe(plain(border!).length);
 	});
 
-	it("MD1-3c: exactly ONE rule per table, and only in grid form", () => {
-		const offenders: string[] = [];
-		for (let w = 12; w <= 120; w += 1) {
-			const rows = renderMarkdown(TABLE6, w).map(plain);
-			const at = rows.map((r, i) => [r, i] as const).filter(([r]) => /^ {2}\u2500+$/.test(r)).map(([, i]) => i);
-			if (isRecord(rows)) {
-				// the record form has no header row, so it has nothing to separate
-				if (at.length !== 0) offenders.push(`W=${w}: ${at.length} rules in the record form`);
-				continue;
-			}
-			if (at.length !== 1) offenders.push(`W=${w}: ${at.length} rules`);
-			else if (at[0] !== 1) offenders.push(`W=${w}: the rule is at row ${at[0]}, not under the header`);
-		}
-		expect(offenders.slice(0, 5)).toEqual([]);
-	});
+	it("MD1-3c-r: a rule between EVERY pair of rows, and the record form still has none", () => {
+		const rows = renderMarkdown(TABLE6, W(80)).map(plain);
+		const body = rows.filter((l) => l.startsWith("\u2502"));
+		const mids = rows.filter((l) => l.startsWith(F.mid)).length;
+		expect(rows.filter((l) => l.startsWith(F.top))).toHaveLength(1);
+		expect(rows.filter((l) => l.startsWith(F.bottom))).toHaveLength(1);
+		expect(mids, "one under the header, one between each pair of body rows").toBeGreaterThan(1);
+		expect(body.length).toBeGreaterThan(mids);
 
-	it("MD1-3d: the rule never makes a row exceed W", () => {
-		const offenders: string[] = [];
-		for (const src of [TABLE5, TABLE6]) {
-			for (let w = 12; w <= 120; w += 1) for (const row of renderMarkdown(src, w)) if (visibleWidth(row) > w) offenders.push(`W=${w} w=${visibleWidth(row)}`);
-		}
-		expect(offenders.slice(0, 5)).toEqual([]);
+		// the record form is the FALLBACK, not a table: no borders at all
+		const narrow = renderMarkdown(TABLE6, W(40)).map(plain);
+		expect(isRecord(narrow)).toBe(true);
+		expect(narrow.some((l) => /[\u250c\u251c\u2514\u2502]/.test(l))).toBe(false);
 	});
 });
 

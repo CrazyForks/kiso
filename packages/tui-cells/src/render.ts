@@ -342,8 +342,14 @@ function toolSummaryDetail(name: string, input: Record<string, unknown>, result:
 			const exit = exitCodeOf(result);
 			return `${command} (exit ${exit})`;
 		}
-		case "list_dir":
-			return String(input.path ?? "(root)");
+		case "list_dir": {
+			// "(root)" already answered an ABSENT path. A model that sends
+			// "." explicitly is making the same request and was getting the
+			// dot on the row. `./` likewise. Anything else — including `..`
+			// and a dotfile directory like `.github` — is a real path.
+			const dir = String(input.path ?? ".");
+			return dir === "." || dir === "./" ? "(root)" : dir;
+		}
 		case "search_text":
 			return searchSubject(input);
 		default:
@@ -386,8 +392,14 @@ function toolTargetRaw(name: string, input: Record<string, unknown>): string {
 			return String(input.path ?? "?");
 		case "shell":
 			return String(input.command ?? "?");
-		case "list_dir":
-			return String(input.path ?? "(root)");
+		case "list_dir": {
+			// "(root)" already answered an ABSENT path. A model that sends
+			// "." explicitly is making the same request and was getting the
+			// dot on the row. `./` likewise. Anything else — including `..`
+			// and a dotfile directory like `.github` — is a real path.
+			const dir = String(input.path ?? ".");
+			return dir === "." || dir === "./" ? "(root)" : dir;
+		}
 		case "search_text":
 			return searchSubject(input);
 		default:

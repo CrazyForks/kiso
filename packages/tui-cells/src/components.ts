@@ -950,7 +950,7 @@ class ToolExecution implements Component {
 			// rewrites it in place: `3s · esc stops` → `exit 0 · 90 lines ·
 			// 3.2s`.
 			const gestures = c.name === "shell" ? " · esc stops · alt+⏎ redirects" : "";
-			const status = pickTier([`${elapsed}s${gestures}`, `${elapsed}s`], Math.max(1, W - visibleWidth(noteIndent())));
+			const status = pickTier([`${elapsedLabel(elapsed)}${gestures}`, elapsedLabel(elapsed)], Math.max(1, W - visibleWidth(noteIndent())));
 			const live = toolBlockBody(c, W, ctx);
 			if (live.length > 0) return slabBlock(gutterCut(gutter, `${verbCol} ${liveTarget(c)}`, W)[0]!, live, status, W);
 			// DC-48 — THE THREE-ROW CARD IS ONE ROW, so it is assembled here
@@ -972,7 +972,7 @@ class ToolExecution implements Component {
 			// way so the COMMAND keeps something to say, and the elapsed —
 			// pin 4's core — never does.
 			const MIN_TARGET = 10; // the gutter, the verb column, a character of command
-			const oneRow = pickTier([`${elapsed}s${gestures}`, `${elapsed}s`], Math.max(1, W - MIN_TARGET - 3));
+			const oneRow = pickTier([`${elapsedLabel(elapsed)}${gestures}`, elapsedLabel(elapsed)], Math.max(1, W - MIN_TARGET - 3));
 			const room = Math.max(4, W - visibleWidth(oneRow) - 3);
 			const only = gutterCut(gutter, `${verbCol} ${liveTarget(c)}`, room)[0]!;
 			return slabBlock(`${only}${p.dim} · ${oneRow}${p.reset}`, [], null, W);
@@ -980,7 +980,10 @@ class ToolExecution implements Component {
 		// W2: ◦ replaces → for QUEUED — · is the separator inside every
 		// metadata group; a queued marker that is also the separator
 		// glyph reads as noise
-		return gutterCut(`${p.dim}◦${p.reset} `, `${verbCol} ${liveTarget(c)}`, W);
+		// The `◦` carried "not started yet" ALONE, and a marker is not a
+		// word: on a screen where running and queued rows sit together, a
+		// reader has to already know the glyph. The suffix says it.
+		return gutterCut(`${p.dim}◦${p.reset} `, `${verbCol} ${liveTarget(c)}${p.dim} · queued${p.reset}`, W);
 	}
 }
 
@@ -1919,14 +1922,42 @@ class Banner implements Component {
  *  height is its row count. */
 export const CAP_TASK_LIVE = 6;
 
-/** W20 — the settled block's duration, the `2h 14m` form (the task
- *  narrative's long-horizon idiom): minutes+seconds under an hour,
- *  hours+minutes past it. */
-export function formatDuration(totalSeconds: number): string {
+/** The two duration idioms, from ONE implementation.
+ *
+ *  They agree in every branch but the hour: W20's settled task block says
+ *  `2h 14m` (a long-horizon narrative does not care about seconds), and a
+ *  LIVE elapsed label says `1h 2m 3s` (a running clock does). A near-copy
+ *  differing in one branch is the drift that a shared helper exists to
+ *  prevent, so the branch is a parameter.
+ *
+ *  Negative is clamped: a clock skew is not a negative duration. */
+function duration(totalSeconds: number, hoursKeepSeconds: boolean): string {
 	const s = Math.max(0, Math.round(totalSeconds));
 	if (s < 60) return `${s}s`;
 	const m = Math.floor(s / 60);
-	return m < 60 ? `${m}m ${s % 60}s` : `${Math.floor(m / 60)}h ${m % 60}m`;
+	if (m < 60) return `${m}m ${s % 60}s`;
+	const h = Math.floor(m / 60);
+	return hoursKeepSeconds ? `${h}h ${m % 60}m ${s % 60}s` : `${h}h ${m % 60}m`;
+}
+
+/** W20 — the settled block's duration, the `2h 14m` form (the task
+ *  narrative's long-horizon idiom): minutes+seconds under an hour,
+ *  hours+minutes past it. Unchanged. */
+export function formatDuration(totalSeconds: number): string {
+	return duration(totalSeconds, false);
+}
+
+/** The LIVE elapsed label — every place a duration is shown while it is
+ *  still running, and on the card that settles from it, so a card and the
+ *  status row can never disagree.
+ *
+ *  It replaced the hand-written second counts, which is how the status
+ *  row came to read "working 637s": ten minutes as a four-figure number,
+ *  with no branch anywhere that said otherwise. Past an hour it keeps
+ *  seconds, because a clock the user is watching tick should not stop
+ *  ticking. */
+export function elapsedLabel(totalSeconds: number): string {
+	return duration(totalSeconds, true);
 }
 
 /**

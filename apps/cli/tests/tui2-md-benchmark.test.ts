@@ -123,19 +123,23 @@ describe("TUI2-MD ⑥ — the acceptance content, end to end", () => {
 		// the list is normalized and hangs — E1: to `- `, which is still
 		// markdown when a human copies the row out of the terminal
 		expect(text).toContain("- ");
-		// the table is drawn, not passed through. R2 supersession: it is
-		// drawn by ALIGNMENT now — the rails were the last box on a screen
-		// that has decided not to have boxes, and a table is bounded by the
-		// blank lines above and below it exactly as every other block is.
-		// The subject is unchanged: the source markup does not reach the
-		// screen, and the cells do.
-		// the RAILS specifically — `│` survives elsewhere as a scoping
-		// gutter (a diff body, a quote), which is the distinction R2 drew:
-		// a rule separates, a gutter scopes, and only the separators
-		// collapsed into one vocabulary.
-		expect(text).not.toMatch(/[├┼┤]/);
-		expect(text).not.toContain("|---|");
-		expect(text).toMatch(/ {2}\S+ +\S+ +\S/);
+		// the table is drawn, not passed through. DECLARED REVERSAL
+		// (2026-09-17, tables only): R2 drew it by ALIGNMENT and this case
+		// asserted the absence of `├┼┤` to say so. The owner reversed that
+		// for tables — the grid is back, four-sided, verified in their own
+		// terminal — so the rails ARE on the screen and the old assertion
+		// said the opposite of what the product now does.
+		//
+		// THE SUBJECT IS UNCHANGED and is what this case was always about:
+		// the source markup does not reach the screen, and the cells do.
+		// That is asserted directly below, which is stronger than the
+		// absence of a glyph — a renderer that dropped the table entirely
+		// would have passed the old line.
+		expect(text).not.toContain("|---|"); // the delimiter row never surfaces
+		expect(text).not.toMatch(/^\s*\|.*\|\s*$/m); // nor a raw source row
+		// and the drawn table is there: a border and a rail-bounded row
+		expect(text).toMatch(/[┌└][─┬┴]*[┐┘]/);
+		expect(text).toMatch(/│.*│/);
 	}, 90_000);
 
 	it("T-MD-45: the styled bytes are the round's alphabet and nothing else", () => {
