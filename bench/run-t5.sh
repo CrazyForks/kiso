@@ -277,14 +277,33 @@ CFG
     seg 1 printf '%s\n' "/model ds $BENCH_EFFORT" "$(TURN 1)" "$(TURN 2)" "$(TURN 3)" "$(TURN 4)" "$(TURN 5)"
     seg 2 printf '/compact\n'
     seg 3 printf '%s\n' "$(TURN 6)" "$(TURN 7)" "$(TURN 8)"
+    # NO `commit` FIELD, and its absence is deliberate.
+    #
+    # It held `git -C $B/.. rev-parse --short HEAD` — the BENCH CLONE's HEAD,
+    # not the running binary's. Both arms of a paired run therefore recorded
+    # the SAME commit whichever binary they executed, and under
+    # KISO_BIN="npx -y ..." it named a commit that bin was never built from.
+    # A field that cannot differ between the things it claims to identify is
+    # not provenance, it is the shape of provenance — the same defect as the
+    # host-version probe above, one field over.
+    #
+    # The running binary cannot attest a commit at all: `$KISO_BIN --version`
+    # prints the package version and nothing else, and no build-commit
+    # constant exists anywhere in the CLI for it to report. So there is
+    # nothing honest to put here, and a fabricated one is worse than none.
+    # `kisoVersion` above is the provenance this record can carry.
+    #
+    # What CAN be attested about the artifact — the resolved executable, its
+    # entry-file digest, and the installed package — is asked of the binary
+    # by capture-config.mjs and lands in config.json beside this file. The
+    # historical records are not rewritten; their `commit` stands as what it
+    # always was, the bench clone's HEAD.
     node -e "
 const fs = require('fs');
-const { execSync } = require('child_process');
 const meta = {
   tool: 'kiso', task: 'T5', run: '$RUN', round: process.env.KISO_ROUND || null,
   model: 'deepseek-flash',
   kisoVersion: '$KISO_VERSION',
-  commit: execSync('git -C $B/.. rev-parse --short HEAD').toString().trim(),
   createdAt: Date.now(),
 };
 fs.writeFileSync('$WORK/meta.json', JSON.stringify(meta, null, 1) + '\n');
