@@ -1,8 +1,9 @@
 # ADR-0054: The default tool table — what is always present, and what deferral is reserved for
 
-- **Status:** Proposed — the decision was taken by the owner on 2026-09-16
-  and reached this draft through the lead. **Ratification is the owner's
-  own act**; this ADR is not Accepted until they take it.
+- **Status:** **Accepted** — ratified by the owner on 2026-09-16, in their
+  own words, directly, on the draft below. The decision itself was taken
+  the same day and reached this draft through the lead; ratification is
+  the owner's own act and they took it.
 - **Date:** 2026-09-16
 - **Layer:** the CLI's built-in extension layer and the coding tool set
   (`packages/tools-node`). **Zero code diff** — this ADR records a decision
