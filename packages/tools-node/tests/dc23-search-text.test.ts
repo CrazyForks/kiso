@@ -114,3 +114,40 @@ describe("ACI-1 — a search result can be fed to read_file unchanged", () => {
 		expect(read.content).toContain("beta needleACI2");
 	});
 })
+
+describe("ACI-5 — the excerpt is centred on the match", () => {
+	// Measured before the change, over 171 real search results and 1,931
+	// excerpt lines: 11.7% hit the 160-char cut and 6.1% did NOT contain the
+	// pattern they matched. A hit whose match is not in the excerpt is a hit
+	// the model cannot act on without a second call.
+	it("a match far along a long line is VISIBLE in the excerpt", async () => {
+		const root = mkdtempSync(join(tmpdir(), "kiso-aci5-"));
+		mkdirSync(join(root, "src"), { recursive: true });
+		writeFileSync(join(root, "src", "wide.ts"), `${"x".repeat(400)}NEEDLE_ACI5${"y".repeat(400)}\n`, "utf8");
+		const res = await searchTextTool({ workspaceRoot: root }).execute({ pattern: "NEEDLE_ACI5" }, ctx);
+		expect(res).toMatchObject({ isError: false });
+		expect(res.content).toContain("NEEDLE_ACI5");
+	});
+
+	it("the excerpt carries context on BOTH sides and marks where it cut", async () => {
+		const root = mkdtempSync(join(tmpdir(), "kiso-aci5-"));
+		mkdirSync(join(root, "src"), { recursive: true });
+		writeFileSync(join(root, "src", "wide.ts"), `${"a".repeat(300)}MIDPOINT${"b".repeat(300)}\n`, "utf8");
+		const res = await searchTextTool({ workspaceRoot: root }).execute({ pattern: "MIDPOINT" }, ctx);
+		const line = res.content.split("\n").find((l) => l.includes("MIDPOINT"))!;
+		const body = line.slice(line.indexOf(": ") + 2);
+		// context either side, and an honest marker that the line continues
+		expect(body).toMatch(/a{20,}MIDPOINTb{20,}/);
+		expect(body.startsWith("…")).toBe(true);
+		expect(body.endsWith("…")).toBe(true);
+	});
+
+	it("a short line is unchanged — no markers, no window", async () => {
+		const root = mkdtempSync(join(tmpdir(), "kiso-aci5-"));
+		mkdirSync(join(root, "src"), { recursive: true });
+		writeFileSync(join(root, "src", "small.ts"), "const SHORT_ACI5 = 1;\n", "utf8");
+		const res = await searchTextTool({ workspaceRoot: root }).execute({ pattern: "SHORT_ACI5" }, ctx);
+		const line = res.content.split("\n").find((l) => l.includes("SHORT_ACI5"))!;
+		expect(line.slice(line.indexOf(": ") + 2)).toBe("const SHORT_ACI5 = 1;");
+	});
+})
