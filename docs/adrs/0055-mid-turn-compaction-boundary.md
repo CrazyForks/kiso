@@ -45,7 +45,7 @@ a tier system.
 
 ### 1. One threshold
 
-When the context crosses `min(0.5 × window, 400K)`, compact at the **next
+When the context crosses `min(0.5 × window, 300K)`, compact at the **next
 settled round**. Never the round in flight. Pairing and do-not-compact
 rules are unchanged.
 
@@ -116,7 +116,7 @@ autonomous runs — is the one least likely to be watching.
 Overflow recovery and the reserve guard are the ONLY new control paths in
 the loop. That is the whole surface.
 
-## Why 400K — a cost model, and what in it is an assumption
+## Why 300K — a cost model, a rule, and a count
 
 **Assumptions, named as assumptions.** DeepSeek off-peak prices (cache
 hit 0.003 / miss 0.15 / output 0.6 per M tokens, the rates REG-1 recorded
@@ -219,10 +219,72 @@ a point. **Within the region the choice is quality**, as it was before the
 model existed — fewer summaries, less decay — which is why 400K was
 proposed in the first place.
 
-Both facts go to the owner together: the rule as specified selects 200K,
-and the rule's answer is an artefact of an unjustified session shape. The
-default is the owner's to ratify with both in view, and it is a knob
-either way.
+### Then the shapes were measured, and the imagined ones were wrong
+
+The 5% rule was replaced with one that fits a region — **minimax regret**:
+across every cell, each threshold's worst-case excess over that cell's own
+cheapest; the default is the threshold minimising that worst case. Over
+the 84 imagined cells it selects **200K at 24.3%**.
+
+But the session shape was still imagined, so it was **counted instead**,
+free, from the durable logs on this machine: 93 interactive sessions (of
+99; 12 requests carried `known: false` and were excluded rather than
+zeroed) and 207 autonomous bench legs (of 215 leg logs; the other 8 never
+produced a usage event, and the 207 trace files under `sessions/traces/`
+are a different artefact and are not sessions).
+
+| | interactive (93) | autonomous legs (207) | **the model assumed** |
+|---|---|---|---|
+| requests per session | median 7, p90 18, max 104 | median 87, p90 114, max 137 | **300** |
+| new tokens per request | median 572, p90 2,451 | median 362, p90 475 | **3,000** |
+| peak context | median 8K, p90 39K, max 132K | median 30K, p90 49K, max **502K** | grows past 900K |
+| sessions ever above 200K | **0%** | 1.9% | — |
+| sessions ever above 400K | **0%** | **0.5%, one leg** | — |
+
+**The assumed shape is an order of magnitude outside both populations.**
+
+Rerunning minimax on shapes drawn from those measurements — tail still
+swept, since the durable log cannot report it — gives **300K at 15.25%**,
+and that is the default, per the rule: the count was in before the branch
+reached the owner, so the real shapes decide.
+
+**But the number that matters most is this one: five of the six real
+shapes never cross ANY candidate threshold.** 83% of the cells are dead —
+every threshold costs exactly the same. The default is therefore chosen by
+**one observed session in three hundred**: the single leg that reached
+502K.
+
+And that leg **did not overflow and finished normally** (70 tool-use
+stops, 8 end-turn, no `context_overflow` anywhere in its log). In 300
+measured sessions there are **zero overflows**.
+
+### What that does and does not mean
+
+It does **not** retire this ADR. The defect is real and verified in the
+tree, and the population it protects — long autonomous runs — is precisely
+the tail that 300 sessions barely sample. One-in-three-hundred is the
+definition of the case, not a reason to dismiss it.
+
+It does mean three things must be said plainly:
+
+- **The threshold is the least important of the three control paths.** It
+  fires for about 2% of autonomous runs. The reserve guard and the
+  overflow recovery are what stand between a long run and a hard stop, and
+  they are not threshold-dependent.
+- **The default rests on thin evidence and says so.** 300K is the least-bad
+  choice across every shape we could imagine AND every shape we measured;
+  it is not a finding, and one more long session could move it.
+- **The measured peaks are peaks UNDER TODAY'S POLICY**, microcompact
+  included. They report what sessions actually sent, not what they would
+  have wanted to send. For choosing a threshold that acts on actual
+  context, that is the right quantity; for asking "would A1b have helped",
+  it is confounded, and a cleaner answer needs the instrument, not the
+  logs.
+
+The default is **300K**, produced by the stated rule on measured shapes,
+with the assumption list attached and the knob available. No further
+iteration on the number until something is measured: post-compaction
+re-read volume, and a wider sample of long autonomous runs.
 
 ## How it will be measured, and what the measurement can and cannot say
 
@@ -280,9 +342,12 @@ sized to detect a small one.
   passes and real sessions still lose work at a settled round, the
   boundary is wrong and the definition — not the thresholds — is what must
   change.
+- **A wider sample of long autonomous runs.** The default is currently
+  decided by ONE observed session above 400K out of 300. Three more would
+  say more than any further arithmetic on the existing ones.
 - **A measurement of post-compaction re-read volume.** The cost model
-  says the choice of 400K over ~200K is worth between +2% and +19%, and
-  that this one quantity decides which. Measure it and the threshold
+  says the choice between 200K and 400K is worth between +2% and +19%,
+  and that this one quantity decides which. Measure it and the threshold
   either stands on evidence or moves; it is the first thing to measure
   post-launch and the cheapest.
 - **A measured cost regression that clears the noise.** Not a number
