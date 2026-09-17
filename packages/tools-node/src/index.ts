@@ -26,11 +26,12 @@ import { fileURLToPath } from "node:url";
 import type { SearchReply, SearchRequest } from "./search-worker.js";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { defineTool, type Tool, type ToolResult } from "@vincemakes/kiso-core";
 // WR-1/WR-1A — the revision-guard primitives (unit-tested in wr1a-coda):
 import { strippedShellEnv } from "./secret-env.js";
 import { contentRevision, normalizeRevision, postEffectEscape, precondition, publishNewFile, revalidateBeforeRename } from "./wr1.js";
+import { CORPUS_MAX_DEPTH, globToRegExp, walkCorpus } from "./corpus.js";
 import { describeSearchMiss } from "./search-miss.js";
 
 /**
@@ -551,14 +552,17 @@ export function readFileTool(opts: WorkspaceToolsOptions): Tool<{ path: string; 
 	});
 }
 
-export function listDirTool(opts: WorkspaceToolsOptions): Tool<{ path?: string }> {
-	return defineTool<{ path?: string }>({
+export function listDirTool(opts: WorkspaceToolsOptions): Tool<{ path?: string; glob?: string }> {
+	return defineTool<{ path?: string; glob?: string }>({
 		name: "list_dir",
 		description:
-			"List the entries of a directory. Omit path to list the workspace root. Capped at 200 entries with an overflow note (narrow to a subdirectory for more).",
+			"List the entries of a directory, or with glob, search the tree recursively for workspace-relative paths matching it. Capped at 200 with an overflow note.",
 		parameters: {
 			type: "object",
-			properties: { path: { type: "string", description: "Workspace-relative directory to list" } },
+			properties: {
+				path: { type: "string", description: "Workspace-relative directory to list" },
+				glob: { type: "string", description: "Recursive search: * and ? within a segment, ** across them; matched against workspace-relative paths" },
+			},
 			additionalProperties: false,
 		},
 		idempotent: true,
@@ -566,9 +570,33 @@ export function listDirTool(opts: WorkspaceToolsOptions): Tool<{ path?: string }
 		effects: { precommitSafe: true, concurrency: "shared" },
 		promptSnippet: "list_dir — directory entries (the workspace ls)",
 		promptGuidelines: ["narrow to a subdirectory when the listing caps at 200 entries"],
-		execute: async ({ path }) => {
+		execute: async ({ path, glob }) => {
 			try {
 				const dir = resolveWithinRoot(opts.workspaceRoot, path ?? ".");
+				// ACI-8: with a pattern this is a recursive search over the
+				// SAME corpus `search_text` uses — one definition, so the two
+				// cannot drift the way they had.
+				if (glob !== undefined) {
+					const re = globToRegExp(glob);
+					const walk = walkCorpus({
+						workspaceRoot: opts.workspaceRoot,
+						walkFrom: dir,
+						maxEntries: MAX_DIR_ENTRIES,
+						accept: (rel) => re.test(rel),
+						isExcluded: (full) => {
+							const r = relative(opts.workspaceRoot, full).split(sep).join("/");
+							return (opts.excludeRoots ?? []).some((ex) => r === ex || r.startsWith(`${ex}/`));
+						},
+					});
+					const body = walk.files.length ? cap(walk.files.join("\n")) : `(no match for ${glob})`;
+					// TWO truncations, different remedies, and neither claimed
+					// when it did not happen: a walk that silently returns less
+					// is the defect a note exists to prevent.
+					const notes: string[] = [];
+					if (walk.cutByCap) notes.push(`${MAX_DIR_ENTRIES} shown (narrow the pattern for more)`);
+					if (walk.cutByDepth) notes.push(`the walk stopped at depth ${CORPUS_MAX_DEPTH} — anything deeper is not listed`);
+					return { content: notes.length ? `${body}\n… ${notes.join("; ")}` : body, isError: false };
+				}
 				// DC-54 — TRUNCATED BEFORE IT BUILDS. It was a `.map` over
 				// EVERY entry with the 200-entry slice only after: a directory
 				// of 200,000 entries built 200,000 strings to show 200 of

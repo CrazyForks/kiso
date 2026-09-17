@@ -18,6 +18,7 @@
 
 import { open, readdir } from "node:fs/promises";
 import { basename, join, relative } from "node:path";
+import { corpusSkips, layersEntering, readLayer, type Layer } from "./corpus.js";
 import { isMainThread, parentPort } from "node:worker_threads";
 
 
@@ -152,7 +153,11 @@ export async function runSearch(req: SearchRequest): Promise<SearchReply> {
 			// unreadable file: skipped, like before
 		}
 	};
-	const walk = async (dir: string, depth: number): Promise<void> => {
+	// ACI-4/ACI-8: the corpus is declared by a `.gitignore` FILE at the
+	// workspace root — not by `.git`, and the walk never goes up.
+	const rootLayer = readLayer(req.root);
+	const declared = rootLayer !== null;
+	const walk = async (dir: string, depth: number, layers: readonly Layer[]): Promise<void> => {
 		if (depth > 8 || outOfBudget()) return;
 		let entries;
 		try {
@@ -165,22 +170,24 @@ export async function runSearch(req: SearchRequest): Promise<SearchReply> {
 			}
 			throw err;
 		}
+		const here = depth === 0 ? layers : layersEntering(dir, layers);
 		for (const entry of entries) {
 			if (outOfBudget()) return;
-			if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
 			const full = join(dir, entry.name);
-			if (entry.isDirectory()) {
+			const isDir = entry.isDirectory();
+			if (corpusSkips(declared, here, full, entry.name, isDir)) continue;
+			if (isDir) {
 				if (isExcluded(full)) {
 					excludedDirs += 1;
 					continue;
 				}
-				await walk(full, depth + 1);
+				await walk(full, depth + 1, here);
 			} else if (entry.isFile()) await scanFile(full);
 		}
 	};
 	try {
 		if (req.single !== null) await scanFile(req.single);
-		else await walk(req.root, 0);
+		else await walk(req.root, 0, rootLayer === null ? [] : [rootLayer]);
 	} catch (err) {
 		return { token: req.token, matches, totalMatches, filesSeen, skippedFiles, multiLink, unreadableDirs, excludedDirs, stopped, stoppedAt, error: (err as Error).message };
 	}
