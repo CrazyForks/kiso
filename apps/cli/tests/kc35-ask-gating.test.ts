@@ -96,6 +96,12 @@ describe("T-Q3 / slice ⓪ — the extraction changed no bytes", () => {
 			// still the longest name.
 			"/copy       copy the last answer (raw markdown) — ctrl+x does the same",
 			"/status     show session id, event count, and context estimate",
+			// 0.39.1 — a DECLARED ADDITION, and a repair rather than a new
+			// feature: `/context` has been dispatchable since TUI2-R1 slice
+			// 6 and was never listed, so the only way to learn it existed
+			// was to read the source. The computed stop does not move:
+			// `/compact` is eight characters and `/context` is eight.
+			"/context    show where the context went — the per-request rent ledger",
 			"/mode       show the approval tier; /mode <name> switches (manual/default/accept-edits/plan/bypass)",
 			"/model      list model profiles; /model <name|provider/model> switches",
 			"/compact    summarize the older conversation to free context",
@@ -134,7 +140,7 @@ describe("T-Q3 / slice ⓪ — the extraction changed no bytes", () => {
 	});
 
 	it("the last row still carries its own newline — two rows from one bodyLog call", () => {
-		expect(helpRows()).toHaveLength(18); // 8 extracted + the mini-spec pair + /rewrap (R4) + /copy (E1 §3) + the three §2.2 shell rows + §2.3's ctrl+t + §2.4's ctrl+g + §2.5's /reload
+		expect(helpRows()).toHaveLength(19); // 8 extracted + the mini-spec pair + /rewrap (R4) + /copy (E1 §3) + the three §2.2 shell rows + §2.3's ctrl+t + §2.4's ctrl+g + §2.5's /reload + 0.39.1's /context repair
 		expect(helpRows().filter((r) => r.includes("\n"))).toHaveLength(1);
 	});
 

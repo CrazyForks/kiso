@@ -77,3 +77,17 @@ describe("KC2 §5: the working glyph family", () => {
 		expect(STATUS_GLYPHS).toHaveLength(7); // §5.1: seven steps of the 200ms tick = 1.4s
 	});
 });
+
+describe("one duration form — the status row uses the shared label (0.39.1)", () => {
+	// The row that started the item. The helper existed at 0.39.0; this
+	// call site was not swept, so it still read `working 637s`.
+	it("past a minute the working row reads in minutes, not a four-figure second count", () => {
+		const row = runningStatus("✦", Date.now() - 637_000, null, 0.1);
+		expect(row).toContain("working 10m 37s");
+		expect(row).not.toContain("637s");
+	});
+
+	it("under a minute nothing moved", () => {
+		expect(runningStatus("✦", Date.now() - 5_000, null, 0.1)).toContain("working 5s");
+	});
+});

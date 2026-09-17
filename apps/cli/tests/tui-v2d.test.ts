@@ -33,7 +33,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { isolatedEnv, stripANSI } from "../../../tests/helpers/isolated-cli.mjs";
+import { isolatedEnv, stripANSI, stripOsc } from "../../../tests/helpers/isolated-cli.mjs";
 
 const CLI = join(fileURLToPath(new URL("..", import.meta.url)), "dist", "index.js");
 
@@ -233,7 +233,13 @@ const CELL_LINE = [
  *  line texts ANSI-stripped. A genuine interleave (two cells' content
  *  merged in one write) still lands inside one segment and fails the
  *  format set. */
-const lint = (raw: string): string[] => {
+const lint = (rawWithOsc: string): string[] => {
+	// The window title (0.39.1) rides the same stream and is not a line:
+	// an OSC addresses the window, occupies no cell, and a terminal paints
+	// none of it. The lint's subject is INTERLEAVING of screen lines, so
+	// the window's own bytes are dropped before the split rather than
+	// classified as a line shape nobody writes.
+	const raw = stripOsc(rawWithOsc);
 	const bad: string[] = [];
 	// the v6 write pattern: the MOVE/CLEAR sequences (A/B/G/D/K/J) precede
 	// each line — the split at them (NOT at every CSI — a line's own SGRs

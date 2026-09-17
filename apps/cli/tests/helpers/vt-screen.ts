@@ -133,9 +133,25 @@ export class VtScreen {
 		}
 	}
 
-	/** One CSI sequence starting at bytes[i] === ESC. Returns the index
+	/** One escape sequence starting at bytes[i] === ESC. Returns the index
 	 *  after the sequence. CUP/EL/ED handled; everything else skipped. */
 	#csi(bytes: Uint8Array, i: number): number {
+		// OSC — `ESC ] … BEL` or `ESC ] … ESC \`. A real terminal CONSUMES
+		// these and paints nothing: they address the window, not the grid.
+		// The emulator used to fall through to the bare-ESC case below and
+		// then PRINT the payload as text, so the window title kiso writes
+		// (0.39.1) would have landed on the screen — a row no terminal
+		// shows. An emulator that renders what a terminal swallows makes
+		// every screen assertion wrong in its presence.
+		if (bytes[i + 1] === 0x5d) {
+			let j = i + 2;
+			while (j < bytes.length) {
+				if (bytes[j] === 0x07) return j + 1;
+				if (bytes[j] === 0x1b && bytes[j + 1] === 0x5c) return j + 2;
+				j += 1;
+			}
+			return bytes.length; // an unterminated OSC consumes the rest
+		}
 		if (bytes[i + 1] !== 0x5b) return i + 1; // a bare ESC
 		let j = i + 2;
 		// signed params — a buggy emitter can write negative CUP rows; the

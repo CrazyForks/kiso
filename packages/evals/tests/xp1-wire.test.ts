@@ -29,7 +29,16 @@ function fakeOpenAI(params: { onCreate?: (p: unknown) => void }) {
 			completions: {
 				create: async (p: unknown) => {
 					params.onCreate?.(p);
-					return { async *[Symbol.asyncIterator]() {} };
+					// One terminal chunk, not an empty stream: these tests read
+					// the CAPTURED REQUEST, but the adapter still has to be fed
+					// a legal response, and no provider ends a stream without a
+					// finish_reason (0.39.1 made that absence a retryable
+					// failure rather than a silent error stop).
+					return {
+						async *[Symbol.asyncIterator]() {
+							yield { choices: [{ index: 0, delta: {}, finish_reason: "stop" }] };
+						},
+					};
 				},
 			},
 		},
@@ -41,7 +50,12 @@ function fakeAnthropic(params: { onCreate?: (p: unknown) => void }) {
 		messages: {
 			stream: (p: unknown) => {
 				params.onCreate?.(p);
-				return { async *[Symbol.asyncIterator]() {} };
+				// see fakeOpenAI above — a legal terminal, not an empty stream
+				return {
+					async *[Symbol.asyncIterator]() {
+						yield { type: "message_stop" };
+					},
+				};
 			},
 		},
 	} as unknown as Anthropic;

@@ -174,18 +174,25 @@ describe("openai-compat stream creation errors are normalized", () => {
 		expect(usage?.inputTokens).toBeNull();
 	});
 
-	it("a TRUNCATED stream (no finish_reason) stops with an error — never completed (review finding 4)", async () => {
-		const events = await drain(
-			createOpenAICompatAdapter(
-				fakeOpenAI({
-					// Chunks stream content but the connection dies before any
-					// finish_reason — the SDK does not throw on premature end.
-					chunks: [CHUNK(null, { content: "half a sentence" })],
-				}),
+	// SUPERSEDED at 0.39.1. Review finding 4 asked for "never completed",
+	// and got `stop { reason: "error" }` — which the kernel turns into a
+	// NON-retryable terminal. Honest about the truncation, wrong about
+	// whose fault it is: the protocol mandates a finish_reason, so its
+	// absence is a failure in the path, not the provider's answer. The
+	// stronger form of the same finding is below — still never completed,
+	// and now recoverable.
+	it("a TRUNCATED stream (no finish_reason) throws retryable — never completed, and never a verdict", async () => {
+		await expect(
+			drain(
+				createOpenAICompatAdapter(
+					fakeOpenAI({
+						// Chunks stream content but the connection dies before any
+						// finish_reason — the SDK does not throw on premature end.
+						chunks: [CHUNK(null, { content: "half a sentence" })],
+					}),
+				),
 			),
-		);
-		const stop = events.find((e) => (e as { type?: string }).type === "stop");
-		expect((stop as { reason?: string }).reason).toBe("error");
+		).rejects.toMatchObject({ code: "network", retryable: true });
 	});
 
 	it("a tool name arriving in a LATER delta is captured, not lost (review finding 10)", async () => {

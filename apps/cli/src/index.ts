@@ -56,6 +56,7 @@ import { loadProjectConfig, loadUserConfig, mergeConfigs, resolveAutoCompact, re
 import { checkForUpdate, knownUpdate, updateCardLines } from "./update-check.js";
 import { tmuxMouseHint } from "./tmux-hint.js";
 import { resume } from "./resume.js";
+import { paintWindowTitle } from "./window-title.js";
 import { resumeTail } from "./resume-tail.js";
 import { armByteTrace } from "./byte-trace.js";
 import { tmpdir, homedir } from "node:os";
@@ -1174,6 +1175,11 @@ async function chatLoop(
 		bindRestoredSession(session);
 		setCurrentModelName(session.model);
 		paintBootStatus(session);
+		// The terminal's window title, HERE for the same reason the three
+		// lines above are here: this is the one step all three entry points
+		// share (first start, `/resume <id>`, a switch), so a tab can never
+		// be left naming the session the user just left.
+		paintWindowTitle(session.log.all);
 		const nav = {
 			sessions: () => agent.sessions().map((m) => m.id),
 			...(process.stdin.isTTY ? { pick: () => pickSession(agent, input) } : {}),

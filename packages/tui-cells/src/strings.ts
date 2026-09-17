@@ -473,51 +473,67 @@ export function keysHelpRow(): string {
  * rows from one call — the shape the KC1/KC2/KC3 gestures were added
  * to, unchanged.
  */
+/** The rows `/help` prints, as DATA — the one place that says which
+ *  commands exist. `helpRows` renders it; `slashCommandNames` asks it
+ *  whether a word is a command at all, so the dispatcher's error line
+ *  cannot drift from the list the same screen prints. */
+const HELP_TABLE: readonly (readonly [string, string])[] = [
+	["/help", "print this list of commands"],
+	["/think", "show the last full thinking block"],
+	["/last", "show the most recent tool call's input and output"],
+	// R4 (C4d): a committed row is the terminal's, and cannot be
+	// re-wrapped in place (ADR-0046) — this appends it re-folded.
+	["/rewrap", "re-print the recent prose at the current width"],
+	["/copy", "copy the last answer (raw markdown) — ctrl+x does the same"],
+	["/status", "show session id, event count, and context estimate"],
+	// A command with no row is a command nobody can find. `/context` has
+	// been dispatchable since TUI2-R1 slice 6 and was never listed here,
+	// so the only way to learn it existed was to read the source.
+	["/context", "show where the context went — the per-request rent ledger"],
+	["/mode", "show the approval tier; /mode <name> switches (manual/default/accept-edits/plan/bypass)"],
+	["/model", "list model profiles; /model <name|provider/model> switches"],
+	["/compact", "summarize the older conversation to free context"],
+	["/clear", "start a fresh conversation (the old session stays resumable)"],
+	["/resume", "switch to another session; /resume <id> goes directly"],
+	// §2.5: the conversation is untouched — this rereads what kiso was
+	// built with, not what it has said.
+	["/reload", "reread extensions, skills and config into this session"],
+	// §2.2: the two shell gestures and their one escape. They sit
+	// beside the slash commands because that is what a reader is
+	// looking for when they look here, even though `!` is not one.
+	// §2.3: the switch belongs beside ctrl+o's job, and a gesture the
+	// sheet does not name is a gesture nobody uses (DC-30, DC-36).
+	["ctrl+t", "fold the thinking blocks, and fold them back"],
+	// §2.4: the composer, in your own editor. It names the variables
+	// because that is what a reader has to set for it to work.
+	["ctrl+g", "edit the composer in $VISUAL or $EDITOR — the text comes back unsent"],
+	["!<cmd>", "run a shell command and send it with its output as your turn"],
+	["!!<cmd>", "run one and show it here only — the model never sees it"],
+	["\\!", "send a line that really starts with ! (the only escape)"],
+	["exit", "leave the session"],
+	// TUI2-R1 (D): the SENTENCE is deliberately unchanged. Deriving it
+	// from KEY_BINDINGS would be an improvement and it would also move
+	// an assertion outside the round's declared supersession classes,
+	// so the sheet stays the derived surface and this row keeps its
+	// words. `keysHelpRow()` exists for the round allowed to swap it;
+	// until then the drift guard is the test that every binding in the
+	// table is mentioned here. DC-1 changes the PADDING, not the words.
+	["keys", "enter sends \u00b7 ctrl+J newline (shift+enter where encoded) \u00b7 esc stops the run \u00b7 alt+\u23ce stops it and sends this instead \u00b7 @ files \u00b7 1-4 answers an ask"],
+];
+
+/** The slash commands `/help` lists. The keys and the `!` gestures in the
+ *  table are not commands and are not here. */
+export function slashCommandNames(): readonly string[] {
+	return HELP_TABLE.map(([name]) => name).filter((n) => n.startsWith("/"));
+}
+
 export function helpRows(): string[] {
 	const p = palette();
 	// DC-1: ONE description column. The gap used to be four spaces after
 	// the name whatever the name's length, so `/help`'s description began
 	// three columns left of `/compact`'s and the second column wandered
 	// down the list. displayWidth is the authority, as everywhere else.
-	const table: readonly (readonly [string, string])[] = [
-		["/help", "print this list of commands"],
-		["/think", "show the last full thinking block"],
-		["/last", "show the most recent tool call's input and output"],
-		// R4 (C4d): a committed row is the terminal's, and cannot be
-		// re-wrapped in place (ADR-0046) — this appends it re-folded.
-		["/rewrap", "re-print the recent prose at the current width"],
-		["/copy", "copy the last answer (raw markdown) — ctrl+x does the same"],
-		["/status", "show session id, event count, and context estimate"],
-		["/mode", "show the approval tier; /mode <name> switches (manual/default/accept-edits/plan/bypass)"],
-		["/model", "list model profiles; /model <name|provider/model> switches"],
-		["/compact", "summarize the older conversation to free context"],
-		["/clear", "start a fresh conversation (the old session stays resumable)"],
-		["/resume", "switch to another session; /resume <id> goes directly"],
-		// §2.5: the conversation is untouched — this rereads what kiso was
-		// built with, not what it has said.
-		["/reload", "reread extensions, skills and config into this session"],
-		// §2.2: the two shell gestures and their one escape. They sit
-		// beside the slash commands because that is what a reader is
-		// looking for when they look here, even though `!` is not one.
-		// §2.3: the switch belongs beside ctrl+o's job, and a gesture the
-		// sheet does not name is a gesture nobody uses (DC-30, DC-36).
-		["ctrl+t", "fold the thinking blocks, and fold them back"],
-		// §2.4: the composer, in your own editor. It names the variables
-		// because that is what a reader has to set for it to work.
-		["ctrl+g", "edit the composer in $VISUAL or $EDITOR — the text comes back unsent"],
-		["!<cmd>", "run a shell command and send it with its output as your turn"],
-		["!!<cmd>", "run one and show it here only — the model never sees it"],
-		["\\!", "send a line that really starts with ! (the only escape)"],
-		["exit", "leave the session"],
-		// TUI2-R1 (D): the SENTENCE is deliberately unchanged. Deriving it
-		// from KEY_BINDINGS would be an improvement and it would also move
-		// an assertion outside the round's declared supersession classes,
-		// so the sheet stays the derived surface and this row keeps its
-		// words. `keysHelpRow()` exists for the round allowed to swap it;
-		// until then the drift guard is the test that every binding in the
-		// table is mentioned here. DC-1 changes the PADDING, not the words.
-		["keys", "enter sends \u00b7 ctrl+J newline (shift+enter where encoded) \u00b7 esc stops the run \u00b7 alt+\u23ce stops it and sends this instead \u00b7 @ files \u00b7 1-4 answers an ask"],
-	];
+	const table = HELP_TABLE;
 	const stop = Math.max(...table.map(([name]) => displayWidth(name))) + 4;
 	const cmd = (name: string, desc: string): string => `${p.bold}${name}${p.reset}${" ".repeat(stop - displayWidth(name))}${desc}`;
 	const rows = table.slice(0, -2).map(([name, desc]) => cmd(name, desc));

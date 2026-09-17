@@ -28,3 +28,6 @@ export function runCli(
 
 /** v2b: strip ANSI CSI sequences and CR from a PTY transcript. */
 export function stripANSI(text: string): string;
+
+/** 0.39.1: drop the OSC sequences — they address the WINDOW, not the grid. */
+export function stripOsc(text: string): string;

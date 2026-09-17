@@ -180,6 +180,19 @@ describe("PH-F1 — an unknown slash command errors, never reaches the model", (
 		expect(r.stdout).not.toContain("[faux mode] the scripted demo turns are exhausted");
 	});
 
+	it("a command that EXISTS but takes an argument it does not accept is NOT called unknown", () => {
+		// 0.39.1, reported from a live session: `/reload extensions` answered
+		// `unknown command: /reload`. `/reload` is real, `/help` lists it,
+		// and the user typed what `/help` said — so the one line kiso gave
+		// them was both wrong and a dead end. The commands that DO take an
+		// argument match on their own prefix long before this branch, so a
+		// known word arriving here means exactly one thing.
+		const { env } = isolatedEnv();
+		const r = runCli(["chat", "known-cmd-arg"], env, { input: "/reload extensions\nexit\n" });
+		expect(r.stdout).toContain("/reload takes no arguments — /help says what it does");
+		expect(r.stdout).not.toContain("unknown command: /reload");
+	});
+
 	it("a multi-line paste that merely begins with '/' is prose and still submits", () => {
 		const { env } = isolatedEnv();
 		const r = runCli(["chat", "slash-paste"], env, { input: "/etc/hosts has an entry\nexit\n" });

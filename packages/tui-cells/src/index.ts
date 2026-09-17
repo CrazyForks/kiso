@@ -18,6 +18,7 @@ export {
 	foldTerms,
 	CAP_TASK_LIVE,
 	elapsedLabel,
+	settledLabel,
 	formatDuration,
 	statusLine,
 	boxTop,

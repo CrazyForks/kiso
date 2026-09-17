@@ -23,6 +23,7 @@
  */
 
 import { kUnit } from "./lines.js";
+import { elapsedLabel } from "@vincemakes/kiso-tui-cells";
 import { TWINKLE } from "@vincemakes/kiso-tui-cells/render";
 import { displayWidth } from "@vincemakes/kiso-tui-cells/width";
 
@@ -105,7 +106,7 @@ export function runningStatus(glyph: string, since: number, outTokens: number | 
 	// state, so its row says nothing rather than guessing.
 	const rate = tokPerSec !== null ? ` · ${tokPerSec} tok/s` : "";
 	const seconds = Math.max(1, Math.round((Date.now() - since) / 1000));
-	return `${glyph} working ${seconds}s${out}${rate} · esc stop · alt+⏎ redirect · ${ctxSegment(ctxRatio)}`;
+	return `${glyph} working ${elapsedLabel(seconds)}${out}${rate} · esc stop · alt+⏎ redirect · ${ctxSegment(ctxRatio)}`;
 }
 
 /**

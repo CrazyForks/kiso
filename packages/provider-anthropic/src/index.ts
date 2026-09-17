@@ -18,7 +18,7 @@ import type { MessageStreamEvent } from "@anthropic-ai/sdk/resources/messages";
 import type { Adapter, StreamOptions } from "@vincemakes/kiso-core";
 import type { AdapterEvent, Event, StopReason } from "@vincemakes/kiso-core";
 import type { AssistantBlock, ContentBlock, Message, ToolSpec } from "@vincemakes/kiso-core";
-import { mapApiError, parseRetryAfter } from "@vincemakes/kiso-core";
+import { mapApiError, parseRetryAfter, streamFailure } from "@vincemakes/kiso-core";
 
 /** Config accepted by the high-level factory (round 7: the provider owns its SDK). */
 export interface AnthropicProviderConfig {
@@ -114,6 +114,10 @@ export function createAnthropicAdapter(client: Anthropic, adapterOpts: Anthropic
 			let usageSeen = false;
 			let usageYielded = false;
 			let stopReasonSeen = false;
+			// 0.39.1: whether the provider ever SIGNALLED an end, as opposed
+			// to whether it named a reason for it (`stopReasonSeen`). The
+			// two differ exactly when the stream just stops.
+			let sawMessageStop = false;
 			let stopReason: StopReason = "end_turn";
 			const toolBuffer = new Map<number, { id: string; name: string; json: string }>();
 			// MG-1 (A5): thinking-family blocks are captured WHOLE — one
@@ -238,6 +242,7 @@ export function createAnthropicAdapter(client: Anthropic, adapterOpts: Anthropic
 							};
 							break;
 						case "message_stop":
+							sawMessageStop = true;
 							// round 6/round 9: EVERY stop path emits a usage first. If no
 							// message_delta yielded one, but message_start DID
 							// report usage data, an honest KNOWN usage is built
@@ -284,6 +289,23 @@ export function createAnthropicAdapter(client: Anthropic, adapterOpts: Anthropic
 				}
 			} catch (err) {
 				throw toAnthropicError(err);
+			}
+
+			// 0.39.1 — the third adapter's half of the transport-failure
+			// class. A stream that never reached `message_stop` emitted no
+			// stop event at all, and the kernel then ended the run on its
+			// adapter-contract violation ("provider stream ended without a
+			// stop event", `invalid_request`, non-retryable) — a verdict
+			// about OUR code for what is someone else's dropped connection.
+			// The protocol mandates the terminal event, so its absence is a
+			// failure in the path; `streamFailure` says so and the kernel's
+			// mid-stream recovery runs. The contract check stays where it
+			// is, for the adapter bug it was written for.
+			//
+			// A `message_stop` with no stop_reason is NOT this case: the
+			// provider signalled its end, and that stop keeps `error` above.
+			if (!sawMessageStop && !options.signal?.aborted) {
+				throw streamFailure(`[anthropic] request failed: the stream ended with no message_stop`);
 			}
 		},
 	};

@@ -64,7 +64,10 @@ describe("REL-0152-D11 — what each provider is actually sent", () => {
 				completions: {
 					create: async (req: Record<string, unknown>) => {
 						seen = req;
-						return { [Symbol.asyncIterator]: async function* () { /* no chunks */ } };
+						// one legal terminal, not an empty stream: this test reads the
+						// CAPTURED REQUEST, but the adapter is still owed a response no
+						// provider would refuse to end (0.39.1).
+						return { [Symbol.asyncIterator]: async function* () { yield { choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }; } };
 					},
 				},
 			},
@@ -83,7 +86,7 @@ describe("REL-0152-D11 — what each provider is actually sent", () => {
 			messages: {
 				stream: (req: Record<string, unknown>) => {
 					seen = req;
-					return { [Symbol.asyncIterator]: async function* () { /* no chunks */ }, abort: () => {} };
+					return { [Symbol.asyncIterator]: async function* () { yield { type: "message_stop" }; }, abort: () => {} };
 				},
 			},
 		};

@@ -54,3 +54,29 @@ export function mapApiError(status: number | undefined, message: string, retryAf
 			return withStatus({ code: "unknown", retryable: false, message });
 	}
 }
+
+/**
+ * A failure that reached us AFTER the response headers did.
+ *
+ * Once a 2xx and the headers are in, the request has been ACCEPTED: no
+ * later failure is a verdict on whether it was valid, because nothing was
+ * left to validate. What remains is the server or the transport failing
+ * mid-flight — a dead socket, a body cut by an intermediary, an in-band
+ * error frame, a stream that simply ends without the terminal event its
+ * protocol mandates. Every one of those is `network` and RETRYABLE, so
+ * the kernel's mid-stream recovery (ADR-0005: retry lives in the kernel;
+ * F4: void the draft durably, then retry) engages instead of ending the
+ * run on a verdict nobody issued.
+ *
+ * Deliberately broader than what can be proven transient: a permanent
+ * fault misclassified here costs `maxRetries` extra requests (2 by
+ * default) and then ends in the same terminal it would have anyway,
+ * while a transient one misclassified the other way costs the whole
+ * session. The asymmetry is the argument.
+ *
+ * An error the provider states BEFORE the stream keeps its status
+ * mapping — `mapApiError` is untouched and stays the authority there.
+ */
+export function streamFailure(message: string): StructuredError {
+	return { code: "network", retryable: true, message };
+}

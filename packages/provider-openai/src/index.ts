@@ -22,7 +22,7 @@ import type { Adapter, StreamOptions } from "@vincemakes/kiso-core";
 import type { AdapterEvent, Event, StopReason } from "@vincemakes/kiso-core";
 import type { AssistantBlock, ContentBlock, Message } from "@vincemakes/kiso-core";
 import type { ToolSpec } from "@vincemakes/kiso-core";
-import { mapApiError, parseRetryAfter } from "@vincemakes/kiso-core";
+import { mapApiError, parseRetryAfter, streamFailure } from "@vincemakes/kiso-core";
 
 interface PendingToolCall {
 	readonly index: number;
@@ -315,6 +315,34 @@ export function createOpenAICompatAdapter(client: OpenAI, adapterOpts: OpenAICom
 				throw toOpenAIError(err, options.model);
 			}
 
+			// 0.39.1 — the verdict is read BEFORE anything is emitted. A
+			// stream that ended with NO finish_reason produced none: the
+			// protocol mandates one, so its absence is a failure somewhere
+			// in the path (a gateway ending a response its upstream
+			// abandoned is how a long session dies), never the provider's
+			// answer. It used to become `stop { reason: "error" }` — which
+			// the kernel reads as `unknown / provider stopped with an
+			// error`, non-retryable — so the run ended and a human had to
+			// restart it. `streamFailure` states the rule and the kernel's
+			// mid-stream recovery takes it from there.
+			//
+			// Placed ABOVE the close-out on purpose: the pending calls at
+			// this point are TRUNCATED. Emitting them launches them (the
+			// kernel starts an execution on `tool_call_end`), which would
+			// both run a tool on a half-arrived argument list and, once
+			// something has started, block the very retry this throw exists
+			// to reach (`unsafeStartedInDraft`).
+			//
+			// An abort keeps its existing path below: COMPAT-F1's early end
+			// is the caller's act, classified by the kernel from the throw
+			// with the signal set, and nothing here changes it. An
+			// UNRECOGNIZED finish_reason is the other non-case — the
+			// provider answered, we just do not know the word, and it still
+			// stops.
+			if (finishReason === null && !options.signal?.aborted) {
+				throw streamFailure(`[${vendorOf(options.model)}] request failed: the stream ended with no finish reason`);
+			}
+
 			// Close out any streamed tool calls.
 			for (const call of [...pending.values()].sort((a, b) => a.index - b.index)) {
 				let input: Record<string, unknown> | null = null;
@@ -343,8 +371,8 @@ export function createOpenAICompatAdapter(client: OpenAI, adapterOpts: OpenAICom
 				yield { seq: 0, type: "usage", inputTokens: null, outputTokens: null, cacheRead: null, cacheWrite: null, known: false, ...(served !== null ? { servedModel: served } : {}) };
 			}
 			// Area 6 hardening (review finding 4): a stream that ended with
-			// NO finish_reason is a TRUNCATED turn — the stop is an explicit
-			// error, never a default end_turn/completed.
+			// NO finish_reason is a TRUNCATED turn — never a default
+			// end_turn/completed.
 			// COMPAT-F1 (2026-09-09, the GLM leg): the SDK closes an ABORTED
 			// stream quietly — the iterator just ends, no finish_reason — and
 			// that used to read as the provider's failure below, so esc on a
@@ -352,13 +380,13 @@ export function createOpenAICompatAdapter(client: OpenAI, adapterOpts: OpenAICom
 			// durable void. The kernel classifies an abort only when the
 			// adapter THROWS while the signal is set (its catch asks
 			// `aborted()` first), which is what the Responses adapter does.
-			// An early end WITHOUT an abort stays the provider's error.
+			// An early end WITHOUT an abort is the transport's failure.
 			if (options.signal?.aborted) {
 				const err = new Error("stream aborted by the caller");
 				err.name = "AbortError";
 				throw err;
 			}
-			yield { seq: 0, type: "stop", reason: finishReason === null ? "error" : stopReason };
+			yield { seq: 0, type: "stop", reason: stopReason };
 		},
 	};
 }
@@ -598,7 +626,7 @@ function toOpenAIError(err: unknown, model: string): unknown {
 	// The name is fetch's, not the vendor's, so it is a transport failure by
 	// construction — the same class as APIConnectionError above.
 	if (err instanceof TypeError && (err.message === "terminated" || err.message === "fetch failed")) {
-		return { code: "network", retryable: true, message: label + err.message };
+		return streamFailure(label + err.message);
 	}
 	return err;
 }

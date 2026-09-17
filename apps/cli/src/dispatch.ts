@@ -4,7 +4,7 @@
  * the context (the chain, the run state, the prompt arming).
  */
 
-import { contextRows, contextUnavailableRows, displayVerb, escapeTerminal, helpRows, kUnit, modePickView, modelPickView, palette, type PickOption, type PickResult } from "@vincemakes/kiso-tui";
+import { contextRows, contextUnavailableRows, displayVerb, escapeTerminal, helpRows, kUnit, modePickView, modelPickView, palette, renderEvent, settledLabel, slashCommandNames, type PickOption, type PickResult } from "@vincemakes/kiso-tui";
 import { newSessionId } from "./session-id.js";
 import { buildAdapter, lookupModelMetadata, resolveContinuationScope, resolveReasoning } from "@vincemakes/kiso-runtime/internal";
 import type { AgentSession } from "@vincemakes/kiso-runtime";
@@ -790,12 +790,29 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 					// (the estimate BEFORE vs AFTER — the same chars/4
 					// proxy the status bar shows, marked ~), and the time.
 					const ctxAfter = Math.round(ctx.estimateCtx() * 100);
-					const elapsed = compactStart > 0 ? ((Date.now() - compactStart) / 1000).toFixed(1) : "?";
+					const elapsed = compactStart > 0 ? settledLabel((Date.now() - compactStart) / 1000) : "?s";
 					// a non-null result implies onStart ran — the "?" is
 					// reachable only at the type level
 					body.notice(
-						`[/compact] ✦ compacted · ${compactInfo?.rounds ?? "?"} rounds → 1 summary · saved ~${kUnit(result.savedTokens)} · ctx ${ctxBefore ?? "?"}% → ${ctxAfter}% · ${elapsed}s`,
+						`[/compact] ✦ compacted · ${compactInfo?.rounds ?? "?"} rounds → 1 summary · saved ~${kUnit(result.savedTokens)} · ctx ${ctxBefore ?? "?"}% → ${ctxAfter}% · ${elapsed}`,
 					);
+					// 0.39.1 — the boundary row, under the recap.
+					//
+					// `summarized` is appended OFF-LOOP: session.summarize()
+					// writes it to the log and persists it, and no hook
+					// carries it to a renderer. So the row that marks where
+					// the transcript was cut had exactly one producer — a
+					// `case "summarized"` in lines.ts whose own comment says
+					// it is there "for the switch's completeness only" — and
+					// zero callers. The durable log said a compaction
+					// happened at seq N; no screen ever did.
+					//
+					// Rendered THROUGH that case rather than written again
+					// here: the line a resumed or replayed view would draw is
+					// the line drawn now, by construction, and the row cannot
+					// drift into two spellings of one fact.
+					const boundary = renderEvent({ type: "summarized", coversToSeq: result.coversToSeq });
+					if (boundary.text !== "") body.raw(boundary.text.replace(/\n$/, "").split("\n"));
 				}
 			} catch (err) {
 				// Honest failure: nothing was persisted, the session
@@ -803,7 +820,22 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 				if (compactCancelled) {
 					body.notice("[/compact] cancelled — nothing was persisted");
 				} else {
-					body.notice(`[/compact] failed: ${err instanceof Error ? err.message : String(err)}`);
+					// 0.39.1 — two repairs on one line. A failure the ADAPTER
+					// classified is a plain object, not an Error: `String(err)`
+					// rendered it `[object Object]`, which became reachable the
+					// moment the adapters started THROWING the
+					// transport-failure class instead of stopping with it. And
+					// a transport failure is worth saying so about: summarize
+					// already retried it once (it has no kernel behind it to do
+					// that), so a second failure means the gateway is still
+					// dropping the stream — the run is fine and the gesture is
+					// worth repeating. A permanent failure is not, and must not
+					// be dressed up as one that is.
+					const e = err as { code?: unknown; retryable?: unknown; message?: unknown };
+					const classified = typeof e.code === "string" && typeof e.message === "string";
+					const detail = classified ? String(e.message) : err instanceof Error ? err.message : String(err);
+					const again = classified && e.retryable === true ? " — the connection dropped again; /compact is worth another try" : "";
+					body.notice(`[/compact] failed: ${escapeTerminal(detail)}${again}`);
 				}
 			} finally {
 				if (compactTimer !== null) clearInterval(compactTimer);
@@ -927,7 +959,23 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 	// still submits.
 	if (trimmed.startsWith("/") && !trimmed.includes("\n")) {
 		ctx.chainRef.current = ctx.chainRef.current.then(async () => {
-			bodyLog(`unknown command: ${escapeTerminal(trimmed.split(" ")[0] ?? trimmed)} — /help lists the commands`);
+			// The word, not the line: a command that EXISTS but was handed an
+			// argument it does not take reaches here too, and calling it
+			// unknown is a lie the user cannot get past — `/help` lists it,
+			// they typed what `/help` said, and kiso answers that there is no
+			// such command. (Reported on `/reload extensions`, 0.39.1.) The
+			// commands that DO take an argument matched on their own prefix
+			// far above, so a known word arriving here means exactly one
+			// thing: it takes none. `slashCommandNames` is the help sheet's
+			// own table, so this line cannot drift from the list the user was
+			// reading when they typed it.
+			const word = trimmed.split(/\s+/)[0] ?? trimmed;
+			const known = slashCommandNames().includes(word);
+			bodyLog(
+				known
+					? `${escapeTerminal(word)} takes no arguments — /help says what it does`
+					: `unknown command: ${escapeTerminal(word)} — /help lists the commands`,
+			);
 			ctx.input.prompt();
 		});
 		return;

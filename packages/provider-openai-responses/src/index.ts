@@ -22,7 +22,7 @@
  *
  * Invariants (the same the two older adapters prove):
  *  - `usage` always precedes the final `stop`;
- *  - no terminal event ⇒ `usage { known:false }` then `stop { reason:"error" }`;
+ *  - no terminal event ⇒ a retryable `network` throw (0.39.1);
  *  - a tool call's id is captured once and never changes mid-stream;
  *  - exactly ONE fetch per stream — no retry loop lives here;
  *  - every non-2xx becomes `mapApiError(status, message, retryAfterMs)`.
@@ -31,7 +31,7 @@
 import type { Adapter, StreamOptions } from "@vincemakes/kiso-core";
 import type { AdapterEvent, ContinuationEntry, StopReason } from "@vincemakes/kiso-core";
 import type { AssistantBlock, ContentBlock, Message, ToolSpec } from "@vincemakes/kiso-core";
-import { mapApiError, parseRetryAfter } from "@vincemakes/kiso-core";
+import { mapApiError, parseRetryAfter, streamFailure } from "@vincemakes/kiso-core";
 
 /** The ChatGPT backend's own token, resolved fresh for each request. */
 export interface ResponsesOAuthToken {
@@ -358,21 +358,20 @@ async function* mapStream(response: Response, options: StreamOptions, target: Ta
 			try {
 				step = await frames.next();
 			} catch (err) {
-				// A cancellation is the CALLER's act and a protocol failure
-				// is the provider's — both propagate unchanged. What is left
-				// is the connection dying mid-stream: a RETRYABLE network
-				// error, thrown as the two older adapters throw it, so the
-				// kernel's stream-cut recovery (F4: void the draft durably,
-				// then retry) engages. The trailing guard below is for a
-				// stream that ENDED cleanly without a terminal frame — a
-				// truncated turn the provider chose to end, not a cut.
+				// A cancellation is the CALLER's act and it propagates
+				// unchanged. An already-structured error is this adapter's
+				// own mapping and travels as it is. What is left is the
+				// connection dying mid-stream: a RETRYABLE network error, so
+				// the kernel's stream-cut recovery (F4: void the draft
+				// durably, then retry) engages.
 				if (isAbort(err) || options.signal?.aborted || isStructured(err)) throw err;
 				throw toTransportError(err, target.providerId);
 			}
 			if (step.done) break;
-			// Outside the try on purpose: a mapping failure (unparseable
-			// tool arguments, an id that changed, an error frame) is this
-			// adapter's own verdict and must never be mistaken for a cut.
+			// Outside the try on purpose: a failure raised while MAPPING a
+			// frame is already classified (0.39.1: the in-band error frames
+			// are `streamFailure` too) and must not be re-wrapped by the
+			// catch above as though the iterator itself had thrown.
 			yield* mapFrame(step.value, state, options.model, target.providerId, scopeProviderId);
 			if (state.terminal) break;
 		}
@@ -382,11 +381,18 @@ async function* mapStream(response: Response, options: StreamOptions, target: Ta
 		await frames.return(undefined);
 	}
 	if (state.terminal) return;
-	// The trailing guard: a stream that never reached a terminal response
-	// is a truncated turn. Usage is UNKNOWN (nulls, never a free turn),
-	// the stop is an explicit error, and nothing follows it.
-	yield usageEvent(undefined);
-	yield stopEvent("error", state, options.model, scopeProviderId);
+	// The trailing guard: a stream that never reached a terminal response.
+	// Until 0.39.1 this emitted `usage { known:false }` + `stop { error }`,
+	// which the kernel turns into a NON-retryable terminal — the way a long
+	// session dies when an intermediary ends a response its upstream
+	// abandoned. A clean end is distinguishable from a destroyed socket at
+	// the HTTP level, but not meaningful: this protocol mandates a terminal
+	// event, so ending without one is a violation by someone in the path,
+	// never the provider's considered verdict. It joins the class the dead
+	// socket above already belonged to, and the attempt is abandoned whole
+	// — the entries captured so far are an abandoned draft's, and the retry
+	// re-derives from committed history.
+	throw streamFailure(`[${target.providerId}] request failed: the stream ended with no terminal event`);
 }
 
 function* mapFrame(frame: ResponsesFrame, state: StreamState, model: string, providerId: string, scopeProviderId: string): Generator<AdapterEvent> {
@@ -479,10 +485,14 @@ function* mapFrame(frame: ResponsesFrame, state: StreamState, model: string, pro
 			yield stopEvent(stopReasonOf(response, state.sawToolCall), state, model, scopeProviderId);
 			break;
 		}
+		// Both frames arrive INSIDE an accepted stream: the request was
+		// judged when the 2xx was written, so neither is a verdict on it.
+		// `streamFailure` states the rule; until 0.39.1 these reached the
+		// kernel as `unknown / retryable:false` and ended the run.
 		case "error":
-			throw mapApiError(undefined, `[${providerId}] stream error: ${frame.message ?? frame.code ?? "no detail"}`);
+			throw streamFailure(`[${providerId}] stream error: ${frame.message ?? frame.code ?? "no detail"}`);
 		case "response.failed":
-			throw mapApiError(undefined, `[${providerId}] response failed: ${failureDetail(frame.response)}`);
+			throw streamFailure(`[${providerId}] response failed: ${failureDetail(frame.response)}`);
 		default:
 			break;
 	}
@@ -647,9 +657,11 @@ function parseFrame(data: string, providerId: string): ResponsesFrame {
 	try {
 		return JSON.parse(data) as ResponsesFrame;
 	} catch {
-		// A frame that is not JSON is a PROTOCOL failure, not a truncated
-		// turn: it is reported rather than folded into the trailing guard.
-		throw mapApiError(undefined, `[${providerId}] malformed SSE frame: ${data.slice(0, 200)}`);
+		// A frame that is not JSON is a PROTOCOL failure — an intermediary
+		// writing its own error into a stream it already opened with a 2xx.
+		// Reported rather than folded into the trailing guard, and retryable
+		// for the same reason as the rest of the class (0.39.1).
+		throw streamFailure(`[${providerId}] malformed SSE frame: ${data.slice(0, 200)}`);
 	}
 }
 
@@ -713,5 +725,5 @@ function toTransportError(err: unknown, providerId: string): unknown {
 	// turn the caller stopped run again.
 	if (isAbort(err)) return err;
 	const message = err instanceof Error ? err.message : String(err);
-	return { code: "network", retryable: true, message: `[${providerId}] request failed: ${message}` };
+	return streamFailure(`[${providerId}] request failed: ${message}`);
 }
