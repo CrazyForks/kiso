@@ -32,7 +32,18 @@ Turn 5 now states the RULE — *a part parses only if it is of the form a-b
 with a number on each side; parseRange cannot report failure, so the check
 is yours* — and not the ANSWER. Stating the answer would copy the held-out
 boundary's own assertion into the task and make a test into a quotation.
-Fixed in both `tasks-t5.json` and `tasks-t6.json` (commit d04264f).
+Fixed in both `tasks-t5.json` and `tasks-t6.json`.
+
+**The first attempt at this fix was wrong and is recorded rather than
+quietly replaced.** It said a part parses *only if it is of the form a-b*,
+which contradicts the fixture's own test — `parseRangeList('1-2,9-10,bad,4')`
+must yield `{4,4}` for the bare `4`. A leg followed the rule and broke
+`tests/range.test.js`. **The rule was stated and never derived against the
+fixture's test**, which is the one check that makes stating a rule worth
+anything. The corrected rule — every `-`-separated piece is a number, a
+single number is the point range `n-n`, `a-b` uses parseRange — now derives
+BOTH the fixture test's expected list and the boundary's `[]`, and that
+derivation is run rather than asserted.
 
 **Legs run after that commit are not comparable to earlier ones** on turn 5
 or anything derived from it.
