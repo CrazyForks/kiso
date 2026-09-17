@@ -111,11 +111,36 @@ exists in that product and is not what it ships by default.
 | | A: deferred schemas | B: proxy |
 |---|---|---|
 | resident cost | one line per server, grows with server count | **constant**, ~200 tokens, 50 servers or 2 |
-| cache | **one break per `load_tools`** — the tool table grows | **zero breaks** — the table never changes |
+| cache, within a session | **one break per `load_tools`** — the tool table grows | **zero breaks** — the table never changes |
+| cache, ACROSS sessions | a distinct prefix per load history | **one prefix forever**, warm on first request |
 | a budget | needed, and must be declared and defended | **none — the question disappears** |
 | schema binding on a call | **native**: the API validates arguments | **none**: arguments go as a blob, and the adapter's error path is what teaches the model |
 | server startup | on connect | **lazy**, on first call |
 | round trips | one `load_tools`, then direct calls | one discovery call per lookup, every time |
+
+### The cache reaches further than either design assumed
+
+Measured while pricing ADR-0055, from 937 interactive requests and 14,821
+autonomous ones: **the FIRST request of a session already hits the cache —
+0.68 interactive, 0.93 autonomous.** The system-prompt-plus-tool-table
+prefix survives *between* sessions, not merely within one.
+
+That changes what the tool table costs. A table that is byte-identical in
+every session is a prefix every future session can start warm against. A
+table that depends on which servers happened to be loaded last time is a
+**different prefix per load history**, and each one is cached separately
+or not at all.
+
+So design B's constant table is worth more than its ~200 tokens suggest,
+and design A's cache break is worse than "once per `load_tools`": it also
+forfeits the cross-session warm start for every table shape it creates.
+
+**The honest boundary on this evidence:** it was measured on a product
+whose table IS constant today — six built-ins, no MCP servers configured
+on the machine. It demonstrates that a constant prefix caches across
+sessions. It does **not** measure what a varying table costs, because
+nothing here varied. That measurement would need a fixture with servers,
+and it is a reason to prefer B rather than a number attached to A.
 
 **The recommendation is B, with promotion as a later increment.**
 
