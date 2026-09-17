@@ -175,6 +175,22 @@ sessions. It does **not** measure what a varying table costs, because
 nothing here varied. That measurement would need a fixture with servers,
 and it is a reason to prefer B rather than a number attached to A.
 
+### Constant rent beats any per-server or per-count budget
+
+Gate 1 settled this by accident. **`sequentialthinking` has ONE tool and
+costs 4,035 bytes — more than every built-in tool kiso ships, combined.**
+
+A budget reasoned per SERVER would have let it through as "just one
+server". A budget reasoned per TOOL COUNT would have let it through as
+"just one tool". Only a budget in BYTES catches it, and even a byte
+budget has to be re-checked every time a server updates, because a
+server's cost is whatever its authors decided a description should say.
+
+The proxy does not have this problem to have: **its resident cost is
+~200 tokens whatever is behind it** — one tool or four hundred, terse
+schemas or essays. That is the argument for B stated in its strongest
+form, and it is an argument no threshold can answer.
+
 **The recommendation is B, with promotion as a later increment.**
 
 Two reasons, and the second is the stronger one:
