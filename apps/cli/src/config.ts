@@ -172,6 +172,19 @@ export function parseConfig(text: string, source: string): KisoConfig {
 			if (p.promptCaching !== undefined && typeof p.promptCaching !== "boolean") fail(`models.${name}.promptCaching`, "expected a boolean");
 			if (p.streamIdleMs !== undefined && (typeof p.streamIdleMs !== "number" || !Number.isFinite(p.streamIdleMs) || p.streamIdleMs < 0))
 				fail(`models.${name}.streamIdleMs`, "expected a non-negative number of milliseconds (0 disables the stream watchdog)");
+			// 0.39.2: `contextWindow` was DECLARED on this type, VALIDATED at
+			// the top level, and CONSUMED by resolveContextWindow — which
+			// prefers it over the global figure, with a comment saying why —
+			// and it was never copied here. So it never reached anything: 70
+			// of 70 profiles that declared one lost it in this object
+			// literal. The cost was not the `ctx ?` on the status row but the
+			// compaction threshold, which fell through to the 200k default
+			// for every model the registry does not carry — a 1M-window model
+			// compacting as though it had a fifth of its window. The
+			// documented workaround for exactly that ("set contextWindow in
+			// your profile") had never done anything.
+			if (p.contextWindow !== undefined && (typeof p.contextWindow !== "number" || !Number.isFinite(p.contextWindow) || p.contextWindow <= 0))
+				fail(`models.${name}.contextWindow`, "expected a positive token count");
 			models[name] = {
 				kind: p.kind as ProfileKind,
 				model: p.model as string,
@@ -179,6 +192,7 @@ export function parseConfig(text: string, source: string): KisoConfig {
 				...(typeof p.baseUrl === "string" ? { baseUrl: p.baseUrl } : {}),
 				...(typeof p.promptCaching === "boolean" ? { promptCaching: p.promptCaching } : {}),
 				...(typeof p.streamIdleMs === "number" ? { streamIdleMs: p.streamIdleMs } : {}),
+				...(typeof p.contextWindow === "number" ? { contextWindow: p.contextWindow } : {}),
 			};
 		}
 		out.models = models;

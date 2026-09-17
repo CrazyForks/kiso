@@ -22,6 +22,18 @@ import { join } from "node:path";
  *  — kiso never silently drops a level, and now it shows the ones it takes.
  *  A model the registry does not know shows `unknown` (nothing is guessed);
  *  it must not read `none`, which is a REAL level since the Responses rows. */
+/** A context figure for a NOTICE, in the status row's own form.
+ *
+ *  `displayCtxRatio` returns NaN as its honest "nobody states this model's
+ *  window", and the status row renders that as `ctx ?`. The `/compact`
+ *  recap multiplied it and interpolated the result, so the same unknown
+ *  reached the screen as `ctx NaN% → NaN%`: one value with a contract, and
+ *  a second consumer that had not read it. The `%` moves inside, because
+ *  the unknown form does not carry one. */
+function ctxPercent(ratio: number): string {
+	return Number.isFinite(ratio) ? `${Math.round(ratio * 100)}%` : "?";
+}
+
 function effortNote(p: ModelProfile): string {
 	const reasoning = lookupModelMetadata(p.model, p.baseUrl)?.capabilities.reasoning ?? null;
 	const effort = reasoning?.effort ?? null;
@@ -757,12 +769,12 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 			let compactInfo: { rounds: number; tokens: number } | null = null as { rounds: number; tokens: number } | null;
 			// the ctx estimate BEFORE the summarized event lands (the used
 			// fraction — the recap's "ctx 91% → 34%" drops after compacting)
-			let ctxBefore: number | null = null;
+			let ctxBefore: string | null = null;
 			const compacting = (info: { rounds: number; tokens: number }): void => {
 				const text = (elapsed: number): string =>
 					`▘ compacting · ${info.rounds} rounds · ~${kUnit(info.tokens)} tokens · ${Math.max(0, elapsed)}s`;
 				compactStart = Date.now();
-				ctxBefore = Math.round(ctx.estimateCtx() * 100);
+				ctxBefore = ctxPercent(ctx.estimateCtx());
 				dock.setStatus(text(0), "esc to cancel");
 				compactTimer = setInterval(() => {
 					dock.setStatus(text(Math.round((Date.now() - compactStart) / 1000)), "esc to cancel");
@@ -789,12 +801,12 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 					// rounds, the one summary, the savings, the ctx drop
 					// (the estimate BEFORE vs AFTER — the same chars/4
 					// proxy the status bar shows, marked ~), and the time.
-					const ctxAfter = Math.round(ctx.estimateCtx() * 100);
+					const ctxAfter = ctxPercent(ctx.estimateCtx());
 					const elapsed = compactStart > 0 ? settledLabel((Date.now() - compactStart) / 1000) : "?s";
 					// a non-null result implies onStart ran — the "?" is
 					// reachable only at the type level
 					body.notice(
-						`[/compact] ✦ compacted · ${compactInfo?.rounds ?? "?"} rounds → 1 summary · saved ~${kUnit(result.savedTokens)} · ctx ${ctxBefore ?? "?"}% → ${ctxAfter}% · ${elapsed}`,
+						`[/compact] ✦ compacted · ${compactInfo?.rounds ?? "?"} rounds → 1 summary · saved ~${kUnit(result.savedTokens)} · ctx ${ctxBefore ?? "?"} → ${ctxAfter} · ${elapsed}`,
 					);
 					// 0.39.1 — the boundary row, under the recap.
 					//
