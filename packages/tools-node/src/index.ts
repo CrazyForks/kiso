@@ -74,6 +74,11 @@ export function shellProgressPath(sessionId: string | undefined, command: string
 	return join(SHELL_PROGRESS_DIR, `${key}.log`);
 }
 
+/** ACI-2: at most this many DISTINCT match lines are named in a refusal. */
+const ACI2_LINES_SHOWN = 5;
+/** Match offsets kept for that report. Past this the refusal says "more"
+ *  without a number rather than one it cannot stand behind. */
+const ACI2_OFFSETS_KEPT = 500;
 const OUTPUT_CAP = 100_000; // chars of output a tool result may carry
 const DEFAULT_SHELL_TIMEOUT_MS = 30_000;
 // the token round: the scoped-read defaults — read_file shows the head 200 lines
@@ -927,11 +932,61 @@ export function writeFileTool(opts: WorkspaceToolsOptions): Tool<{ path: string;
 	});
 }
 
+/** ACI-2: every offset where `search` occurs, OVERLAPPING ones included —
+ *  "aa" occurs twice in "aaa", and the two resolutions differ, so the call
+ *  is ambiguous. A scan that steps past each match by its own length
+ *  reports one and edits blind. This is the ONLY scan: `count === 0` is the
+ *  missing pattern and `offsets[0]` is where a unique one resolved. */
+function occurrencesOf(text: string, search: string): { count: number; offsets: number[] } {
+	const offsets: number[] = [];
+	let count = 0;
+	for (let at = text.indexOf(search); at !== -1; ) {
+		count += 1;
+		if (offsets.length < ACI2_OFFSETS_KEPT) offsets.push(at);
+		// The cursor must ADVANCE. indexOf("", n) clamps n to the string
+		// length and then returns the same offset forever — a synchronous
+		// spin no test timeout can interrupt. The single indexOf this
+		// replaced could not hang; a loop has to earn that.
+		const next = text.indexOf(search, at + 1);
+		if (next <= at) break;
+		at = next;
+	}
+	return { count, offsets };
+}
+
+/** The distinct 1-based lines the (ASCENDING) offsets fall on, in ONE pass —
+ *  a line lookup per offset re-walks the file and a common pattern has
+ *  hundreds of them. Ascending order is what lets adjacent-dedupe stand in
+ *  for a set. */
+function linesOfOffsets(text: string, offsets: readonly number[]): number[] {
+	const lines: number[] = [];
+	let line = 1;
+	let i = 0;
+	for (const at of offsets) {
+		for (; i < at; i += 1) if (text.charCodeAt(i) === 10) line += 1;
+		if (lines[lines.length - 1] !== line) lines.push(line);
+	}
+	return lines;
+}
+
+/** "line 4" / "lines 1, 2" / "lines 1, 2, 3, 4, 5 and 35 more" — the tail
+ *  counts LINES not yet named, never matches: a pattern hit ten times on
+ *  one line reads "line 1", because "and 9 more" would send the caller
+ *  looking for nine lines that are not there. `exhaustive` false means the
+ *  offsets themselves were capped, so the tail carries no number at all. */
+function describeMatchLines(text: string, offsets: readonly number[], exhaustive: boolean): string {
+	const lines = linesOfOffsets(text, offsets);
+	const shown = lines.slice(0, ACI2_LINES_SHOWN);
+	const hidden = lines.length - shown.length;
+	const tail = !exhaustive ? " and more" : hidden > 0 ? ` and ${hidden} more` : "";
+	return `${shown.length === 1 && tail === "" ? "line" : "lines"} ${shown.join(", ")}${tail}`;
+}
+
 export function editFileTool(opts: WorkspaceToolsOptions): Tool<{ path: string; search?: string; replace?: string; edits?: readonly { search: string; replace: string }[]; expectedRevision?: string }> {
 	return defineTool<{ path: string; search?: string; replace?: string; edits?: readonly { search: string; replace: string }[]; expectedRevision?: string }>({
 		name: "edit_file",
 		description:
-			"Edit a workspace file at its latest revision (expectedRevision). ONE of: search+replace (first exact occurrence), or edits (1-32 disjoint hunks resolved against the same snapshot, applied atomically).",
+			"Edit a workspace file at its latest revision (expectedRevision). ONE of: search+replace (must match exactly once), or edits (1-32 disjoint hunks resolved against the same snapshot, applied atomically).",
 		parameters: {
 			type: "object",
 			properties: {
@@ -1026,13 +1081,14 @@ export function editFileTool(opts: WorkspaceToolsOptions): Tool<{ path: string; 
 				const text = bytes.toString("utf8");
 				// WR-1E2: EVERY hunk resolves against THIS snapshot — never the
 				// output of an earlier hunk. All spans are known before any
-				// staging; overlaps refuse (duplicate searches both resolve
-				// first-occurrence and therefore overlap — never retargeted).
+				// staging; overlaps refuse. Since ACI-2 a non-unique search is
+				// already refused above, so the overlap left to catch is two
+				// hunks aimed at the same unique text — never retargeted.
 				const spans: { start: number; end: number; replace: string }[] = [];
 				for (let i = 0; i < hunks.length; i += 1) {
 					const h = hunks[i]!;
-					const at = text.indexOf(h.search);
-					if (at === -1) {
+					const { count, offsets } = occurrencesOf(text, h.search);
+					if (count === 0) {
 						// WR-1A ④: the WORLD lacks the pattern (the input is
 						// fine) and nothing ran — precondition; the note never
 						// rides an edit that wrote nothing.
@@ -1045,7 +1101,19 @@ export function editFileTool(opts: WorkspaceToolsOptions): Tool<{ path: string; 
 						const detail = describeSearchMiss(text, h.search);
 						return precondition(detail ? `${headline}\n${detail}` : headline);
 					}
-					spans.push({ start: at, end: at + h.search.length, replace: h.replace });
+					// ACI-2: more than one resolution is a QUESTION, not an edit.
+					// Taking the first one wrote the wrong place and reported
+					// success — the one failure shape a mutation tool must not
+					// have. The refusal carries the count and the lines so the
+					// call can be fixed without reading the file again.
+					if (count > 1) {
+						const lines = describeMatchLines(text, offsets, count <= ACI2_OFFSETS_KEPT);
+						const where = hunks.length === 1 && edits === undefined ? lines : `hunk ${i + 1}, ${lines}`;
+						return precondition(
+							`edit_file: pattern matches ${count} places in ${path} (${where}) — include enough surrounding text to make it unique`,
+						);
+					}
+					spans.push({ start: offsets[0]!, end: offsets[0]! + h.search.length, replace: h.replace });
 				}
 				const bySpan = [...spans].sort((a, b) => a.start - b.start);
 				for (let i = 1; i < bySpan.length; i += 1) {

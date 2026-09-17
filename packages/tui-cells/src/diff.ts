@@ -123,7 +123,10 @@ function stats(diff: DiffLine[]): { added: number; removed: number } {
  *  A genuine miss is now reported as a miss: the tool will return
  *  `pattern not found in <path>` and change nothing, so the panel says
  *  exactly that instead of inventing a diff for an edit that will not
- *  happen. `path` names the file in that note. */
+ *  happen. `path` names the file in that note.
+ *
+ *  Since ACI-2 an AMBIGUOUS search is the second case of the same rule:
+ *  the tool refuses it, so there is no edit to draw. */
 export function editFileDiff(oldContent: string, search: string, replace: string, path?: string): DiffResult {
 	const at = oldContent.indexOf(search);
 	if (at < 0) {
@@ -132,6 +135,18 @@ export function editFileDiff(oldContent: string, search: string, replace: string
 			added: 0,
 			removed: 0,
 			notFound: true,
+		};
+	}
+	// ACI-2: an ambiguous search is REFUSED by the tool, and this diff is
+	// drawn for the APPROVAL PANEL — before the tool runs. Previewing the
+	// first of N places showed a human the very edit ACI-2 exists to
+	// prevent, then asked them to approve one that would not happen. The
+	// same rule as the miss above, for the same reason.
+	if (search.length > 0 && oldContent.indexOf(search, at + 1) > at) {
+		return {
+			lines: [{ kind: " ", text: `pattern matches more than one place in ${path ?? "the file"}` }],
+			added: 0,
+			removed: 0,
 		};
 	}
 	const result = oldContent.slice(0, at) + replace + oldContent.slice(at + search.length);

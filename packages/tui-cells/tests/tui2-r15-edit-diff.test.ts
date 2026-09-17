@@ -85,13 +85,28 @@ describe("TUI2-R1.5 ② — editFileDiff locates the way the tool does (VD-2)", 
 		]);
 	});
 
-	it("the FIRST occurrence is the one that is previewed — the tool replaces exactly one", () => {
+	// DECLARED SUPERSESSION (ACI-2). This pinned "the FIRST occurrence is
+	// previewed". Since ACI-2 the tool REFUSES an ambiguous search, and this
+	// diff is drawn for the APPROVAL PANEL — before the tool runs. Previewing
+	// a change at the first of N places therefore showed a human the exact
+	// edit ACI-2 exists to prevent, and asked them to approve an edit that
+	// would then be refused. Same rule this function already states for a
+	// miss: no diff for an edit that will not happen.
+	it("an AMBIGUOUS search is reported, not previewed at the first of N places", () => {
 		const old = "x\nDUP\ny\nDUP\nz\n";
-		const r = editFileDiff(old, "DUP", "ONE");
+		const r = editFileDiff(old, "DUP", "ONE", "f.ts");
+		expect({ added: r.added, removed: r.removed }).toEqual({ added: 0, removed: 0 });
+		expect(r.lines.map((l) => l.text).join("")).toContain("more than one place");
+		expect(r.lines.map((l) => l.text).join("")).toContain("f.ts");
+		// and nothing is drawn as changed
+		expect(r.lines.every((l) => l.kind === " ")).toBe(true);
+	});
+
+	it("a UNIQUE search is still previewed normally", () => {
+		const old = "x\nONLY\ny\n";
+		const r = editFileDiff(old, "ONLY", "TWO");
 		expect({ added: r.added, removed: r.removed }).toEqual({ added: 1, removed: 1 });
-		expect(r.lines.filter((l) => l.kind === "+").map((l) => l.text)).toEqual(["ONE"]);
-		// the SECOND DUP survives — it is context, never a change
-		expect(r.lines.some((l) => l.kind === " " && l.text === "DUP")).toBe(true);
+		expect(r.lines.filter((l) => l.kind === "+").map((l) => l.text)).toEqual(["TWO"]);
 	});
 
 	it("an INSERTION (replace contains the search) reports one changed line, not a rewrite", () => {

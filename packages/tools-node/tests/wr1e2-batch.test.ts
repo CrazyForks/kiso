@@ -8,9 +8,9 @@
  *
  * Hunk semantics (P0, frozen before GREEN): every hunk resolves
  * against the SAME snapshot expectedRevision validated — never against
- * earlier hunks' output. First-occurrence literal match per hunk; all
+ * earlier hunks' output. Exactly-once literal match per hunk (ACI-2); all
  * spans determined before staging; overlaps refuse (duplicate searches
- * both resolve first-occurrence and therefore overlap — never silently
+ * both resolve to that same one place and therefore overlap — never silently
  * retargeted). Shape errors (mixed forms, empty, >32) are
  * invalid_input; world errors (missing pattern, stale) are
  * precondition. No partial postimage is ever published.
@@ -69,7 +69,7 @@ describe("WR-1E2 — one snapshot, N disjoint hunks, one publish", () => {
 		expect(readFileSync(join(root, "f.ts"), "utf8")).toBe(ORIGINAL);
 	});
 
-	it("④ overlapping spans refuse — duplicate searches both resolve FIRST occurrence, never a silent retarget", async () => {
+	it("④ overlapping spans refuse — duplicate searches resolve to the SAME one place, never a silent retarget", async () => {
 		const { root, edit } = ws();
 		const dup = await edit.execute(
 			{ path: "f.ts", expectedRevision: rev(ORIGINAL), edits: [{ search: "alpha", replace: "A" }, { search: "alpha", replace: "B" }] },
