@@ -53,8 +53,12 @@ function fakeAnthropic(params: { onCreate?: (p: unknown) => void; events?: reado
 			stream: (p: unknown) => {
 				params.onCreate?.(p);
 				return {
+					// A legal minimal end when the test scripts no events: it
+					// reads the CAPTURED REQUEST, and no provider ends a stream
+					// without its terminal event (0.39.1 made that absence a
+					// retryable failure).
 					async *[Symbol.asyncIterator]() {
-						for (const ev of params.events ?? []) yield ev;
+						for (const ev of params.events ?? [{ type: "message_stop" }]) yield ev;
 					},
 				};
 			},
@@ -68,8 +72,15 @@ function fakeOpenAI(params: { onCreate?: (p: unknown) => void }) {
 			completions: {
 				create: async (p: unknown) => {
 					params.onCreate?.(p);
+					// One terminal chunk, not an empty stream: these tests read
+					// the CAPTURED REQUEST, but the adapter still has to be fed
+					// a legal response, and no provider ends a stream without a
+					// finish_reason (0.39.1 made that absence a retryable
+					// failure rather than a silent error stop).
 					return {
-						async *[Symbol.asyncIterator]() {},
+						async *[Symbol.asyncIterator]() {
+							yield { choices: [{ index: 0, delta: {}, finish_reason: "stop" }] };
+						},
 					};
 				},
 			},

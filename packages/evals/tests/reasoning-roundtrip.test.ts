@@ -40,9 +40,14 @@ function fakeOpenAI(params: { onCreate?: (p: unknown) => void }) {
 			completions: {
 				create: async (p: unknown) => {
 					params.onCreate?.(p);
+					// One terminal chunk, not an empty stream: these tests read
+					// the CAPTURED REQUEST, but the adapter still has to be fed
+					// a legal response, and no provider ends a stream without a
+					// finish_reason (0.39.1 made that absence a retryable
+					// failure rather than a silent error stop).
 					return {
 						async *[Symbol.asyncIterator]() {
-							// no chunks — the request capture is what matters
+							yield { choices: [{ index: 0, delta: {}, finish_reason: "stop" }] };
 						},
 					};
 				},

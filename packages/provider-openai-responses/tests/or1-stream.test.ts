@@ -7,9 +7,9 @@
  *  - `usage` precedes `stop`, always, and both come from the SAME
  *    terminal event (a usage read from a later frame would be a
  *    different response's);
- *  - a stream that dies before a terminal event ends in
- *    `usage { known:false }` + `stop { reason:"error" }` and NOTHING
- *    after — a truncated turn is never reported as a clean one;
+ *  - a stream that dies before a terminal event never produces a stop:
+ *    it throws retryable (0.39.1) — a truncated turn is never reported
+ *    as a clean one, and never as a verdict either;
  *  - `function_call_arguments.done` emits only the part the deltas did
  *    not already carry, so the accumulated input is the arguments
  *    exactly once.
@@ -164,20 +164,32 @@ describe("OR-1 stream — the nine events, in order", () => {
 		await expect(collect()).rejects.toMatchObject({ code: "network", retryable: true });
 	});
 
-	it("a stream the provider ENDS without a terminal frame is a truncated turn: usage{known:false} then stop{error} and NOTHING after", async () => {
+	// RETIRED at 0.39.1 with the rule it stated. It asserted that a stream
+	// ENDED without a terminal frame produced `usage{known:false}` + a
+	// `stop{error}` carrying the continuation entries that had already
+	// closed — "truncation costs the turn, not the state that was already
+	// valid". That rule rested on reading a clean end as the provider's own
+	// choice. It is not: this protocol mandates a terminal event, so ending
+	// without one is a violation by someone in the path, and the resulting
+	// non-retryable terminal is how a long session dies behind a gateway
+	// whose upstream went away. The case now throws and joins the dead
+	// socket's class; the entries belong to an abandoned attempt and the
+	// kernel re-derives from committed history. Stated here rather than
+	// re-typed to match: see transport-failure-after-headers.test.ts.
+	it("a stream the provider ENDS without a terminal frame still REPORTS what arrived, then throws", async () => {
 		rig.reply = truncatedReply(SCRIPT, 8); // ends cleanly after the second text delta
-		const events = await collect();
-		const stopAt = events.findIndex((e) => e.type === "stop");
-		expect(stopAt).toBe(events.length - 1);
-		expect(events[stopAt - 1]).toEqual({ seq: 0, type: "usage", inputTokens: null, outputTokens: null, cacheRead: null, cacheWrite: null, known: false });
-		expect(events[stopAt]).toMatchObject({ seq: 0, type: "stop", reason: "error" });
-		// The reasoning item that DID close before the cut still rides the
-		// stop: it is complete and signed, and a resumed turn needs it.
-		// Truncation costs the turn, not the state that was already valid.
-		expect((events[stopAt] as { continuation?: { entries: unknown[] } }).continuation?.entries).toHaveLength(1);
-		// the text that DID arrive is still reported — a truncated turn is
-		// not an erased one
+		const events: AdapterEvent[] = [];
+		const adapter = createOpenAIResponsesProvider({ apiKey: "sk-rig", baseUrl: rig.baseUrl });
+		await expect(
+			(async () => {
+				for await (const ev of adapter.stream({ model: "gpt-5.5", messages: [{ role: "user", content: "go" }] })) events.push(ev);
+			})(),
+		).rejects.toMatchObject({ code: "network", retryable: true });
+		// A truncated turn is not an erased one: what arrived was yielded
+		// before the throw, and it is the kernel — not the adapter — that
+		// durably voids the draft.
 		expect(events.filter((e) => e.type === "text_delta")).toHaveLength(2);
+		expect(events.some((e) => e.type === "stop")).toBe(false);
 	});
 
 	it("function_call_arguments.done emits only the suffix the deltas did not carry", async () => {

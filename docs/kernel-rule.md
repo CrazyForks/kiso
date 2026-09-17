@@ -28,31 +28,30 @@ core:
   packages/core/src/protocol/events.ts  479
   packages/core/src/kernel/project.ts   360
   ...
-  total                                2145  / 2200
-  ✓ 55 lines of headroom remaining.
+  total                                2148  / 2200
+  ✓ 52 lines of headroom remaining.
 
 cli:
-  apps/cli/src/index.ts     771
-  apps/cli/src/chat.ts      730
-  apps/cli/src/dispatch.ts  411
+  apps/cli/src/index.ts     981
+  apps/cli/src/chat.ts      836
+  apps/cli/src/dispatch.ts  532
   ...
-  total                    3660  / 1920
-  ▸ 1740 over the reference figure — report-only (ADR-0043 Amendment 8).
+  total                    4301  / 1920
+  ▸ 2381 over the reference figure — report-only (ADR-0043 Amendment 8).
 
 tui:
-  packages/tui/src/compositor.ts   1323
-  packages/tui/src/editor.ts       1068
-  packages/tui/src/panel-input.ts   406
+  packages/tui/src/compositor.ts   1344
+  packages/tui/src/editor.ts       1208
+  packages/tui/src/panel-input.ts   423
   ...
-  total                            3887  / 4000
-  ✓ 113 lines of headroom remaining.
+  total                            4104  / 4000
 
 tui-cells:
-  packages/tui-cells/src/components.ts      825
-  packages/tui-cells/src/md.ts              497
-  packages/tui-cells/src/approval-panel.ts  369
+  packages/tui-cells/src/components.ts       835
+  packages/tui-cells/src/md.ts               576
+  packages/tui-cells/src/approval-panel.ts   416
   ...
-  total                                    2575  / 1280
+  total                                     2755  / 1280
   ▸ 1295 over the reference figure — report-only (ADR-0043 Amendment 8).
 ```
 

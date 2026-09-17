@@ -286,9 +286,16 @@ describe("COMPAT-F1 — a stream cut by the caller's abort is an ABORT, not a pr
 		};
 		await expect(drain()).rejects.toThrow();
 	});
-	it("an early end WITHOUT an abort is still the provider's error — stop:error, as before", async () => {
-		const events = await collect(createOpenAICompatAdapter(earlyEnd() as never));
-		expect(events.at(-1)).toMatchObject({ type: "stop", reason: "error" });
+	// RETIRED at 0.39.1 with the rule it stated ("still the provider's
+	// error — stop:error"). An early end is no more the provider's verdict
+	// without an abort than with one; what differs is WHOSE failure it is,
+	// and that distinction is what this pair has to keep proving. Both
+	// cases now throw — the abort as an AbortError the kernel records as
+	// `aborted by user`, the bare early end as a retryable network error
+	// the kernel retries. COMPAT-F1 is untouched: it was always about not
+	// confusing the two.
+	it("an early end WITHOUT an abort is a retryable network error, not the provider's verdict", async () => {
+		await expect(collect(createOpenAICompatAdapter(earlyEnd() as never))).rejects.toMatchObject({ code: "network", retryable: true });
 	});
 });
 
