@@ -33,6 +33,8 @@ afterEach(() => {
 	delete (process.stdout as { isTTY?: boolean }).isTTY;
 });
 
+const isRecord = (rows: readonly string[]): boolean => !rows.some((r) => /^[\u250c\u251c\u2514]/.test(r));
+
 function plain(s: string): string {
 	return s.replace(/\x1b\[[0-9;]*m/g, "");
 }
@@ -48,36 +50,45 @@ describe("TUI2-MD ④ — tables", () => {
 	 * does the work the rails were doing, the header is still bold, and a
 	 * copied table is closer to markdown without them.
 	 */
-	it("T-MD-28: the aligned table — a bold header, one rule, padded columns, no rails", () => {
+	it("T-MD-28: the table draws a FULL GRID — bold header, rails, a rule between every row", () => {
 		const p = palette();
 		const rows = renderMarkdown(TABLE, 60);
-		// DECLARED SUPERSESSION (MD-1.3 / R2 AMENDMENT 1, owner ruling
-		// 2026-09-11): ONE rule is drawn under the header row, at the grid's
-		// own width (4+5+6 columns plus two 2-space gutters = 19). R2 removed
-		// the RAILS — the four-sided box that BOUNDS a table; this bounds
-		// nothing and SEPARATES the header from the body, which is the one job
-		// the round's governing distinction gives a rule. Rails stay out, and
-		// the assertion below still holds them out.
-		expect(rows).toEqual([
-			`  ${p.bold}area${p.reset}  ${p.bold}lines${p.reset}  ${p.bold}budget${p.reset}`,
-			`  ${p.dim}${"\u2500".repeat(19)}${p.reset}`,
-			"  core  1972   2000",
-			"  cli   2012   1920",
-		]);
-		expect(rows.every((r) => !plain(r).includes("\u2502"))).toBe(true);
+		// DECLARED REVERSAL (2026-09-17, tables only), the THIRD layer on this
+		// case. R2 removed the rails; MD-1.3 put ONE rule under the header and
+		// the assertion here "still holds them out". The owner reversed that
+		// for tables: rails are back, four-sided, with a rule between every
+		// pair of rows. Every other R2 hairline rule stands.
+		//
+		// The expectation is stated STRUCTURALLY rather than as one more exact
+		// SGR string. The previous two layers each re-typed the literal and
+		// each time the literal was the thing that had to change; what the
+		// case is actually about — a bold header, padded cells, a dim hairline
+		// grid — survives all three and can be said directly.
+		const flat = rows.map(plain);
+		expect(flat[0]).toMatch(/^\u250c[\u2500\u252c]+\u2510$/);
+		expect(flat.at(-1)).toMatch(/^\u2514[\u2500\u2534]+\u2518$/);
+		expect(rows[1], "the header keeps its bold").toContain(p.bold);
+		expect(flat[1]).toMatch(/^\u2502 area .*\u2502 lines .*\u2502 budget .*\u2502$/);
+		expect(flat[2], "a junctioned rule under the header").toMatch(/^\u251c[\u2500\u253c]+\u2524$/);
+		// every content cell is still there, padded inside its rails
+		for (const cell of ["core", "1972", "2000", "cli", "2012", "1920"]) {
+			expect(flat.some((r) => r.includes(cell)), cell).toBe(true);
+		}
+		// and the grid is dim — the R2 hairline colour, not body strength
+		expect(rows[0]).toContain(p.dim);
 	});
 
 	it("T-MD-29: CJK cells measure with the width authority, so the columns line up", () => {
-		// two-column CJK headers and cells, mixed with narrow ASCII
 		const src = ["| \u5ef6\u8fdf | ms |", "|---|---|", "| \u4fee\u590d\u524d | 120 |", "| a | 45 |"].join("\n");
-		// R2: without rails the rows no longer pad to a common width, so the
-		// subject is stated directly — every COLUMN starts at the same
-		// place, which is what "the columns line up" always meant.
-		// MD-1.3: the header rule is one unbroken run and has no columns in
-		// it, so it is not one of the rows this case is about.
-		const rows = renderMarkdown(src, 60).map(plain).filter((r) => !/^ {2}\u2500+$/.test(r));
-		const second = rows.map((r) => visibleWidth(r.slice(0, r.lastIndexOf("  ") + 2)));
-		expect(new Set(second).size).toBe(1);
+		// The subject is unchanged and the rails make it DIRECTLY observable:
+		// "the columns line up" is now "every rail sits at the same column on
+		// every line". Under R2 this had to be inferred from where the last
+		// gutter fell, because without rails the rows did not pad to a common
+		// width. This is the same claim with a witness.
+		const rows = renderMarkdown(src, 60).map(plain);
+		const railsAt = (r: string): number[] => [...r].reduce<number[]>((acc, ch, i) => (/[\u2502\u250c\u252c\u2510\u251c\u253c\u2524\u2514\u2534\u2518]/.test(ch) ? [...acc, visibleWidth(r.slice(0, i))] : acc), []);
+		const positions = rows.map((r) => railsAt(r).join(","));
+		expect(new Set(positions).size, `rails drift: ${[...new Set(positions)].join(" | ")}`).toBe(1);
 	});
 
 	it("T-MD-30: styled cell content is measured STRIPPED — SGR has no width", () => {
@@ -88,8 +99,18 @@ describe("TUI2-MD ④ — tables", () => {
 
 	it("T-MD-31: the alignment column comes from the delimiter row", () => {
 		const src = ["| head | head | head |", "|:--|:-:|--:|", "| a | b | c |"].join("\n");
-		// row 1 is MD-1.3's header rule; row 2 is the body row this is about
-		expect(plain(renderMarkdown(src, 60)[2]!)).toBe("  a      b       c"); // left, centre, right — R2: no rails
+		// Alignment is unchanged; it now happens INSIDE a cell, between rails.
+		// The body row is the last line before the bottom border.
+		const rows = renderMarkdown(src, 60).map(plain);
+		const body = rows.at(-2)!;
+		const cells = body.slice(1, -1).split("\u2502");
+		expect(cells).toHaveLength(3);
+		expect(cells[0], "left: hard against its opening rail").toMatch(/^ a +$/);
+		expect(cells[2], "right: hard against its closing rail").toMatch(/^ +c $/);
+		const mid = cells[1]!;
+		const lead = mid.length - mid.trimStart().length;
+		const trail = mid.length - mid.trimEnd().length;
+		expect(Math.abs(lead - trail), `centre: ${JSON.stringify(mid)}`).toBeLessThanOrEqual(1);
 	});
 
 	it("T-MD-32: too narrow -> the VERTICAL record, every cell kept", () => {
@@ -123,11 +144,17 @@ describe("TUI2-MD ④ — tables", () => {
 			`${p.bold}area${p.reset}${p.dim}:${p.reset} b`,
 			`${p.dim}n:${p.reset} 2`,
 		]);
-		// one column more and the aligned table is back — at SHRUNK columns
-		// (8/1), which is the whole of MD-1.1 in one assertion
-		expect(plain(renderMarkdown(wide, 15)[0]!)).toBe("  area      n");
-		expect(plain(renderMarkdown(wide, 15)[1]!)).toBe(`  ${"\u2500".repeat(11)}`); // MD-1.3's rule
-		expect(plain(renderMarkdown(wide, 15)[2]!)).toBe("  a-very-l  1");
+		// DECLARED REVERSAL (2026-09-17, tables only): the flip moves one
+		// column, from 14/15 to 15/16, and the number is DERIVED rather than
+		// found. Two columns whose floors are min(natural, CELL_FLOOR) = 8
+		// and 1 need `8 + 1 + 3*2 + 1 = 16` under the grid's measure against
+		// `8 + 1 + 2*2 + 2 = 15` without rails — exactly the n−1 the rails
+		// cost. The SUBJECT is untouched for the third time: a table that
+		// cannot be drawn becomes records rather than being cut.
+		expect(isRecord(renderMarkdown(wide, 15).map(plain)), "15 is still records").toBe(true);
+		const back = renderMarkdown(wide, 16).map(plain);
+		expect(back[0], "16 is the grid, at shrunk columns 8/1").toMatch(/^\u250c[\u2500\u252c]+\u2510$/);
+		expect(back.some((r) => r.includes("a-very-l")), "the shrunk cell wraps, never cuts").toBe(true);
 	});
 
 	it("T-MD-33: NOTHING is ever truncated — every cell appears at every width", () => {

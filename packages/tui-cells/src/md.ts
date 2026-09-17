@@ -765,35 +765,37 @@ function tableRows(b: MdBlock, W: number): string[] {
 	const cols = shrinkCols(natural, W);
 	if (cols === null) return recordRows(t, W);
 	const p = palette();
-	// R2: no rails. The drawn width is two columns of inset plus the
-	// columns and their two-space gutters — a table is bounded by the
-	// blank lines above and below it, exactly as every other block on the
-	// screen is, and it was the last box left on a screen that has decided
-	// not to have boxes. Alignment does the work the rails were doing, and
-	// a copied table is closer to markdown without them.
+	// DECLARED REVERSAL (2026-09-17), TABLES ONLY. R2 removed the rails at
+	// the nineteen-screen review and MD-1.3 put ONE rule under the header;
+	// both are superseded here. Every other R2 hairline rule stands, and
+	// the record form keeps NO borders — it is the fallback, not a table.
+	//
+	// The rails are hairlines in the R2 hairline colour, and the styling
+	// goes on AFTER the measure, exactly as it does for a cell: a colour
+	// can never move a column.
+	const rule = (l: string, m: string, r: string): string =>
+		`${p.dim}${l}${cols.map((w) => "\u2500".repeat(w + 2)).join(m)}${r}${p.reset}`;
+	const V = `${p.dim}\u2502${p.reset}`;
 	const row = (cells: readonly string[], bold: boolean): string[] => {
 		const boxes = cells.map((c, i) => cellBox(c, cols[i]!, t.align[i]!, bold));
 		const rows: string[] = [];
 		for (let k = 0; k < Math.max(...boxes.map((x) => x.length)); k += 1) {
 			// a short box pays its blanks so the columns to its right do not
 			// move: a cell is a BOX, and the row is as tall as its tallest.
-			rows.push(`  ${boxes.map((x, i) => x[k] ?? " ".repeat(cols[i]!)).join("  ")}`.replace(/\s+$/, ""));
+			// Trailing space is NOT stripped any more — it sits inside the
+			// closing rail, and stripping it would pull the rail left.
+			rows.push(`${V}${boxes.map((x, i) => ` ${x[k] ?? " ".repeat(cols[i]!)} `).join(V)}${V}`);
 		}
 		return rows;
 	};
-	// MD-1.3 / R2 AMENDMENT 1 (owner ruling, 2026-09-11) — ONE rule under
-	// the header row, at the grid's own width. R2 removed the RAILS: the
-	// four-sided box that BOUNDS a table. This bounds nothing; it SEPARATES
-	// the header from the body, which is the one job the round's governing
-	// distinction gives a rule — a rule separates, a gutter scopes, a rail
-	// bounds. Rails stay out.
-	//
-	// What it buys is not decoration: without it a six-row table's header
-	// was carried by SGR bold ALONE, so in a pipe, under NO_COLOR, or on a
-	// terminal with weak bold, seven identical rows arrived with nothing
-	// saying which one names the columns.
-	const ruleW = cols.reduce((n, w) => n + w, 0) + Math.max(0, cols.length - 1) * 2;
-	return [...row(t.header, true), `  ${p.dim}${"\u2500".repeat(ruleW)}${p.reset}`, ...t.rows.flatMap((r) => row(r, false))];
+	const body = t.rows.flatMap((r, i) => (i === 0 ? row(r, false) : [rule("\u251c", "\u253c", "\u2524"), ...row(r, false)]));
+	return [
+		rule("\u250c", "\u252c", "\u2510"),
+		...row(t.header, true),
+		rule("\u251c", "\u253c", "\u2524"),
+		...body,
+		rule("\u2514", "\u2534", "\u2518"),
+	];
 }
 
 /** A cell's column count: what a human sees, styling removed. */
@@ -808,13 +810,22 @@ function cellWidth(cell: string): number {
  *  that decides when the record form is still the better answer. */
 const CELL_FLOOR = 8;
 
-/** The drawn width of a grid with these columns, by the measure the R2
- *  table has always used: the two-column inset plus every column AND its
- *  two-space gutter. Conservative by one gutter (the last column has
- *  none), which is where the table's right margin comes from — kept as
- *  it was, because the record threshold has always been stated in it. */
+/** The drawn width of a grid with these columns.
+ *
+ *  DECLARED REVERSAL (2026-09-17, tables only): the R2 measure was the
+ *  two-column inset plus every column and its two-space gutter — the
+ *  shape of a table with NO RAILS. With rails it is `sum + 3n + 1`: one
+ *  rail between every pair of columns and one at each edge (n+1), and one
+ *  space of padding inside every rail (2n).
+ *
+ *  This function's old comment said the record threshold "has always been
+ *  stated in it", and that is exactly why changing it IS the re-cut: the
+ *  grid costs n−1 columns more than the railless form — 2 for a
+ *  three-column table, 6 for a seven-column one — and the record fallback
+ *  arrives that much earlier. Nothing else moves: the greedy shrink, the
+ *  CELL_FLOOR of 8 and the fallback criterion are untouched. */
 function gridWidth(cols: readonly number[]): number {
-	return cols.reduce((n, w) => n + w + 2, 2);
+	return cols.reduce((n, w) => n + w, 0) + 3 * cols.length + 1;
 }
 
 /**
