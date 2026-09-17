@@ -57,11 +57,43 @@ Measured, free, from this tree (`createCodingTools`, serialized as
 and it is the reason this ADR exists: it is small enough that one ordinary
 MCP server can dominate it.
 
+### GATE 1 IS RUN — and it does not withdraw the ADR
+
+Measured 2026-09-17 in a container, $0, no model call: four official
+reference servers, their schemas read from their own `tools/list` over
+stdio and serialised exactly as the built-in table above.
+
+| server | tools | bytes | against the built-in surface |
+|---|---|---|---|
+| filesystem | 14 | 7,986 | **2.12×** |
+| memory | 9 | 4,159 | 1.10× |
+| sequentialthinking | **1** | 4,035 | **1.07×** |
+| everything | 13 | 4,940 | 1.31× |
+| **all four** | 37 | **21,120 B ≈ 5,280 tok** | **5.60×** |
+
+Against the budget declared ABOVE, before these numbers existed: a single
+server defers past 2× (7,544 B), all servers past 4× (15,088 B).
+**Filesystem alone clears the single-server threshold at 2.12×, and four
+ordinary servers clear the collective one at 5.60×.** The problem is
+real and the budget was not fitted to it.
+
+**The finding that outranks the totals: `sequentialthinking` has ONE tool
+and costs 4,035 bytes — more than every built-in tool kiso ships,
+combined.** A budget reasoned per SERVER, or per tool count, would have
+missed it. That is a direct argument for the proxy: its resident cost is
+constant at ~200 tokens whatever the tool count, while any
+schemas-resident design pays whatever a single verbose tool decides to
+cost.
+
 **What I have NOT measured: how big a real server actually is.** There is
 no `~/.kiso/mcp-tools.json` on this machine, so I have no real server's
 schemas to weigh. I am not going to put an estimate in an ADR and let it
 harden into a fact — that is the exact failure this programme has paid for
 more than once.
+
+(The paragraphs below were written BEFORE the gate ran and are kept as
+they stood, so the prediction and the result can be read against each
+other.)
 
 So **gate 1 is the measurement, and it costs $0**: spawn 2–3 real servers,
 let the extension write its tool cache, and serialize it the same way the
