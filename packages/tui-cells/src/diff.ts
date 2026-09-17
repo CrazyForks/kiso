@@ -19,9 +19,25 @@ export interface DiffResult {
 	lines: DiffLine[];
 	added: number;
 	removed: number;
+	/** Which of the three this result is. Set on EVERY result.
+	 *
+	 *  - `"diff"` — `lines` is a real diff and the counts are real
+	 *  - `"not-found"` — the search is not in the file
+	 *  - `"ambiguous"` — the search resolves in more than one place (ACI-2)
+	 *
+	 *  The last two carry an honest note in `lines` and zero counts: the
+	 *  tool will refuse, so there is no edit to draw. */
+	outcome?: "diff" | "not-found" | "ambiguous";
 	/** TUI2-R1.5 ② (VD-2): the search is not in the file — the tool will
 	 *  ERROR, so the panel shows the honest note carried in `lines` and
-	 *  never a diff. Absent on every real diff. */
+	 *  never a diff.
+	 *
+	 *  @deprecated Read `outcome`. This flag means *the search was not
+	 *  found*; it has never meant *there is no diff*, and since ACI-2 those
+	 *  are different things — an ambiguous search also produces a note with
+	 *  no diff and does NOT set this flag. Its value is unchanged and will
+	 *  stay `outcome === "not-found"`, so nothing that reads it today
+	 *  changes meaning. */
 	notFound?: true;
 }
 
@@ -134,6 +150,7 @@ export function editFileDiff(oldContent: string, search: string, replace: string
 			lines: [{ kind: " ", text: `pattern not found in ${path ?? "the file"}` }],
 			added: 0,
 			removed: 0,
+			outcome: "not-found",
 			notFound: true,
 		};
 	}
@@ -147,11 +164,12 @@ export function editFileDiff(oldContent: string, search: string, replace: string
 			lines: [{ kind: " ", text: `pattern matches more than one place in ${path ?? "the file"}` }],
 			added: 0,
 			removed: 0,
+			outcome: "ambiguous",
 		};
 	}
 	const result = oldContent.slice(0, at) + replace + oldContent.slice(at + search.length);
 	const lines = withContext(lcsDiff(oldContent.split("\n"), result.split("\n")));
-	return { lines, ...stats(lines) };
+	return { lines, ...stats(lines), outcome: "diff" };
 }
 
 /** write_file: a new file is all +; an existing file diffs row-level
@@ -159,8 +177,8 @@ export function editFileDiff(oldContent: string, search: string, replace: string
 export function writeFileDiff(oldContent: string | null, newContent: string): DiffResult {
 	if (oldContent === null) {
 		const lines = newContent.split("\n").map((text) => ({ kind: "+" as const, text }));
-		return { lines, added: lines.length, removed: 0 };
+		return { lines, added: lines.length, removed: 0, outcome: "diff" };
 	}
 	const lines = withContext(lcsDiff(oldContent.split("\n"), newContent.split("\n")));
-	return { lines, ...stats(lines) };
+	return { lines, ...stats(lines), outcome: "diff" };
 }

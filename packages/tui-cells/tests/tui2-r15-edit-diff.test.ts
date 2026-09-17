@@ -18,7 +18,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { editFileDiff } from "../src/diff.js";
+import { editFileDiff, writeFileDiff } from "../src/diff.js";
 
 /** The walkthrough's own fixture — src/parser.ts, with "// OLD" INDENTED
  *  inside its line, which is what made the line-aligned locator miss. */
@@ -114,5 +114,38 @@ describe("TUI2-R1.5 ② — editFileDiff locates the way the tool does (VD-2)", 
 		const r = editFileDiff(old, "keep me", "keep me\nand this");
 		expect({ added: r.added, removed: r.removed }).toEqual({ added: 1, removed: 0 });
 		expect(r.lines.filter((l) => l.kind === "+").map((l) => l.text)).toEqual(["and this"]);
+	});
+});
+
+describe("ACI-2 coda — every diff result says WHICH of the three it is", () => {
+	// `notFound` was set and never read anywhere in the tree, and ACI-2 made
+	// it narrower than it looks: it means the search was not found, it has
+	// never meant there is no diff, and since ACI-2 those differ. `outcome`
+	// is the complete discriminator — set on every result, so the ambiguous
+	// case is representable instead of silent.
+	it("editFileDiff names all three outcomes", () => {
+		expect(editFileDiff("x\nONLY\ny\n", "ONLY", "TWO").outcome).toBe("diff");
+		expect(editFileDiff("x\ny\n", "MISSING", "TWO", "f.ts").outcome).toBe("not-found");
+		expect(editFileDiff("x\nDUP\ny\nDUP\nz\n", "DUP", "ONE", "f.ts").outcome).toBe("ambiguous");
+	});
+
+	it("writeFileDiff is always a diff — a new file and an edited one alike", () => {
+		expect(writeFileDiff(null, "a\nb\n").outcome).toBe("diff");
+		expect(writeFileDiff("a\n", "a\nb\n").outcome).toBe("diff");
+	});
+
+	it("notFound keeps EXACTLY the meaning it always had", () => {
+		// the deprecated flag must not quietly acquire the ambiguous case:
+		// a consumer reading it today gets the same answer tomorrow
+		expect(editFileDiff("x\ny\n", "MISSING", "T", "f.ts").notFound).toBe(true);
+		expect(editFileDiff("x\nDUP\ny\nDUP\n", "DUP", "T", "f.ts").notFound).toBeUndefined();
+		expect(editFileDiff("x\nONLY\n", "ONLY", "T").notFound).toBeUndefined();
+	});
+
+	it("a non-diff outcome carries no counted change", () => {
+		for (const r of [editFileDiff("x\ny\n", "MISSING", "T", "f.ts"), editFileDiff("a\nDUP\nDUP\n", "DUP", "T", "f.ts")]) {
+			expect({ added: r.added, removed: r.removed }).toEqual({ added: 0, removed: 0 });
+			expect(r.outcome).not.toBe("diff");
+		}
 	});
 });
