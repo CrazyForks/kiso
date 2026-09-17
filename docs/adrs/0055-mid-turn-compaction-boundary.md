@@ -168,6 +168,62 @@ choice turns on — post-compaction re-read volume — **is measurable**, on
 the same scaled instrument, without a new one. It is the first thing to
 measure post-launch, and it is what would move this number.
 
+### The selection rule, and what it turned out to depend on
+
+A rule was fixed **before its answer was seen**, to keep the default from
+being chosen by taste: *the default is the LARGEST threshold whose cost is
+within 5% of the cheapest in ALL twelve combinations.*
+
+Applied mechanically to the session shape above (300 requests × 3K new
+tokens, 40K tail), the worst-case excess over that combination's own
+cheapest is:
+
+| threshold | worst-case excess | within 5%? |
+|---|---|---|
+| 100K | 68.2% | no |
+| 150K | 21.7% | no |
+| **200K** | **4.2%** | **yes** |
+| 300K | 9.3% | no |
+| 400K | 18.7% | no |
+| 500K | 32.0% | no |
+| 600K | 38.1% | no |
+
+**The rule selects 200K**, and 200K is the only threshold that passes at
+all. 300K fails at 9.3%, and it fails in the cheap-re-read combinations —
+the same parameter that decides everything else here.
+
+**Then the rule was applied to six other session shapes, and it does not
+hold still.** The twelve combinations varied summary length and re-read
+volume; the session shape was held fixed and was never justified:
+
+| session shape | the rule selects |
+|---|---|
+| 300 × 3K, tail 40K (the stated one) | 200K |
+| 300 × 1K, tail 40K | 200K |
+| 300 × 8K, tail 40K | **400K** |
+| 300 × 3K, tail 80K | **300K** |
+| 100 × 3K, tail 40K | **nothing passes** |
+| 600 × 3K, tail 40K | **nothing passes** |
+| 300 × 3K, tail 10K | **nothing passes** |
+
+So the honest reading: **on three of seven plausible shapes the 5%
+criterion is unsatisfiable** — the spread across assumptions is wider than
+5% at every threshold — and where it is satisfiable the answer moves
+between 200K and 400K. The rule's output is decided by the session shape,
+which is the one assumption nobody has argued for.
+
+What the model CAN establish is the region, and the region is the
+original claim: the defensible answer lies **between 200K and 400K**, and
+never-compacting is worse than any point in it. What it cannot do is pick
+a point. **Within the region the choice is quality**, as it was before the
+model existed — fewer summaries, less decay — which is why 400K was
+proposed in the first place.
+
+Both facts go to the owner together: the rule as specified selects 200K,
+and the rule's answer is an artefact of an unjustified session shape. The
+default is the owner's to ratify with both in view, and it is a knob
+either way.
+
 ## How it will be measured, and what the measurement can and cannot say
 
 **Functional first, effects reported.** The gate is behaviour, not
