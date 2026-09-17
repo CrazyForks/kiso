@@ -1,6 +1,6 @@
 <p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/hero-dark.png"><img src="assets/hero.png" width="100%" alt="kiso — the durable runtime for AI agents"></picture></p>
 
-<p align="center"><b>v0.37.0</b> · MIT · Node ≥ 22 · <a href="https://kiso.work">kiso.work</a> · <a href="README.zh.md">Chinese edition</a></p>
+<p align="center"><b>v0.38.0</b> · MIT · Node ≥ 22 · <a href="https://kiso.work">kiso.work</a> · <a href="README.zh.md">Chinese edition</a></p>
 
 **kiso** is a durable runtime for AI agents. Every
 approval, tool result and event is written to disk as it happens, so an agent
@@ -495,7 +495,7 @@ gate: build → typecheck → tests → size → pack → API surface → hero �
 whitespace → CJK → versions → PTY manifest → dist inventory → bench repro →
 bench tests → bytes → `git diff --check` → consumer smoke tiers → demo.
 **3,120 tests green in 426 files** (2,468 unit, 652 PTY), 6 incident fixtures
-on the real runtime, 39 ADRs.
+on the real runtime, 40 ADRs.
 
 ## Why another one
 

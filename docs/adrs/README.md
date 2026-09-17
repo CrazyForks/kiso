@@ -93,6 +93,14 @@ not another recalibration)
   implementation or a real divergence); new projections ship with a
   voided-range admissibility test.
 
+- 0054 — The default tool table: what is always present, and what deferral
+  is reserved for — PROPOSED, 2026-09-16, awaiting the owner's
+  ratification. The seven built-ins plus TTY-conditional `ask_user` stay;
+  `delegate` and `ask_user` are default capabilities and never manual
+  configuration. The decision-load hypothesis was measured in a nine-pair
+  round and NOT SUPPORTED, so the projection idea is moot and deferred
+  loading is reserved for an MCP-heavy long tail, not applied at seven.
+
 Old ADRs are kept verbatim — decision history is the point of the
 discipline; superseded records carry the marker in their own Status line,
 never an edit.

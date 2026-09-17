@@ -19,9 +19,14 @@ describe("knownContextWindow: a stated window, or null", () => {
 		expect(knownContextWindow({ model: "claude-sonnet-5" })).toBe(1_000_000);
 	});
 
-	it("DeepSeek states none — the vendor publishes no window and the registry says so", () => {
-		expect(knownContextWindow({ model: "deepseek-flash", baseUrl: "https://api.deepseek.com" })).toBeNull();
-		expect(knownContextWindow({ model: "deepseek-v4-pro", baseUrl: "https://api.deepseek.com" })).toBeNull();
+	// SUPERSEDED (REG-1, 2026-09-17). This read "DeepSeek states none — the
+	// vendor publishes no window and the registry says so". The premise was
+	// false when it was written: the vendor's pricing table has stated
+	// "CONTEXT LENGTH 1M" throughout, on the same page the reasoning block
+	// already cited. What the registry said was not what the vendor states.
+	it("DeepSeek states 1M, and the registry says so", () => {
+		expect(knownContextWindow({ model: "deepseek-flash", baseUrl: "https://api.deepseek.com" })).toBe(1_000_000);
+		expect(knownContextWindow({ model: "deepseek-v4-pro", baseUrl: "https://api.deepseek.com" })).toBe(1_000_000);
 	});
 
 	it("a model nobody registered states none either", () => {

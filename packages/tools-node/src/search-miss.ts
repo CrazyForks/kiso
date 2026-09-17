@@ -61,7 +61,12 @@ export function describeSearchMiss(text: string, search: string): string {
 		const firstLine = search.split("\n", 1)[0] ?? "";
 		return `  no part of it appears in the file — it begins "${fragment(firstLine)}"`;
 	}
-	// First occurrence, matching the tool's own first-occurrence semantics.
+	// The FIRST place the prefix appears. Since ACI-2 the tool no longer
+	// has first-occurrence semantics to match, so the reason is now this
+	// function's own: a miss report needs one location and the earliest is
+	// the deterministic choice. A prefix occurring in several places is
+	// reported at the earliest of them, which can be further from where the
+	// caller was aiming than the report admits.
 	const at = text.indexOf(search.slice(0, matched));
 	const endOfMatch = at + matched;
 	const line = lineAt(text, at);

@@ -1,6 +1,6 @@
 <p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/hero-dark.png"><img src="assets/hero.png" width="100%" alt="kiso — the durable runtime for AI agents"></picture></p>
 
-<p align="center"><b>v0.37.0</b> · MIT · Node ≥ 22 · <a href="https://kiso.work">kiso.work</a> · <a href="README.md">English edition</a></p>
+<p align="center"><b>v0.38.0</b> · MIT · Node ≥ 22 · <a href="https://kiso.work">kiso.work</a> · <a href="README.md">English edition</a></p>
 
 **kiso** 是一个可靠续跑的 AI agent 运行时。每一次审批、每一个工具结果、每一条事件都在发生的当下写进磁盘,所以一个被打断、崩溃或被强杀的 agent 会**从已提交的持久前缀**接着跑——审批还在、结果还在——而不是从头再来。崩溃时仍在生成中的内容可能被重新生成;结果不明的副作用交给人来裁定。内核**上限**是 2,200 行 TypeScript,事件溯源,每个设计决策都随附一份 ADR,写明为什么,以及何时推翻它。
 
@@ -302,7 +302,7 @@ for await (const ev of session.run("What is 2+3?")) {
 | **面** | [sdk.md](docs/sdk.md)——公开面与事件流契约 · [usage.md](docs/usage.md)——规范 usage schema 与价格表 · [request-trace.md](docs/request-trace.md)——请求追踪账本 |
 | **记录** | [status.md](docs/status.md)——逐个面的交付状态 · [docs/adrs/](docs/adrs/README.md)——39 份架构决策记录 · [bench/README.md](bench/README.md)——bench:同一个模型、同一批任务、三个 Agent |
 
-CI 先按锁文件安装,然后跑 `npm run check`——这就是完整门链:build → typecheck → tests → size → pack → API 面 → hero → whitespace → CJK → versions → PTY manifest → dist inventory → bench repro → bench tests → bytes → `git diff --check` → 消费者冒烟层 → demo。**3,120 个测试全绿,426 个文件**(单元 2,468,PTY 652),6 个事故夹具跑在真实运行时上,39 份 ADR。
+CI 先按锁文件安装,然后跑 `npm run check`——这就是完整门链:build → typecheck → tests → size → pack → API 面 → hero → whitespace → CJK → versions → PTY manifest → dist inventory → bench repro → bench tests → bytes → `git diff --check` → 消费者冒烟层 → demo。**3,120 个测试全绿,426 个文件**(单元 2,468,PTY 652),6 个事故夹具跑在真实运行时上,40 份 ADR。
 
 ## 为什么还要做一个
 

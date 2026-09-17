@@ -64,11 +64,25 @@ describe("read / list / search", () => {
 });
 
 describe("edit / shell", () => {
-	it("edit_file replaces only the first occurrence", async () => {
+	// DECLARED SUPERSESSION (ACI-2). This pinned "replaces only the first
+	// occurrence" — a real rule, deliberately pinned, and now retired: a
+	// caller who meant the SECOND "one" got a silent wrong edit that
+	// reported success. The same fixture now pins the rule that replaced
+	// it, so the change is visible here rather than in a deletion.
+	it("edit_file refuses a search that matches twice, instead of taking the first", async () => {
 		const root = tempRoot();
 		writeFileSync(join(root, "a.txt"), "one one two", "utf8");
-		await editFileTool({ workspaceRoot: root }).execute({ path: "a.txt", search: "one", replace: "ONE", expectedRevision: revOf(join(root, "a.txt")) }, CTX);
-		expect(readFileSync(join(root, "a.txt"), "utf8")).toBe("ONE one two");
+		const r = await editFileTool({ workspaceRoot: root }).execute({ path: "a.txt", search: "one", replace: "ONE", expectedRevision: revOf(join(root, "a.txt")) }, CTX);
+		expect(r.isError).toBe(true);
+		expect(r.content).toContain("matches 2 places");
+		expect(readFileSync(join(root, "a.txt"), "utf8")).toBe("one one two");
+	});
+
+	it("edit_file still replaces a search that matches once", async () => {
+		const root = tempRoot();
+		writeFileSync(join(root, "a.txt"), "one one two", "utf8");
+		await editFileTool({ workspaceRoot: root }).execute({ path: "a.txt", search: "two", replace: "TWO", expectedRevision: revOf(join(root, "a.txt")) }, CTX);
+		expect(readFileSync(join(root, "a.txt"), "utf8")).toBe("one one TWO");
 	});
 
 	it("edit_file reports a missing pattern as invalid_input, not a crash", async () => {

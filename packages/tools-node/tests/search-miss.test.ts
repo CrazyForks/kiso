@@ -85,7 +85,7 @@ describe("describeSearchMiss — the three shapes a miss takes", () => {
 		expect(out).toContain("…");
 	});
 
-	it("resolves the prefix at its FIRST occurrence, matching the tool's own semantics", () => {
+	it("resolves the prefix at its FIRST occurrence — deterministic, and no longer a match to the tool's own rule (ACI-2)", () => {
 		const twice = "AAA\nBBB\nAAA\nCCC\n";
 		const out = describeSearchMiss(twice, "AAA\nZZZ");
 		// the first AAA is on line 1; the second is on line 3

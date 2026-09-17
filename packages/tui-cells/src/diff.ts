@@ -19,9 +19,25 @@ export interface DiffResult {
 	lines: DiffLine[];
 	added: number;
 	removed: number;
+	/** Which of the three this result is. Set on EVERY result.
+	 *
+	 *  - `"diff"` — `lines` is a real diff and the counts are real
+	 *  - `"not-found"` — the search is not in the file
+	 *  - `"ambiguous"` — the search resolves in more than one place (ACI-2)
+	 *
+	 *  The last two carry an honest note in `lines` and zero counts: the
+	 *  tool will refuse, so there is no edit to draw. */
+	outcome?: "diff" | "not-found" | "ambiguous";
 	/** TUI2-R1.5 ② (VD-2): the search is not in the file — the tool will
 	 *  ERROR, so the panel shows the honest note carried in `lines` and
-	 *  never a diff. Absent on every real diff. */
+	 *  never a diff.
+	 *
+	 *  @deprecated Read `outcome`. This flag means *the search was not
+	 *  found*; it has never meant *there is no diff*, and since ACI-2 those
+	 *  are different things — an ambiguous search also produces a note with
+	 *  no diff and does NOT set this flag. Its value is unchanged and will
+	 *  stay `outcome === "not-found"`, so nothing that reads it today
+	 *  changes meaning. */
 	notFound?: true;
 }
 
@@ -123,7 +139,10 @@ function stats(diff: DiffLine[]): { added: number; removed: number } {
  *  A genuine miss is now reported as a miss: the tool will return
  *  `pattern not found in <path>` and change nothing, so the panel says
  *  exactly that instead of inventing a diff for an edit that will not
- *  happen. `path` names the file in that note. */
+ *  happen. `path` names the file in that note.
+ *
+ *  Since ACI-2 an AMBIGUOUS search is the second case of the same rule:
+ *  the tool refuses it, so there is no edit to draw. */
 export function editFileDiff(oldContent: string, search: string, replace: string, path?: string): DiffResult {
 	const at = oldContent.indexOf(search);
 	if (at < 0) {
@@ -131,12 +150,26 @@ export function editFileDiff(oldContent: string, search: string, replace: string
 			lines: [{ kind: " ", text: `pattern not found in ${path ?? "the file"}` }],
 			added: 0,
 			removed: 0,
+			outcome: "not-found",
 			notFound: true,
+		};
+	}
+	// ACI-2: an ambiguous search is REFUSED by the tool, and this diff is
+	// drawn for the APPROVAL PANEL — before the tool runs. Previewing the
+	// first of N places showed a human the very edit ACI-2 exists to
+	// prevent, then asked them to approve one that would not happen. The
+	// same rule as the miss above, for the same reason.
+	if (search.length > 0 && oldContent.indexOf(search, at + 1) > at) {
+		return {
+			lines: [{ kind: " ", text: `pattern matches more than one place in ${path ?? "the file"}` }],
+			added: 0,
+			removed: 0,
+			outcome: "ambiguous",
 		};
 	}
 	const result = oldContent.slice(0, at) + replace + oldContent.slice(at + search.length);
 	const lines = withContext(lcsDiff(oldContent.split("\n"), result.split("\n")));
-	return { lines, ...stats(lines) };
+	return { lines, ...stats(lines), outcome: "diff" };
 }
 
 /** write_file: a new file is all +; an existing file diffs row-level
@@ -144,8 +177,8 @@ export function editFileDiff(oldContent: string, search: string, replace: string
 export function writeFileDiff(oldContent: string | null, newContent: string): DiffResult {
 	if (oldContent === null) {
 		const lines = newContent.split("\n").map((text) => ({ kind: "+" as const, text }));
-		return { lines, added: lines.length, removed: 0 };
+		return { lines, added: lines.length, removed: 0, outcome: "diff" };
 	}
 	const lines = withContext(lcsDiff(oldContent.split("\n"), newContent.split("\n")));
-	return { lines, ...stats(lines) };
+	return { lines, ...stats(lines), outcome: "diff" };
 }
