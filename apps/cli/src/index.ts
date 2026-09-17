@@ -608,10 +608,7 @@ Tool discipline:
   first — never guess its content.
 - Use edit_file for targeted changes and write_file for full rewrites.
   Prefer many small edits over one large write.
-- shell is for commands: builds, tests, git, grep. Be careful — shell has
-  side effects and may take time. Run one command at a time and inspect
-  the output before continuing.
-- Batch independent tool calls into one reply — they run in parallel.
+- Be careful — shell has side effects and may take time.
 - search_text and list_dir are cheap — locate first, then read ranges
   with read_file offset/limit; never read a whole large file in one call.
 - Do not re-read a file you already read unchanged, or one you changed
