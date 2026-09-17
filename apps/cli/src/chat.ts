@@ -30,6 +30,7 @@ import { canonicalizeUsage } from "@vincemakes/kiso-runtime";
 import { canonicalizeUsageForModel, requestBudget } from "@vincemakes/kiso-runtime/internal";
 import type { AgentSession, Run } from "@vincemakes/kiso-runtime";
 import { dispatch, type DispatchCtx, abortBangCommand } from "./dispatch.js";
+import { paintWindowTitle } from "./window-title.js";
 import { agentBaseUrl, agentModel, body, bodyLog, configuredWindow, dock, type LineInput } from "./state.js";
 import { attachImages } from "./attachments.js";
 import { lookupModelMetadata } from "@vincemakes/kiso-runtime/internal";
@@ -845,6 +846,13 @@ export async function consumeRun(
 		// construction (ADR-0040).
 		switch (ev.type) {
 			case "user_input":
+				// The window title is re-derived here because THIS is when a
+				// session stops being nameless: the tab opened as `kiso —
+				// <workspace>` and the first substantive prompt is what gives
+				// it a name. Re-derived rather than set, so the opener rule is
+				// `sessionTitle`'s and a greeting-first session upgrades when
+				// the real prompt lands instead of keeping "hi" forever.
+				paintWindowTitle(session.log.all);
 				// TV-1B: a system-sourced input is PRODUCT MACHINERY — visible
 				// (every durable input renders) but never painted as the
 				// user's words. Provenance is honest on screen, not only in

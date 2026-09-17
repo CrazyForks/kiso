@@ -76,3 +76,19 @@ export function runCli(args, env, options = {}) {
 export function stripANSI(text) {
 	return text.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/\r/g, "");
 }
+
+/** The transcript with its OSC sequences removed.
+ *
+ *  `ESC ] … BEL` (and the ST form) addresses the WINDOW — its title, its
+ *  icon — never the grid: a terminal consumes it and paints nothing, and
+ *  it occupies no cell and no column. A test that reads the raw stream as
+ *  though it were screen content must drop them first, or kiso's window
+ *  title (0.39.1) reads as a line that was never on screen. Separate from
+ *  `stripANSI` because the two are asked for different reasons: that one
+ *  removes what DECORATES a line, this one removes what is not a line.
+ *  The VT emulator (helpers/vt-screen.ts) consumes them for the tests
+ *  that go through it. */
+export function stripOsc(text) {
+	// eslint-disable-next-line no-control-regex
+	return text.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "");
+}
