@@ -22,9 +22,20 @@ Three things follow, and they are the design, not caveats on it:
    resident line** naming it and what it is for. The model always knows
    the capability exists.
 3. **Admission is append-only.** `load_tools` adds schemas to the live
-   request and never removes one. A tool that appeared cannot vanish
-   mid-session — that would make the model's own earlier reasoning
-   unreproducible.
+   request and never removes one.
+
+   It is not free, and the two costs are worth naming. **One round trip**
+   — the model asks, gets the schemas, then acts. And **one cache break**:
+   the tool table sits near the front of the request, so growing it
+   invalidates the prompt cache for everything behind it.
+
+   That second cost is the real argument for append-only, not tidiness. A
+   table that only ever grows breaks the cache **once per load**, and
+   every request after that load is cacheable again against the new
+   prefix. A table that can shrink as well as grow breaks it repeatedly
+   and unpredictably, and nothing in the session ever settles. Append-only
+   also keeps the model's earlier reasoning reproducible: a tool that
+   appeared cannot vanish mid-session.
 
 ## The measurement I already have, and the one I do not
 
@@ -67,13 +78,39 @@ withdrawn, not tuned.** Deferral buys nothing worth its hazard against a
 **Above a declared byte budget, a server's tools are replaced by one
 resident line; `load_tools` admits them on demand.**
 
-- **The budget is declared, not tuned.** It is written down before the
-  measurement, in the config, and the same in every session. A budget
-  chosen after seeing which servers a user runs is a budget fitted to that
-  user.
+### The budget, declared here, before gate 1
+
+Expressed against the surface actually measured above, so it means
+something rather than being a round number:
+
+| | |
+|---|---|
+| a **single server** defers when its schemas exceed **2× the built-in surface** | > 7,544 B ≈ 1,886 tokens |
+| **all MCP servers together** defer when their total exceeds **4×** | > 15,088 B ≈ 3,772 tokens |
+
+**These are written down BEFORE the measurement and change only by a
+recorded ruling.** A budget chosen after seeing gate 1's numbers — or
+after seeing which servers a particular user runs — is a budget fitted to
+its evidence, and would make the gate decorative. If the numbers turn out
+wrong, they are changed the way a pinned decision is changed: declared,
+with the reason.
+
+The reason for these two in particular: one server that costs twice
+everything kiso ships is already the larger half of the request, and a
+collection costing four times it has made the built-ins a rounding error.
+Neither number is a finding. They are a stated position, and the
+distinction matters more than the digits.
 - **Below the budget, nothing changes.** A one- or two-server setup — the
   common case — behaves exactly as it does today, full schemas resident.
   This change must be invisible to the people it does not help.
+- **The resident line carries what the decision needs**: the **server
+  name**, **one sentence of capability**, and the **tool count**. Less
+  than that and the model cannot tell whether loading is worth a round
+  trip; more and the line stops being cheaper than the schemas it
+  replaces. Whether the model then loads the RIGHT server is measured by
+  the same scenario shape as the skills check — direct, oblique, absent,
+  near-miss — because it is the same question about the same kind of
+  sentence.
 - **`load_tools` is one call, and it is cheap.** It takes a server name
   and admits that server's schemas. It does not search, rank, or guess —
   the resident line already told the model what is there.
@@ -91,6 +128,15 @@ resident line; `load_tools` admits them on demand.**
 4. below the budget, the request is **byte-identical** to today's.
 
 (4) is the one that matters most and is the easiest to get wrong.
+
+**The prior question is not in this ADR at all.** The skills extension
+already ships this architecture — one resident line per skill, full text
+on demand — and nobody has checked whether the line reaches the body. The
+skills behaviour check asks exactly that, and the precedence is explicit:
+**if the model does not reach tier 2 from an index line, this ADR waits
+for that to be fixed rather than inheriting it.** Shipping a second
+instance of an architecture whose first instance does not work would be
+choosing not to know.
 
 **Behavioural, reported and judged by nothing yet:** a small scenario set
 where the right tool lives behind a deferred server, counting how often
