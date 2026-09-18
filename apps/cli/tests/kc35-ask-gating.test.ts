@@ -113,6 +113,14 @@ describe("T-Q3 / slice ⓪ — the extraction changed no bytes", () => {
 			// stop does not move: `/compact` is eight characters and
 			// `/reload` is seven, so every pre-move row keeps its padding.
 			"/reload     reread extensions, skills and config into this session",
+			// 0.40.0 — three DECLARED ADDITIONS in the same class: the two
+			// skill commands, and the `/<name>` rule a person needs before
+			// installing a skill named like a command (the command wins).
+			// The computed stop does not move: `/compact` is eight
+			// characters and `/skills` and `/<name>` are seven.
+			"/skills     list the installed skills, and any that cannot load",
+			"/skill      run a skill as your turn: /skill <name> [args]",
+			"/<name>     runs the skill <name> when no command above has that name",
 			// §2.3 — a DECLARED ADDITION in the same class: the switch is
 			// beside the shell gestures because that is where a reader
 			// looks for a key, and a gesture the sheet does not name is a
@@ -140,7 +148,7 @@ describe("T-Q3 / slice ⓪ — the extraction changed no bytes", () => {
 	});
 
 	it("the last row still carries its own newline — two rows from one bodyLog call", () => {
-		expect(helpRows()).toHaveLength(19); // 8 extracted + the mini-spec pair + /rewrap (R4) + /copy (E1 §3) + the three §2.2 shell rows + §2.3's ctrl+t + §2.4's ctrl+g + §2.5's /reload + 0.39.1's /context repair
+		expect(helpRows()).toHaveLength(22); // 8 extracted + the mini-spec pair + /rewrap (R4) + /copy (E1 §3) + the three §2.2 shell rows + §2.3's ctrl+t + §2.4's ctrl+g + §2.5's /reload + 0.39.1's /context repair + 0.40.0's three skill rows
 		expect(helpRows().filter((r) => r.includes("\n"))).toHaveLength(1);
 	});
 

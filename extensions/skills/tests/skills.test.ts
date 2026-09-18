@@ -178,3 +178,74 @@ describe("⑤ safe-defaults (the round's only change outside extensions/)", () =
 		expect(decide({ name: "write_file", input: {} }, ctx)).toMatchObject({ action: "ask" });
 	});
 });
+
+/** 0.40.0 — the catalog: the SAME scan the model's index came from, handed
+ *  to the CLI so `/skill` and `/skills` never walk the directory a second
+ *  time and get a second answer. */
+type Catalog = {
+	readonly entries: readonly { name: string; description: string; dir: string; path: string; userInvocable: boolean }[];
+	readonly broken: readonly { dir: string; reason: string }[];
+	body(name: string): { body: string } | { error: string };
+};
+const catalogOf = (ext: KisoExtension): Catalog => {
+	const c = (ext as KisoExtension & { catalog?: Catalog }).catalog;
+	if (c === undefined) throw new Error("no catalog on the extension");
+	return c;
+};
+
+describe("0.40.0 skills: the catalog the CLI invokes from", () => {
+	it("lists every indexed skill with its directory, and `user-invocable: false` marks a model-only skill", async () => {
+		const dir = skillDir();
+		writeSkill(dir, "review", "\nReview the diff.\n", { name: "review", description: "review code" });
+		writeSkill(dir, "internal", "\nModel only.\n", { name: "internal", description: "for the model", "user-invocable": "false" });
+		// anything but the literal `false` is invocable — absence cannot be
+		// told apart from a skill written before the key existed
+		writeSkill(dir, "odd", "\nOdd.\n", { name: "odd", description: "odd value", "user-invocable": "no" });
+		const cat = catalogOf(await extWith(dir));
+		expect(cat.entries.map((e) => [e.name, e.dir, e.userInvocable])).toEqual([
+			["internal", "internal", false],
+			["odd", "odd", true],
+			["review", "review", true],
+		]);
+		// the model still sees and can load a model-only skill
+		const ext = await extWith(dir);
+		expect(ext.systemPrompt?.append).toContain("- internal: for the model");
+	});
+
+	it("broken entries carry the loader's own reason — the same words the model's warning line uses", async () => {
+		const dir = skillDir();
+		writeSkill(dir, "good", "\nbody\n", { description: "fine" });
+		writeSkill(dir, "bad", "\nbody\n", { name: "bad" });
+		mkdirSync(join(dir, "empty"));
+		const ext = await extWith(dir);
+		const cat = catalogOf(ext);
+		expect(cat.broken).toEqual([
+			{ dir: "bad", reason: "no description" },
+			{ dir: "empty", reason: "no SKILL.md" },
+		]);
+		for (const b of cat.broken) expect(ext.systemPrompt?.append).toContain(`${b.dir} (${b.reason})`);
+	});
+
+	it("body() returns the SKILL.md body with the frontmatter stripped, read at call time", async () => {
+		const dir = skillDir();
+		writeSkill(dir, "review", "\nReview the diff.\nThen say so.\n", { name: "review", description: "review code" });
+		const cat = catalogOf(await extWith(dir));
+		expect(cat.body("review")).toEqual({ body: "Review the diff.\nThen say so." });
+		// read per call (finding #8): an edit after load is what is sent
+		writeSkill(dir, "review", "\nEdited.\n", { name: "review", description: "review code" });
+		expect(cat.body("review")).toEqual({ body: "Edited." });
+	});
+
+	it("body() refuses a body over the read_skill cap rather than truncating it", async () => {
+		const dir = skillDir();
+		writeSkill(dir, "huge", `\n${"x".repeat(32 * 1024 + 1)}\n`, { name: "huge", description: "too big" });
+		const r = catalogOf(await extWith(dir)).body("huge");
+		expect("error" in r ? r.error : "").toMatch(/^over the 32,768-character skill cap \(\d[\d,]* characters\)$/);
+	});
+
+	it("an empty skills directory still carries an empty catalog", async () => {
+		const cat = catalogOf(await extWith(skillDir()));
+		expect(cat.entries).toEqual([]);
+		expect(cat.broken).toEqual([]);
+	});
+});

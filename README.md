@@ -470,7 +470,7 @@ in either direction turns the check red.
 Comments do not count — explain freely, implement tersely. The gate is a
 snapshot discipline, not a self-adjusting ratchet: it has moved exactly twice,
 each by adjudicated amendment, and the standing escape hatch is EXTRACTION
-(ADR-0043). The core sits at **2,148 of 2,200** lines today. The product
+(ADR-0043). The core sits at **2,159 of 2,200** lines today. The product
 surfaces run a different regime since Amendment 8 — printed every check for
 visibility, never failing it, protected by the architecture gates instead.
 

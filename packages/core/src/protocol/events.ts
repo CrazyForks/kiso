@@ -181,6 +181,17 @@ export interface UserInputEvent {
 	readonly content: string | readonly import("./messages.js").ContentBlock[];
 	/** Provenance of the prompt (Area 6) — preserved losslessly. */
 	readonly source?: import("./messages.js").MessageSource;
+	/** 0.40.0 (ADR-0051 §5 rule 1): how a PERSON's turn was composed — a
+	 *  skill they invoked, and the line they typed. Display provenance only:
+	 *  `content` is what the model receives and the projection never reads
+	 *  this, so no byte of it reaches a request. */
+	readonly via?: UserInputVia;
+}
+
+export interface UserInputVia {
+	readonly kind: "skill";
+	readonly name: string;
+	readonly line: string;
 }
 
 /**
@@ -721,6 +732,12 @@ function isSource(v: Record<string, unknown>): boolean {
 	return v.source === undefined || MESSAGE_SOURCES.has(v.source as import("./messages.js").MessageSource);
 }
 
+function isVia(v: Record<string, unknown>): boolean {
+	if (v.via === undefined) return true;
+	const via = v.via as Record<string, unknown>;
+	return isPlainObject(via) && via.kind === "skill" && typeof via.name === "string" && via.name !== "" && typeof via.line === "string" && via.line !== "";
+}
+
 function isTags(v: Record<string, unknown>): boolean {
 	return v.tags === undefined || (Array.isArray(v.tags) && v.tags.every((t) => typeof t === "string"));
 }
@@ -844,7 +861,7 @@ const EVENT_VALIDATORS = {
 	thinking: (v: Record<string, unknown>) => typeof v.text === "string",
 	usage: isUsage,
 	stop: (v: Record<string, unknown>) => STOP_REASONS.has(v.reason as StopReason) && isContinuation(v.continuation),
-	user_input: (v: Record<string, unknown>) => isContent(v.content) && isSource(v),
+	user_input: (v: Record<string, unknown>) => isContent(v.content) && isSource(v) && isVia(v),
 	compacted: (v: Record<string, unknown>) =>
 		Array.isArray(v.cleared) &&
 		v.cleared.every(

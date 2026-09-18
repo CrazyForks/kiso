@@ -140,6 +140,10 @@ export const MENU_ITEMS: readonly MenuItem[] = [
 	{ name: "/status", desc: "show session id, event count, and context estimate" },
 	// TUI2-R1 (E): the rent-ledger attribution — where the context went
 	{ name: "/context", desc: "show where the context went — the last request's rent ledger" },
+	// 0.40.0: the person's door to the installed skills — `/<name>` works
+	// too when no command here has that name.
+	{ name: "/skills", desc: "list the installed skills — /<name> [args] runs one" },
+	{ name: "/skill", desc: "run a skill as your turn: /skill <name> [args]" },
 	{ name: "/help", desc: "print this list of commands" },
 ];
 
