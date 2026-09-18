@@ -325,12 +325,62 @@ describe("ADR-0044 cli: /compact on a real PTY", () => {
 		// The row went LIVE across a real elapsed second — the 1.5s call
 		// makes the 1s repaint deterministic (the interval is cleared only
 		// when summarize() settles, so it fires even under the abort).
-		expect(plain).toContain("tokens · 1s");
+		// 0.40.0 — a DECLARED change: from the attempt's start the covered
+		// size carries the output bar ("~Nk → ▱▱▱▱▱▱ 0/32k"); nothing has
+		// streamed during the 1.5s delay, so it reads zero at the second tick.
+		expect(plain).toContain("0/32k · 1s");
 		expect(plain).toContain("[/compact] cancelled — nothing was persisted");
 		// The cancel left the session untouched: no summarized event on disk.
 		const durable = readFileSync(join(home, "sessions", "kc.jsonl"), "utf8");
 		expect(durable).not.toContain('"type":"summarized"');
 		expect(durable).not.toContain("Must never land.");
+	});
+});
+
+describe("0.40.0 cli: the compacting row's bar on a real PTY", () => {
+	it("fills from streamed reasoning before any text — at least two distinct fills, then the recap", () => {
+		const dir = mkdtempSync(join(tmpdir(), "kiso-compact-bar-pty-"));
+		// KISO_MAX_RETRIES pinned: this gate is about the bar, and the kernel's
+		// ten-attempt budget would turn any stray retryable failure into minutes
+		const { env: isoEnv, dirs } = isolatedEnv({ KISO_CONTEXT_WINDOW: "20000", KISO_MAX_RETRIES: "0" });
+		const home = dirs.home;
+		seedSession(home, "kb");
+		const VALID = ["## Goal", "g", "## Constraints", "c", "## User requests", "u", "## Files and changes", "f", "## Errors and fixes", "e", "## Current work", "w", "## Next steps", "n"].join("\n");
+		const script = [
+			...Array.from({ length: 7 }, () => ({ events: [{ type: "stop", reason: "end_turn" }] })),
+			{ events: [{ type: "stop", reason: "end_turn" }] }, // recovery resume
+			{
+				events: [
+					{ type: "delay", ms: 1200 },
+					// 64,000 chars of reasoning ≈ 16k tokens: half the bar, before any text
+					{ type: "thinking", text: "r".repeat(64_000) },
+					{ type: "delay", ms: 1200 },
+					{ type: "text_delta", text: VALID },
+					{ type: "stop", reason: "end_turn" },
+					{ type: "usage", known: true, inputTokens: 5000, outputTokens: 24_000, cacheRead: 0, cacheWrite: null, reasoningTokens: 16_000 },
+				],
+			},
+		];
+		const scriptPath = join(dir, "faux.json");
+		writeFileSync(scriptPath, JSON.stringify(script), "utf8");
+		const out = ptyRun(
+			{ ...isoEnv, KISO_FAUX_SCRIPT: scriptPath },
+			[
+				["/ commands · \u2191 history", "/compact\r"],
+				["✦ compacted", "exit\r"],
+			],
+			dir,
+			"kb",
+			{ modeFlag: "bypass" },
+		);
+		const plain = stripANSI(out);
+		// the zero, then the reasoning-filled half — reasoning moves the bar
+		// before a single character of the summary exists
+		expect(plain).toContain("→ ▱▱▱▱▱▱ 0/32k");
+		expect(plain).toContain("→ ▰▰▰▱▱▱ 16k/32k");
+		// and the call completed: the recap, and the durable checkpoint
+		expect(plain).toContain("[/compact] ✦ compacted · 4 rounds → 1 summary");
+		expect(readFileSync(join(home, "sessions", "kb.jsonl"), "utf8")).toContain('"type":"summarized"');
 	});
 });
 

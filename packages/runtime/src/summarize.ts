@@ -297,6 +297,29 @@ export interface SummarizeConversationOptions {
 	/** ADR-0005 Amendment 2: announced before each wait, as the kernel
 	 *  announces its own. Observation only — a throw is swallowed. */
 	readonly onRetry?: (info: RetryInfo) => Promise<void> | void;
+	/** 0.40.0: how much of the OUTPUT budget the call has spent so far —
+	 *  reported at each attempt's start (zero) and as text, reasoning and
+	 *  the final usage arrive. Observation only: a throw is swallowed, and
+	 *  the request is identical with or without it. */
+	readonly onProgress?: (progress: SummaryProgress) => void;
+}
+
+/**
+ * 0.40.0 — the summary call's progress against its output budget.
+ *
+ * `produced` counts streamed text AND streamed reasoning (owner's ruling —
+ * a bar over text alone sits low while thinking spends the budget, and the
+ * call then fails at "full"), by the session's chars/4 proxy, until the
+ * provider reports its output total, which replaces the estimate
+ * (`reported`). `reasoningUnseen`: the provider billed reasoning that never
+ * streamed, so the jump to the reported total has a named cause.
+ */
+export interface SummaryProgress {
+	readonly produced: number;
+	/** the call's output budget; null when the call carries none */
+	readonly budget: number | null;
+	readonly reasoningUnseen: boolean;
+	readonly reported: boolean;
 }
 
 /** The summary call's result — the text PLUS the provider-reported usage
@@ -421,6 +444,19 @@ async function summaryAttempt(options: SummarizeConversationOptions): Promise<Su
 	let stopReason: string | undefined;
 	let toolCalls = 0;
 	let afterStop: string | undefined;
+	// 0.40.0: the progress this attempt reports — it starts at zero, so a
+	// retry visibly starts the bar again
+	let streamedChars = 0;
+	let sawReasoning = false;
+	const report = (progress: SummaryProgress): void => {
+		try {
+			options.onProgress?.(progress);
+		} catch {
+			// observation only
+		}
+	};
+	const budget = options.maxOutputTokens ?? null;
+	report({ produced: 0, budget, reasoningUnseen: false, reported: false });
 	for await (const ev of adapter.stream({
 		model,
 		messages,
@@ -430,8 +466,12 @@ async function summaryAttempt(options: SummarizeConversationOptions): Promise<Su
 		...(options.reasoning !== undefined ? { reasoning: options.reasoning } : {}),
 	})) {
 		if (stops > 0 && ev.type !== "usage" && ev.type !== "stop" && afterStop === undefined) afterStop = ev.type;
-		if (ev.type === "text_delta") text += ev.text;
-		else if (ev.type === "tool_call_start" || ev.type === "tool_call_end" || ev.type === "tool_call_input_delta") toolCalls += 1;
+		if (ev.type === "text_delta" || ev.type === "thinking") {
+			if (ev.type === "text_delta") text += ev.text;
+			else sawReasoning = true;
+			streamedChars += ev.text.length;
+			report({ produced: Math.ceil(streamedChars / 4), budget, reasoningUnseen: false, reported: false });
+		} else if (ev.type === "tool_call_start" || ev.type === "tool_call_end" || ev.type === "tool_call_input_delta") toolCalls += 1;
 		else if (ev.type === "stop") {
 			stops += 1;
 			stopReason = ev.reason;
@@ -451,6 +491,9 @@ async function summaryAttempt(options: SummarizeConversationOptions): Promise<Su
 				cacheWrite: ev.cacheWrite,
 				...(ev.reasoningTokens !== undefined ? { reasoningTokens: ev.reasoningTokens } : {}),
 			};
+			if (ev.outputTokens !== null) {
+				report({ produced: ev.outputTokens, budget, reasoningUnseen: !sawReasoning && (ev.reasoningTokens ?? 0) > 0, reported: true });
+			}
 		}
 	}
 	if (stops === 0) throw new Error("the summary turn never stopped — not a complete turn");

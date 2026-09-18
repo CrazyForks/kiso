@@ -23,6 +23,19 @@
  */
 
 import { kUnit } from "./lines.js";
+import { meterGlyphs } from "./context-ledger.js";
+
+/** 0.40.0 — the compacting row's bar: output produced so far against the
+ *  summary call's output budget (text AND reasoning — see the runtime's
+ *  SummaryProgress), and whether reasoning was billed without streaming. */
+export interface CompactingProgress {
+	readonly produced: number;
+	readonly budget: number | null;
+	readonly reasoningUnseen: boolean;
+}
+
+/** The compacting row's bar width — short: it shares a row. */
+const BAR_ON_ROW = 6;
 import { elapsedLabel } from "@vincemakes/kiso-tui-cells";
 import { TWINKLE } from "@vincemakes/kiso-tui-cells/render";
 import { displayWidth } from "@vincemakes/kiso-tui-cells/width";
@@ -194,10 +207,29 @@ export function runningStatus(glyph: string, since: number, outTokens: number | 
  * inline template in dispatch (0.40.0) so it composes like every other
  * row and has a place for what the launch build adds to it.
  */
-export function compactingStatus(glyph: string, rounds: number, tokens: number, elapsedSeconds: number, W?: number, retry?: RetryOnRow | null): string {
+export function compactingStatus(
+	glyph: string,
+	rounds: number,
+	tokens: number,
+	elapsedSeconds: number,
+	W?: number,
+	retry?: RetryOnRow | null,
+	progress?: CompactingProgress | null,
+): string {
+	// 0.40.0: with a budget to measure against, the covered size and the bar
+	// are ONE fact — what went in, and how much of the output budget has
+	// come out. Without a budget the row keeps the covered size alone: the
+	// bar never invents a denominator.
+	const covered =
+		progress != null && progress.budget !== null && progress.budget > 0
+			? `~${kUnit(tokens)} \u2192 ${meterGlyphs(progress.produced / progress.budget, BAR_ON_ROW)} ${kUnit(progress.produced)}/${kUnit(progress.budget)}`
+			: `~${kUnit(tokens)} tokens`;
 	return composeRow(`${glyph} compacting`, [
 		{ kind: "fact", text: `${rounds} rounds` },
-		{ kind: "fact", text: `~${kUnit(tokens)} tokens` },
+		{ kind: "fact", text: covered },
+		// why the figure jumped when the usage landed — a HINT, so a narrow
+		// row gives it up before the bar, the seconds or the retry
+		progress?.reasoningUnseen === true && progress.budget !== null ? { kind: "hint", text: "incl. unstreamed reasoning" } : null,
 		{ kind: "fact", text: `${Math.max(0, elapsedSeconds)}s` },
 		// ADR-0005 Amendment 2: the summary call retries under the kernel's
 		// policy, and a retry here is the same fact it is on the running row.

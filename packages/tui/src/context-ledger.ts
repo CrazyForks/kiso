@@ -78,15 +78,25 @@ function k(n: number): string {
  * the detail text rides after them, dim, and is cut by the caller's
  * width if it must be.
  */
+/** 0.40.0 — the ONE fill rule for a ▰▱ meter: `ratio` of `cells`, rounded,
+ *  clamped to the bar. The `/context` bar and the compacting row's bar both
+ *  draw through it, so the two cannot fill differently. Plain glyphs; the
+ *  caller styles them. */
+export function meterGlyphs(ratio: number, cells: number): string {
+	const filled = Math.max(0, Math.min(cells, Math.round((Number.isFinite(ratio) ? ratio : 0) * cells)));
+	return `${"\u25b0".repeat(filled)}${"\u25b1".repeat(cells - filled)}`;
+}
+
 export function contextRows(ledger: ContextLedger): string[] {
 	const p = palette();
 	const used = ledger.systemPrompt + ledger.toolTable + ledger.skillsIndex + ledger.envelope + ledger.messages;
 	const free = Math.max(0, ledger.window - used);
 	const ratio = ledger.window > 0 ? Math.min(1, used / ledger.window) : 1;
-	const filled = Math.max(0, Math.min(BAR_CELLS, Math.round(ratio * BAR_CELLS)));
+	const bar = meterGlyphs(ratio, BAR_CELLS);
+	const filled = bar.indexOf("\u25b1") < 0 ? BAR_CELLS : bar.indexOf("\u25b1");
 	const rows = [
 		`${p.bold}context — ${k(used)} / ${k(ledger.window)} tokens (${Math.round(ratio * 100)}%)${p.reset}`,
-		`${p.bold}${"▰".repeat(filled)}${p.reset}${p.dim}${"▱".repeat(BAR_CELLS - filled)}${p.reset}`,
+		`${p.bold}${bar.slice(0, filled)}${p.reset}${p.dim}${bar.slice(filled)}${p.reset}`,
 	];
 	/** One surface row: the label at 14 columns, the count right-aligned
 	 *  at 5, then the dim detail. */
