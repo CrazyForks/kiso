@@ -1276,7 +1276,9 @@ async function chatLoop(
 		// be left naming the session the user just left.
 		paintWindowTitle(session.log.all);
 		const nav = {
-			sessions: () => agent.sessions().map((m) => m.id),
+			// 0.40.0 dogfood: the ids only — agent.sessions() read every log whole
+			// (seconds on the owner's 118 sessions) before /resume could open
+			sessions: () => agent.sessionIds(),
 			...(process.stdin.isTTY ? { pick: () => pickSession(agent, input) } : {}),
 		};
 		const end = await chat(session, currentFaux, input, autoCompact, nav);

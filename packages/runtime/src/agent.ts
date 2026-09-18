@@ -111,8 +111,9 @@ export class AgentRuntime {
 		this.#adapterPromise = resolveAdapter(definition);
 	}
 
+	/** The ids alone, from the directory — no log is read (store.ids). */
 	sessionIds(): string[] {
-		return this.#definition.store.list().map((m) => m.id);
+		return this.#definition.store.ids();
 	}
 
 	/** Session metadata for listings (`kiso sessions`). */
