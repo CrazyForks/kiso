@@ -28,11 +28,12 @@ export function isProtectedWrite(call: PolicyCall, workspaceRoot: string): boole
 	if (!WRITERS.has(call.name)) return false;
 	const path = call.input.path;
 	if (typeof path !== "string") return false;
-	if (path.split(/[\\/]/).some((seg) => PROTECTED.has(seg))) return true;
+	// case folded: on a case-insensitive disk `.GIT/config` IS .git/config
+	if (path.split(/[\\/]/).some((seg) => PROTECTED.has(seg.toLowerCase()))) return true;
 	const { canonical } = resolveShellPath(workspaceRoot, workspaceRoot, path);
 	return relative(resolveShellPath(workspaceRoot, workspaceRoot, ".").canonical, canonical)
 		.split(sep)
-		.some((seg) => PROTECTED.has(seg));
+		.some((seg) => PROTECTED.has(seg.toLowerCase()));
 }
 
 const ABSTAIN: PolicyVerdict = { action: "abstain" };

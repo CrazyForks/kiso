@@ -31,13 +31,13 @@
  * a private key to the provider. The model has search_text for that.
  */
 
-import { realpathSync, statSync } from "node:fs";
+import { statSync } from "node:fs";
 import { basename, isAbsolute, relative } from "node:path";
 import type { PolicyVerdict } from "@vincemakes/kiso-core";
 import type { KisoExtension } from "@vincemakes/kiso-runtime";
 import { isCredentialName } from "@vincemakes/kiso-tools-node";
 import { getMode, type Mode } from "./mode.js";
-import { parseShell, resolveShellPath, type Redirect, type SimpleCommand } from "./shell-words.js";
+import { parseShell, realCase, resolveShellPath, type Redirect, type SimpleCommand } from "./shell-words.js";
 
 export type ReadOnlyVerdict = { readonly allow: true } | { readonly allow: false; readonly why: string };
 
@@ -66,10 +66,12 @@ function content(ctx: Ctx, word: string): string | null {
 	const s = scope(ctx, word);
 	if (s !== null) return s;
 	if (word === "-") return null;
-	if (isCredentialName(basename(word))) return `${word} is a credential file`;
+	// B2: the disk is case-insensitive and the names are not — `.ENV` and
+	// `ID_RSA` are `.env` and `id_rsa` to the file system, so to the rule
+	if (isCredentialName(basename(word).toLowerCase())) return `${word} is a credential file`;
 	for (const cwd of ctx.cwds) {
 		const { canonical } = resolveShellPath(ctx.root, cwd, word);
-		if (isCredentialName(basename(canonical))) return `${word} leads to a credential file`;
+		if (isCredentialName(basename(canonical).toLowerCase())) return `${word} leads to a credential file`;
 		for (const p of ctx.protectedRoots) {
 			const rel = relative(p, canonical);
 			if (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))) return `${word} is inside kiso's own home`;
@@ -536,13 +538,7 @@ function command(cmd: SimpleCommand, ctx: Ctx): string | null {
 export function classifyReadOnly(commandLine: string, workspaceRoot: string, protectedRoots: readonly string[] = []): ReadOnlyVerdict {
 	const parsed = parseShell(commandLine);
 	if (!parsed.ok) return { allow: false, why: parsed.why };
-	const canonicalProtected = protectedRoots.map((p) => {
-		try {
-			return realpathSync(p);
-		} catch {
-			return p;
-		}
-	});
+	const canonicalProtected = protectedRoots.map(realCase);
 	let cwds: readonly string[] = [workspaceRoot];
 	for (const pipeline of parsed.list) {
 		const ctx: Ctx = { root: workspaceRoot, protectedRoots: canonicalProtected, cwds };

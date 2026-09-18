@@ -19,7 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import { classifyReadOnly, READ_ONLY_COMMANDS } from "../src/readonly-shell.js";
-import { parseShell } from "../src/shell-words.js";
+import { parseShell, realCase, resolveShellPath } from "../src/shell-words.js";
 
 let root = "";
 
@@ -39,6 +39,9 @@ beforeAll(() => {
 	symlinkSync(join(outside, "secret.txt"), join(root, "out-link"));
 	symlinkSync(outside, join(root, "out-dir"));
 	symlinkSync(join(root, ".env"), join(root, "innocent"));
+	// a kiso home INSIDE the workspace — the DC-49 home-workspace shape
+	mkdirSync(join(root, "khome"));
+	writeFileSync(join(root, "khome", "auth.json"), "{}");
 });
 
 const verdict = (cmd: string) => classifyReadOnly(cmd, root);
@@ -159,6 +162,20 @@ const REFUSE: readonly (readonly [string, string])[] = [
 	["ls>out", "glued"],
 	["ls &> out", "redirection to out"],
 	["cat < .env", "credential"],
+	// B1 (the lead's review): `..` is taken on the REAL path — out-dir
+	// points outside, so out-dir/.. is outside's parent, not the workspace
+	["cat out-dir/../outside/secret.txt", "outside"],
+	["ls out-dir/..", "outside"],
+	["cd out-dir/.. && ls", "outside"],
+	// B2: a case-insensitive disk — .ENV is .env to the file system
+	["cat .ENV", "credential"],
+	["cat .Env", "credential"],
+	["cat ID_RSA", "credential"],
+	["cat SERVER.PEM", "credential"],
+	["head .ENV", "credential"],
+	["grep KEY .ENV", "credential"],
+	["cat < .ENV", "credential"],
+	["cat src/../.ENV", "credential"],
 	// paths out of the workspace, or into a credential
 	["cat /etc/passwd", "outside"],
 	["cat ../outside/secret.txt", "outside"],
@@ -357,5 +374,29 @@ describe("the lexer — the words the shell would pass, or a refusal", () => {
 	it("a quoted assignment prefix is still an assignment; a quoted command name is not", () => {
 		expect(parseShell('FOO="x" rm -rf /').ok).toBe(false);
 		expect(parseShell('"FOO=x" rm').ok).toBe(true);
+	});
+});
+
+describe("the shared resolver — real components, in the disk's case (review B1, B2)", () => {
+	it("`..` after a symlink is the parent of its TARGET", () => {
+		const r = resolveShellPath(root, root, "out-dir/..");
+		expect(r.canonical).toBe(realCase(join(root, "..")));
+		expect(r.inside).toBe(false);
+	});
+
+	it("an existing name comes back in the case the disk holds it", () => {
+		expect(resolveShellPath(root, root, ".ENV").canonical).toBe(join(realCase(root), ".env"));
+		expect(resolveShellPath(root, root, "SRC/A.TS").canonical).toBe(join(realCase(root), "src", "a.ts"));
+	});
+
+	it("past the last existing component the rest is text", () => {
+		expect(resolveShellPath(root, root, "nope/deeper/../x").canonical).toBe(join(realCase(root), "nope", "x"));
+		expect(resolveShellPath(root, root, "nope/deeper/../x").inside).toBe(true);
+	});
+
+	it("a protected root is matched in the disk's case", () => {
+		const v = classifyReadOnly("cat KHOME/auth.json", root, [join(root, "khome")]);
+		expect(v.allow).toBe(false);
+		expect(v.allow === false ? v.why : "").toContain("kiso's own home");
 	});
 });

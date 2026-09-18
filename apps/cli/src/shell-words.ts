@@ -17,7 +17,7 @@
  */
 
 import { existsSync, realpathSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative } from "node:path";
 
 export interface Redirect {
 	/** The descriptor written before the operator (`2>`), null when none
@@ -266,29 +266,42 @@ export interface ResolvedPath {
 	readonly inside: boolean;
 }
 
+/** A real path in the case the DISK holds it. The JS realpath keeps the
+ *  case it was given, so on a case-insensitive disk `.ENV` stayed `.ENV`
+ *  and walked past every name-based predicate (the lead's review, B2). */
+export function realCase(p: string): string {
+	try {
+		return realpathSync.native(p);
+	} catch {
+		return p;
+	}
+}
+
 export function resolveShellPath(workspaceRoot: string, cwd: string, word: string): ResolvedPath {
-	const candidate = isAbsolute(word) ? resolve(word) : resolve(cwd, word);
-	let ancestor = candidate;
-	const tail: string[] = [];
-	while (!existsSync(ancestor)) {
-		const parent = dirname(ancestor);
-		if (parent === ancestor) break;
-		tail.unshift(basename(ancestor));
-		ancestor = parent;
+	// B1 (the lead's review): `..` is taken on the REAL path, one component
+	// at a time — never collapsed as text first. `link-out/..` is the parent
+	// of where link-out POINTS, which is where the shell goes; collapsed as
+	// text it was the workspace, and `cat link-out/../etc/hosts` printed.
+	let current = isAbsolute(word) ? "/" : realCase(cwd);
+	// past the last component that exists, the rest is text: nothing on
+	// disk can redirect a path that does not exist
+	const missing: string[] = [];
+	for (const part of word.split("/")) {
+		if (part === "" || part === ".") continue;
+		if (missing.length > 0) {
+			if (part === "..") missing.pop();
+			else missing.push(part);
+			continue;
+		}
+		if (part === "..") {
+			current = dirname(current);
+			continue;
+		}
+		const next = join(current, part);
+		if (existsSync(next)) current = realCase(next);
+		else missing.push(part);
 	}
-	let real: string;
-	try {
-		real = realpathSync(ancestor);
-	} catch {
-		real = ancestor;
-	}
-	const canonical = tail.length > 0 ? join(real, ...tail) : real;
-	let rootReal: string;
-	try {
-		rootReal = realpathSync(workspaceRoot);
-	} catch {
-		rootReal = resolve(workspaceRoot);
-	}
-	const rel = relative(rootReal, canonical);
+	const canonical = missing.length > 0 ? join(current, ...missing) : current;
+	const rel = relative(realCase(workspaceRoot), canonical);
 	return { canonical, inside: rel === "" || (!rel.startsWith("..") && !isAbsolute(rel)) };
 }
