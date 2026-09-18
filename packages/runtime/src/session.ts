@@ -579,7 +579,7 @@ export class AgentSession {
 		// registry says the model can turn it off. Absent — the auto
 		// policy — the call is byte-identical to before; see
 		// `MANUAL_SUMMARY_BUDGET` for the measurement and for why.
-		options: { keepRounds?: number; keepTokens?: number; signal?: AbortSignalLike; onStart?: (info: CompactInfo) => void; drop?: boolean; focus?: string; manualBudget?: boolean } = {},
+		options: { keepRounds?: number; keepTokens?: number; signal?: AbortSignalLike; onStart?: (info: CompactInfo) => void; drop?: boolean; focus?: string; manualBudget?: boolean; onProgress?: (progress: import("./summarize.js").SummaryProgress) => void } = {},
 	): Promise<SummarizeResult | null> {
 		this.ensureHealthy();
 		const keepRounds = options.keepRounds ?? KEEP_RECENT_ROUNDS;
@@ -650,6 +650,8 @@ export class AgentSession {
 				onRetry: async (info) => {
 					await this.#config.hooks?.onRetry?.(info, {});
 				},
+				// 0.40.0: the compacting row's bar — observation only
+				...(options.onProgress !== undefined ? { onProgress: options.onProgress } : {}),
 			});
 			summary = call.text;
 			usage = call.usage;
