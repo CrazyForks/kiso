@@ -10,8 +10,9 @@
  * monotonicity — bypass cannot override an extension deny).
  */
 
-import type { PolicyVerdict } from "@vincemakes/kiso-core";
+import type { PolicyCall, PolicyVerdict } from "@vincemakes/kiso-core";
 import type { KisoExtension } from "@vincemakes/kiso-runtime";
+import { isProtectedWrite } from "./protected-writes.js";
 
 export type Mode = "manual" | "default" | "accept-edits" | "plan" | "bypass";
 
@@ -61,7 +62,7 @@ export function modeFromEnv(): Mode | undefined {
 }
 
 /** The per-tier verdict for a tool call — only when this tier is current. */
-function tierVerdict(tier: Mode, call: { name: string }): PolicyVerdict {
+function tierVerdict(tier: Mode, call: PolicyCall, workspaceRoot: () => string): PolicyVerdict {
 	if (tier !== current) return { action: "abstain" }; // not our tier — no opinion
 	switch (tier) {
 		case "manual":
@@ -77,7 +78,9 @@ function tierVerdict(tier: Mode, call: { name: string }): PolicyVerdict {
 			return { action: "abstain" };
 		case "accept-edits":
 			if (READ_TOOLS.has(call.name)) return { action: "allow" };
-			if (call.name === "write_file" || call.name === "edit_file") return { action: "allow" };
+			// 0.40.0: a write into .git/ or .kiso/ asks even here — both hold
+			// configuration that runs (protected-writes.ts)
+			if (call.name === "write_file" || call.name === "edit_file") return isProtectedWrite(call, workspaceRoot()) ? { action: "ask" } : { action: "allow" };
 			if (call.name === "shell") return { action: "ask" };
 			return { action: "abstain" }; // see "default"
 		case "plan":
@@ -97,12 +100,12 @@ function tierVerdict(tier: Mode, call: { name: string }): PolicyVerdict {
  *  deny>allow>ask over the SPEAKING verdicts (abstain = no opinion), so a
  *  user extension's deny wins over any mode tier, bypass included (the
  *  monotonicity e2e pins it). */
-export function modeExtensions(): readonly KisoExtension[] {
+export function modeExtensions(workspaceRoot: () => string = () => process.cwd()): readonly KisoExtension[] {
 	return [...MODES.filter((m) => m === current), ...MODES.filter((m) => m !== current)].map((m) => ({
 		name: `mode:${m}`,
 		approvals: [
 			{
-				decide: async (payload) => tierVerdict(m, { name: payload.name }),
+				decide: async (payload) => tierVerdict(m, { name: payload.name, input: payload.input ?? {} }, workspaceRoot),
 			},
 		],
 	}));

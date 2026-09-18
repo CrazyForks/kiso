@@ -381,6 +381,40 @@ describe("Modes (real PTY, 24×80) — plan mode, /mode switching, the audit tra
 		expect(result?.content).toContain("2");
 	}, 90_000);
 
+	it("0.40.0: accept-edits still ASKS for a write into .git/ — configuration that runs", () => {
+		const { env } = isolatedEnv();
+		const dir = mkdtempSync(join(tmpdir(), "kiso-modes-"));
+		const workdir = join(dir, "work");
+		mkdirSync(join(workdir, ".git"), { recursive: true });
+		const script = join(dir, "faux.json");
+		writeFileSync(
+			script,
+			JSON.stringify([
+				{ events: [{ type: "tool_call_end", callId: "w1", name: "write_file", input: { path: "notes.md", content: "x", expectedRevision: "absent" } }, { type: "stop", reason: "tool_use" }] },
+				{ events: [{ type: "tool_call_end", callId: "w2", name: "write_file", input: { path: ".git/config", content: "[core]\n", expectedRevision: "absent" } }, { type: "stop", reason: "tool_use" }] },
+				{ events: [{ type: "text_delta", text: "pw done" }, { type: "stop", reason: "end_turn" }] },
+			]),
+			"utf8",
+		);
+		// ONE approval is fed: had the ordinary write asked, it would take it
+		// and the .git write would wait out the timeout.
+		ptyRun(
+			{ ...env, KISO_FAUX_SCRIPT: script },
+			[
+				["▌ ", "go\r"],
+				["don't ask again", "y\r"],
+				["pw done", "exit\r"],
+			],
+			workdir,
+			{ modeFlag: "accept-edits", session: "modes-pw" },
+		);
+		const events = new SessionStore(join(env.KISO_HOME!, "sessions")).load("modes-pw").map((r) => r.event);
+		const asked = events.filter((e) => e.type === "permission_requested").map((e) => (e as { callId: string }).callId);
+		expect(asked, "only the .git write was put to the human").toEqual(["w2"]);
+		const decided = decidedEvents(env, "modes-pw");
+		expect(decided.find((e) => e.callId === "w1")).toMatchObject({ decision: "approved", decidedBy: "mode:accept-edits" });
+	}, 90_000);
+
 	it("KISO_MODE=plan in a PIPE: same enforcement, byte-plain, no human pause", () => {
 		const { env, dirs } = isolatedEnv();
 		const dir = mkdtempSync(join(tmpdir(), "kiso-modes-"));

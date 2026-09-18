@@ -413,6 +413,13 @@ export function setCurrentModelName(value: string): void {
 }
 
 /** E1: the extensions loaded by makeAgent — their names feed the banner. */
+/** 0.40.0: the calls a saved allow never carries (protected-writes.ts) —
+ *  set where the chain is assembled, read where a first grant joins it. */
+export let neverInherited: (call: import("@vincemakes/kiso-core").PolicyCall) => boolean = () => false;
+export function setNeverInherited(value: (call: import("@vincemakes/kiso-core").PolicyCall) => boolean): void {
+	neverInherited = value;
+}
+
 export let loadedExtensions: readonly KisoExtension[] = [];
 /** R-D 0.1.45: the BUILT-IN layer — the three default official extensions,
  *  shipped with the cli (module imports, never a disk scan; builtin.ts).

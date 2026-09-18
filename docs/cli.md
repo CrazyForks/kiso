@@ -127,7 +127,7 @@ tier that decided, exactly like it names the extension.
 |---|---|
 | `default` | reads allow, and shell commands proven read-only (`ls`, `cat`, `git status`/`log`/`diff`); write/edit/other shell ask the human; extension tools are the extensions' business (the tier stays out of it) |
 | `manual` | EVERY tool asks the human |
-| `accept-edits` | `default` + write_file/edit_file allow |
+| `accept-edits` | `default` + write_file/edit_file allow — except a write into `.git/` or `.kiso/` (as written or through a symlink), which asks in every asking tier and is never carried by a saved allow: both hold configuration that runs |
 | `plan` | read/list/search/read_skill allow; everything else denied with `plan mode: read-only` (the deny reason guides the model to output a plan; the startup prompt adds a plan directive) |
 | `bypass` | everything allows — but a user extension's `deny` still wins (the chain's deny>allow>ask composition; a deny wins over every tier, bypass included) |
 

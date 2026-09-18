@@ -14,7 +14,8 @@ import { askDeclineAll, askView, projectTrustRows, projectTrustView, projectUntr
 import type { AskUI } from "@vincemakes/kiso-ask-ext";
 import { projectArtifacts, recordTrust, trustFor, type ProjectArtifacts } from "@vincemakes/kiso-runtime";
 import type { AgentSession, KisoExtension } from "@vincemakes/kiso-runtime";
-import { bodyLog, currentAgentExtensions, dock, extensionsDir, kisoHome, mergedTempPaths, type LineInput } from "./state.js";
+import { bodyLog, currentAgentExtensions, dock, extensionsDir, kisoHome, mergedTempPaths, neverInherited, type LineInput } from "./state.js";
+import { guardSavedAllow } from "./protected-writes.js";
 import { loadUserConfig, resolveProjectTrustPolicy } from "./config.js";
 import { getMode } from "./mode.js";
 
@@ -238,8 +239,11 @@ export async function addDontAskAgainRule(rule: string): Promise<void> {
 	// bytes of the first.
 	const mod = (await import(`${pathToFileURL(file).href}?grant=${(grantSerial += 1)}`)) as { default?: unknown };
 	if (mod.default === undefined) return;
-	if (at >= 0) currentAgentExtensions[at] = mod.default as KisoExtension;
-	else currentAgentExtensions.push(mod.default as KisoExtension);
+	// 0.40.0: wrapped as at startup — a first grant must not carry what a
+	// saved allow never carries.
+	const joined = guardSavedAllow(mod.default as KisoExtension, neverInherited);
+	if (at >= 0) currentAgentExtensions[at] = joined;
+	else currentAgentExtensions.push(joined);
 }
 
 /** RL-F5 — the rules a generated file already holds. The `new Set([...])`
