@@ -107,10 +107,8 @@ export { AT_CAP, AT_SKIP, AT_VISIBLE, atEmbed, atFilter, atPanelRows, atWindow, 
 // the row (picked or printed), the band, and the filter. The CARDS are
 // the cli's projection (session-cards.ts); this turns them into bytes.
 export {
-	BADGE_GLYPH,
 	idColumn,
 	sessionAge,
-	sessionBadge,
 	sessionCounterRow,
 	sessionFilter,
 	sessionListFooter,

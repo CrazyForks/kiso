@@ -2,20 +2,12 @@
  * TUI2-R2 slices ①–③ — the session picker's PURE half: the durability
  * badge, the row, the band, and the filter.
  *
- * The badge is the round's whole argument. kiso's claim is that a
- * session survives kill -9 and resumes from its durable prefix; until
- * now that claim was a sentence in a README. A badge per row makes it a
- * thing you can SEE before you pick: this one completed, this one was
- * cut mid-run and will resume exactly, this one is holding a question
- * for you.
- *
- * The vocabulary (the palette's functional set — no new colour):
- *
- *   ✓ green   the run's terminal event says completed
- *   ✗ red     the terminal says anything else
- *   ▌ bold    no terminal event — interrupted mid-run
- *   ? warn    the uncertain ledger is not empty (overrides ▌)
- *   ◌ dim     a permission request nobody has answered
+ * The row's STATE is the round's whole argument. kiso's claim is that a
+ * session survives kill -9 and resumes from its durable prefix; the note
+ * column makes it a thing you can READ before you pick: this one completed,
+ * this one was cut mid-run and will resume exactly, this one is holding a
+ * question for you. (0.40.1, owner's ruling: words, never glyphs — the
+ * ✓ ✗ ▌ ? ◌ column that stood here said nothing the words did not.)
  *
  * Purity, as everywhere in this package: the cards are DATA the CLI
  * projects (session-cards.ts) and this module turns them into bytes. It
@@ -108,30 +100,6 @@ function fitTags(card: SessionCardView, here: string | null, room: number): stri
 		if (candidate !== "" && visibleWidth(candidate) <= room) return candidate;
 	}
 	return "";
-}
-
-/** The glyph per state — one cell each, so the badge column never
- *  shifts the id column (a column that moves per row reads as damage). */
-export const BADGE_GLYPH: Readonly<Record<SessionCardView["badge"], string>> = {
-	completed: "✓", // ✓
-	failed: "✗", // ✗
-	interrupted: "▌", // ▌ — the input brick: this session is mid-sentence
-	uncertain: "?",
-	ask: "◌", // ◌ — the dotted circle: a question with no answer in it yet
-};
-
-/** The badge, styled. The colour IS the meaning here (the mono
- *  discipline's three functional exceptions), so NO_COLOR degrades to
- *  the glyph alone — which is why the glyphs are distinct shapes and
- *  not three coloured dots. */
-export function sessionBadge(badge: SessionCardView["badge"]): string {
-	const p = palette();
-	const g = BADGE_GLYPH[badge];
-	if (badge === "completed") return `${p.green}${g}${p.reset}`;
-	if (badge === "failed") return `${p.red}${g}${p.reset}`;
-	if (badge === "interrupted") return `${p.bold}${g}${p.reset}`;
-	if (badge === "uncertain") return `${p.warn}${g}${p.reset}`;
-	return `${p.dim}${g}${p.reset}`;
 }
 
 /**
@@ -261,12 +229,9 @@ function rowSpans(card: SessionCardView, budget: number, now: number, idCol: num
 		text += styled;
 		w += cells;
 	};
-	// the badge: one glyph + one space, styled as a unit (the glyph's own
-	// SGR spans make it unmeasurable by `put`'s plain/styled pair)
-	if (w + 2 <= budget) {
-		text += `${sessionBadge(card.badge)} `;
-		w += 2;
-	}
+	// 0.40.1 (owner's ruling): NO status glyph. The ✓ ✗ ▌ ? ◌ column is
+	// gone; the state is a WORD, in the note column (sessionNote), where it
+	// already said everything the glyph did.
 	// R2 (owner, 2026-08-27) — the TITLE LEADS and the id is gone.
 	//
 	// The id was four characters of machine identity sitting in the column
