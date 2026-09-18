@@ -37,15 +37,18 @@ beforeAll(() => {
 
 const check = (cmd: string) => floorCheck(cmd, root, home);
 
-/** [command, a word the reason must contain] */
-const REFUSED: readonly (readonly [string, string])[] = [
+/** [command, a word the reason must contain — or a pattern, where the
+ *  platform decides which of two true reasons comes first: the test's own
+ *  workspace lives under the temp directory, which is /var/folders here
+ *  and /tmp on Linux] */
+const REFUSED: readonly (readonly [string, string | RegExp])[] = [
 	["rm -rf /", "/"],
 	["rm -rf /*", "a wildcard over /"],
 	["rm -rf --no-preserve-root /", "/"],
 	["rm -rf ~", "the home directory"],
 	["rm -rf ~/", "the home directory"],
 	["rm -rf ~/*", "a wildcard over the home directory"],
-	["rm -rf ~/.*", "a wildcard over the home directory"],
+	["rm -rf ~/.*", "wildcard"],
 	["rm -rf .", "the workspace root"],
 	["rm -rf ./", "the workspace root"],
 	["rm -rf *", "a wildcard over the workspace root"],
@@ -54,11 +57,11 @@ const REFUSED: readonly (readonly [string, string])[] = [
 	["rm -rf ../..", "above the workspace"],
 	["rm -rf /usr", "a system root (/usr)"],
 	["rm -rf /etc", "a system root (/etc)"],
-	["rm -rf /tmp", "a system root"],
+	["rm -rf /tmp", /a temp root|above the workspace/],
 	["rm -rf home-link/", "the home directory"],
 	// only a variable: empty, it is the root of whatever follows
 	["rm -rf $DIR/", "only a variable"],
-	['rm -rf "$HOME"', "only a variable"],
+	['rm -rf "$HOME"', "the home directory"],
 	['rm -rf "${X}"/*', "only a variable"],
 	["rm -rf ~/$X", "a wildcard over the home directory"],
 	// the well-known home subtrees, and anything inside them
@@ -89,8 +92,92 @@ const REFUSED: readonly (readonly [string, string])[] = [
 	['cd "$X" && rm -rf *', "the home directory"],
 	// the other destructive commands
 	["find / -delete", "/"],
-	["find . -name '*.log' -delete", "the workspace root"],
-	["find ~ -name x -delete", "the home directory"],
+	// R6: with no selecting primary, find ranges over everything
+	["find . -type f -delete", "find with no selecting primary over the workspace root"],
+	["find ~ -delete", "the home directory"],
+	// ── the lead's review, 2026-09-18 ──
+	// B7: the target of a whole-tree git command is the repository root
+	["cd src && git reset --hard", "the workspace root"],
+	["git -C src reset --hard", "the workspace root"],
+	["git -C ~/proj reset --hard", "the workspace root"],
+	["git checkout -- :/", "the workspace root"],
+	["git clean -f ':(top)'", "the workspace root"],
+	["git --work-tree=.. reset --hard", "the home directory"],
+	["git --work-tree ~ reset --hard", "the home directory"],
+	["git --git-dir=.git --work-tree=. clean -fd ~", "the home directory"],
+	["/usr/bin/env rm -rf ~", "the home directory"],
+	["/usr/bin/sudo rm -rf /", "/"],
+	// B8: $HOME and $PWD are known; a wildcard inside or reaching a subtree
+	["rm -rf $HOME/.ssh", "~/.ssh"],
+	["rm -rf ${HOME}/.ssh", "~/.ssh"],
+	['rm -rf "$HOME"/.ssh', "~/.ssh"],
+	["rm -rf ~/.ssh/id_*", "inside ~/.ssh"],
+	["rm -rf ~/.ssh*", "reaches ~/.ssh"],
+	["rm -rf ~/.c*", "reaches ~/.config"],
+	["rm -rf $PWD", "the workspace root"],
+	["rm -rf ${PWD}/*", "a wildcard over the workspace root"],
+	// B9: a wildcard is over a directory only when it is nothing but globs
+	["rm -rf */..", "a wildcard over the workspace root"],
+	["rm -rf **/*", "a wildcard over the workspace root"],
+	// B10: compound syntax, assignments, child shells, cd's own forms
+	["if true; then rm -rf ~; fi", "the home directory"],
+	['for f in ~/.ssh/*; do rm -f "$f"; done', "only a variable"],
+	["{ rm -rf ~; }", "the home directory"],
+	["! rm -rf ~", "the home directory"],
+	['X="$Y" rm -rf ~', "the home directory"],
+	["sh -c 'cd build' && rm -rf *", "a wildcard over the workspace root"],
+	["(cd build) && rm -rf *", "a wildcard over the workspace root"],
+	["echo $(cd build) && rm -rf *", "a wildcard over the workspace root"],
+	["cd -- .. && rm -rf *", "a wildcard over the home directory"],
+	["cd build && cd - && rm -rf *", "a wildcard over the workspace root"],
+	["pushd build && popd && rm -rf *", "a wildcard over the workspace root"],
+	["eval sh -c 'rm -rf /'", "/"],
+	["timeout 5 rm -rf ~", "the home directory"],
+	["timeout -s KILL 5 rm -rf ~", "the home directory"],
+	["busybox rm -rf ~", "the home directory"],
+	// R5: the same loss as checkout -- .
+	["git checkout .", "the workspace root"],
+	["git checkout ./", "the workspace root"],
+	["git checkout HEAD .", "the workspace root"],
+	["git checkout -f", "the workspace root"],
+	["git restore .", "the workspace root"],
+	["git restore --staged --worktree .", "the workspace root"],
+	["git switch -f main", "the workspace root"],
+	["git switch --discard-changes main", "the workspace root"],
+	// the lead's probe, second pass: eval is re-read as the shell would
+	["eval 'rm -rf ~'", "the home directory"],
+	['eval "rm -rf /"', "/"],
+	["eval echo\\;rm -rf /", "/"],
+	["eval 'echo $(rm -rf /)'", "/"],
+	["eval 'cd .. && rm -rf *'", "a wildcard over the home directory"],
+	["cd build && eval 'rm -rf ..'", "the workspace root"],
+	["eval rm -rf '$HOME'", "the home directory"],
+	["eval eval eval eval eval rm -rf /", "/"],
+	["sh -c 'eval \"rm -rf /\"'", "/"],
+	// a leading word that is only a variable may be empty
+	['eval "$X" rm -rf ~', "the home directory"],
+	["$SUDO rm -rf ~", "the home directory"],
+	// git -C composes, and outside any repository the directory itself is the target
+	["git -C .. reset --hard", "the home directory"],
+	["git -C / reset --hard", "/"],
+	["git -C ~/.ssh reset --hard", "~/.ssh"],
+	["git -C src -C .. reset --hard", "the workspace root"],
+	["cd .. && git reset --hard", "the home directory"],
+	// a pathspec glob is git's to expand, quoted or not
+	["git checkout -- '*'", "a wildcard over the workspace root"],
+	["git clean -f build '*'", "a wildcard over the workspace root"],
+	// -delete before the selecting primary deletes everything
+	["find . -delete -name x", "find with no selecting primary over the workspace root"],
+	// R7: the workspace's history
+	["rm -rf .git", "the workspace's .git"],
+	["rm -rf .git/objects", "the workspace's .git"],
+	// R8: system roots and what is inside them; mount and home roots
+	["rm -rf /usr/local/lib", "inside a system root (/usr)"],
+	["rm -rf /etc/hosts", "system root"],
+	["rm -rf /Users/someoneelse", "a mount or home root"],
+	["rm -rf /Volumes/Data", "a mount or home root"],
+	["rm -rf /home", "a system root (/home)"],
+	["rm -rf /var/folders", /a temp root|above the workspace/],
 	["git clean -fdx", "the workspace root"],
 	["git clean -f", "the workspace root"],
 	["git clean --force -d", "the workspace root"],
@@ -116,6 +203,32 @@ const RUNS: readonly string[] = [
 	"git reset --soft HEAD~1",
 	"git reset HEAD src/a.ts",
 	"git checkout main",
+	// ── the lead's review, 2026-09-18 ──
+	// B9: everyday cleanups
+	"rm -f *.orig",
+	"rm -rf *.log",
+	"rm -rf **/node_modules",
+	"rm -rf /tmp/*.log",
+	"find -L build -delete",
+	// R6: a selecting primary ranges over SOME entries
+	"find . -name '*.log' -delete",
+	"find ~ -name x -delete",
+	// B10: a cd inside a subshell stays inside it; the subshell starts where its command runs
+	"(cd build && rm -rf *)",
+	"cd build && echo $(rm -rf *)",
+	"cd build && sh -c 'rm -rf *'",
+	// eval's cd persists, and && means it worked
+	"eval cd build && rm -rf *",
+	// R5: a branch name is never a path
+	"git checkout -b feature",
+	"git restore --staged .",
+	"git restore src/a.ts",
+	"git switch main",
+	// R8: inside a temp root, and past a mount or home root
+	"rm -rf /tmp/build-cache",
+	"rm -rf /private/tmp/x",
+	"rm -rf /Volumes/Data/proj/node_modules",
+	"rm -rf /Users/someoneelse/proj/build",
 	"git checkout -- src/a.ts",
 	"ls -la / ~ ~/.ssh",
 	"cat ~/.ssh/config",
@@ -131,7 +244,8 @@ describe("the floor refuses the unrecoverable, and says which", () => {
 		it(JSON.stringify(cmd), () => {
 			const v = check(cmd);
 			expect(v.refused, cmd).toBe(true);
-			expect(v.refused ? v.why : "", cmd).toContain(why);
+			if (typeof why === "string") expect(v.refused ? v.why : "", cmd).toContain(why);
+			else expect(v.refused ? v.why : "", cmd).toMatch(why);
 		});
 	}
 });

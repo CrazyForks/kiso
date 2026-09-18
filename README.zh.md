@@ -125,8 +125,10 @@ kiso sessions                  列出持久会话及其状态
 这些每次都会问你。
 
 **灾难兜底。** 在任何模式下(包括 bypass),kiso 都拒绝目标无法恢复的破坏性命令
-(`rm`、`git clean -f`、`git reset --hard`、`git checkout -- <路径>`、`find … -delete`):
-`/` 或系统根目录、你的家目录、工作区根目录或它之上的任何目录、`~/.ssh`、`~/.config`、
+(`rm`、`git clean -f`、`git reset --hard`、`git checkout -- <路径>` / `.` / `-f`、`git restore`、
+`git switch -f`、不带选择条件的 `find … -delete`):
+`/`、系统根目录及其内部(临时目录除外)、你的家目录、工作区根目录或它之上的任何目录、
+工作区的 `.git`、`~/.ssh`、`~/.config`、
 `~/.kiso`、`~/.gnupg`、`~/.aws` 及其内部、覆盖以上任何一处的通配符,以及只有一个变量的
 目标(`rm -rf $DIR/`)。其余一切按模式执行——`rm -rf /tmp/probe` 在 bypass 下照样运行。
 拒绝会记为 `decidedBy: floor`,并告诉模型原因。兜底读的是命令行,不是沙箱。在

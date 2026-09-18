@@ -424,9 +424,12 @@ function parseLooseAt(src: string, start: number, depth: number, closeParen: boo
 	const endWord = (): void => {
 		if (!inWord) return;
 		const w: LooseWord = { text, unknownAt, unknownIsGlob, tilde, variableOnly: tooDeep || (startsWithExpansion && /^[/*.]*$/.test(lit)) };
+		const assign = /^[A-Za-z_][A-Za-z0-9_]*=/.exec(text);
 		if (dropNext) dropNext = false;
-		else if (!seenCommandWord && unknownAt < 0 && /^[A-Za-z_][A-Za-z0-9_]*=/.test(text)) {
-			// a leading assignment: environment for the command, not the command
+		else if (!seenCommandWord && assign !== null && (unknownAt < 0 || unknownAt >= assign[0].length)) {
+			// a leading assignment: environment for the command, not the
+			// command — `X="$Y" rm …` included (B10: the value holding an
+			// expansion made it the command, and hid the rm)
 		} else {
 			argv.push(w);
 			seenCommandWord = true;
@@ -471,12 +474,14 @@ function parseLooseAt(src: string, start: number, depth: number, closeParen: boo
 		if (src[i] === "`") {
 			const close = src.indexOf("`", i + 1);
 			j = close < 0 ? src.length : close + 1;
-			if (depth < LOOSE_MAX_DEPTH) top().push({ kind: "group", items: parseLooseAt(src.slice(i + 1, close < 0 ? src.length : close), 0, depth + 1, false).items, joinedBy: ";" });
+			// the subshell runs as part of the command that holds it, so it
+			// takes that command's joiner (`cd x && echo \`…\`` runs it in x)
+			if (depth < LOOSE_MAX_DEPTH) top().push({ kind: "group", items: parseLooseAt(src.slice(i + 1, close < 0 ? src.length : close), 0, depth + 1, false).items, joinedBy });
 			else tooDeep = true;
 		} else if (src[i + 1] === "(") {
 			if (depth < LOOSE_MAX_DEPTH) {
 				const inner = parseLooseAt(src, i + 2, depth + 1, true);
-				top().push({ kind: "group", items: inner.items, joinedBy: ";" });
+				top().push({ kind: "group", items: inner.items, joinedBy });
 				j = Math.min(inner.end + 1, src.length);
 			} else {
 				// too deep to read: consume to the matching paren, unread

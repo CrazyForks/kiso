@@ -195,10 +195,12 @@ or a write into `.git/` or `.kiso/`: those reach you every time.
 
 **The catastrophe floor.** In every mode, bypass included, kiso refuses a
 destructive command (`rm`, `git clean -f`, `git reset --hard`,
-`git checkout -- <paths>`, `find … -delete`) whose target cannot be recovered:
-`/` or a system root, your home directory, the workspace root or anything above
-it, `~/.ssh`, `~/.config`, `~/.kiso`, `~/.gnupg`, `~/.aws` or anything inside
-them, a wildcard over any of those, or a target that is only a variable
+`git checkout -- <paths>` / `.` / `-f`, `git restore`, `git switch -f`,
+`find … -delete` with no selecting primary) whose target cannot be recovered:
+`/`, a system root or what is inside it (temp directories excepted), your home
+directory, the workspace root or anything above it, the workspace's `.git`,
+`~/.ssh`, `~/.config`, `~/.kiso`, `~/.gnupg`, `~/.aws` or anything inside them,
+a wildcard over any of those, or a target that is only a variable
 (`rm -rf $DIR/`). Everything else runs as the mode says — `rm -rf /tmp/probe`
 runs in bypass. A refusal is recorded as `decidedBy: floor`, and the model is
 told why. The floor reads the command line; it is not a sandbox. `"floor": "off"`

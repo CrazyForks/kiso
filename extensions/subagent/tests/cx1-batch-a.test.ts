@@ -143,12 +143,15 @@ describe("CX-1 F2 — the implementer's output is never deleted on a collection 
 		const { dir, home } = repo();
 		const script = join(dir, "faux.json");
 		// the child writes, then breaks its own worktree's git link — the
-		// collection that follows must fail loudly, not read as "no changes"
+		// collection that follows must fail loudly, not read as "no changes".
+		// 0.40.0: moved, not removed — `rm -f .git` is the catastrophe
+		// floor's to refuse now (the workspace's .git, ruling R7), and a
+		// refused command would break nothing
 		writeFileSync(
 			script,
 			JSON.stringify([
 				turn([{ type: "tool_call_end", callId: "w1", name: "write_file", input: { path: "work.txt", content: "valuable", expectedRevision: "absent" } }, { type: "stop", reason: "tool_use" }]),
-				turn([{ type: "tool_call_end", callId: "s1", name: "shell", input: { command: "rm -f .git" } }, { type: "stop", reason: "tool_use" }]),
+				turn([{ type: "tool_call_end", callId: "s1", name: "shell", input: { command: "mv .git .git-moved" } }, { type: "stop", reason: "tool_use" }]),
 				done,
 			]),
 			"utf8",
