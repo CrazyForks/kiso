@@ -4,7 +4,7 @@
  * the context (the chain, the run state, the prompt arming).
  */
 
-import { contextRows, contextUnavailableRows, displayVerb, escapeTerminal, helpRows, kUnit, modePickView, modelPickView, palette, renderEvent, settledLabel, slashCommandNames, type PickOption, type PickResult } from "@vincemakes/kiso-tui";
+import { contextRows, contextUnavailableRows, displayVerb, escapeTerminal, helpRows, kUnit, modePickView, modelPickView, compactingStatus, palette, renderEvent, settledLabel, slashCommandNames, type PickOption, type PickResult } from "@vincemakes/kiso-tui";
 import { newSessionId } from "./session-id.js";
 import { buildAdapter, lookupModelMetadata, resolveContinuationScope, resolveReasoning } from "@vincemakes/kiso-runtime/internal";
 import type { AgentSession } from "@vincemakes/kiso-runtime";
@@ -794,8 +794,9 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 			// fraction — the recap's "ctx 91% → 34%" drops after compacting)
 			let ctxBefore: string | null = null;
 			const compacting = (info: { rounds: number; tokens: number }): void => {
-				const text = (elapsed: number): string =>
-					`▘ compacting · ${info.rounds} rounds · ~${kUnit(info.tokens)} tokens · ${Math.max(0, elapsed)}s`;
+				// 0.40.0: composed by the row seam, not a template here — the row
+				// is where the launch build's progress segment plugs in.
+				const text = (elapsed: number): string => compactingStatus("▘", info.rounds, info.tokens, elapsed);
 				compactStart = Date.now();
 				ctxBefore = ctxPercent(ctx.estimateCtx());
 				dock.setStatus(text(0), "esc to cancel");
