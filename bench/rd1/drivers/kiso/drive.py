@@ -523,6 +523,7 @@ def main():
         "HOME": agent_home,
         "TERM": "dumb",
         "KISO_HOME": home,
+        "KISO_SESSIONS_DIR": os.path.join(home, "sessions"),
         "KISO_MODE": "accept-edits",
         "OPENAI_BASE_URL": base_url,
         "OPENAI_API_KEY": os.environ[a.api_key_env],

@@ -243,7 +243,7 @@ CFG
     # operator's skills is not the product as installed.
     set -- "OPENAI_BASE_URL=https://api.deepseek.com" "OPENAI_API_KEY=$DEEPSEEK_API_KEY" \
       "OPENAI_MODEL=deepseek-flash" "KISO_EXTENSIONS_DIR=$EXTDIR" \
-      "KISO_HOME=$WORK/kiso-home" "KISO_SKILLS_DIR=$SKILLDIR" "KISO_NO_UPDATE_CHECK=1"
+      "KISO_HOME=$WORK/kiso-home" "KISO_SESSIONS_DIR=$WORK/kiso-home/sessions" "KISO_SKILLS_DIR=$SKILLDIR" "KISO_NO_UPDATE_CHECK=1"
     KISO_ENV_PAIRS="$*"
     # F33-R4: the exit status is KEPT, not discarded. Every segment used to
     # end in `|| true`, and the absence of a limit status later became

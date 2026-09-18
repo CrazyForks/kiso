@@ -125,7 +125,9 @@ for n in 1 2; do
   (sleep 2; printf 'hello\r'; sleep 4; printf 'exit\r'; sleep 3) \
     | perl -e 'alarm 120; exec @ARGV' script -q "$TMP/f9-$n" "$BIN" chat > /dev/null 2>&1
 done
-LOGS=$(find "$KISO_HOME/sessions" -maxdepth 1 -name '*.jsonl' | wc -l | tr -d ' ')
+# 0.40.0: a session lives in its project's folder (KISO_HOME/projects/
+# <enc>/); the legacy folder is counted too, so the gate observes either
+LOGS=$( { find "$KISO_HOME/sessions" -maxdepth 1 -name '*.jsonl' 2>/dev/null; find "$KISO_HOME/projects" -mindepth 2 -maxdepth 2 -name '*.jsonl' 2>/dev/null; } | wc -l | tr -d ' ')
 [ "$LOGS" -ge 2 ] \
   && echo "PASS session identity: $LOGS distinct durable logs from 2 launches" \
   || { echo "FAIL session identity (RD1B-F9): 2 launches produced $LOGS durable log(s) — a run-less launch logs nothing, so 0 here means the gate did not observe; 1 means the second inherited the first's history"; exit 1; }

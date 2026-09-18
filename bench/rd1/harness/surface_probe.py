@@ -151,7 +151,7 @@ def main():
         elif os.path.exists(target):
             os.unlink(target)
         h = tempfile.mkdtemp(prefix="kiso-home-", dir=root)
-        env = whitelist_env({"HOME": h, "KISO_HOME": h, "KISO_MODE": "bypass"})
+        env = whitelist_env({"HOME": h, "KISO_HOME": h, "KISO_SESSIONS_DIR": os.path.join(h, "sessions"), "KISO_MODE": "bypass"})
         r = subprocess.run(["node", a.kiso_cli, "chat", label], env=env, cwd=fixture,
                            input=PROMPT + "\nexit\n", text=True, capture_output=True, timeout=180)
         total, split = kiso_first_request(h)

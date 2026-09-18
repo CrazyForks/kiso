@@ -239,7 +239,7 @@ case "$TOOL" in
 CFG
     set -- "OPENAI_BASE_URL=https://api.deepseek.com" "OPENAI_API_KEY=$DEEPSEEK_API_KEY" \
       "OPENAI_MODEL=deepseek-flash" "KISO_EXTENSIONS_DIR=$EXTDIR" \
-      "KISO_HOME=$WORK/kiso-home" "KISO_SKILLS_DIR=$SKILLDIR" "KISO_NO_UPDATE_CHECK=1"
+      "KISO_HOME=$WORK/kiso-home" "KISO_SESSIONS_DIR=$WORK/kiso-home/sessions" "KISO_SKILLS_DIR=$SKILLDIR" "KISO_NO_UPDATE_CHECK=1"
     # EDIT-ECHO A/B: the ONLY difference between the two arms of that
     # experiment. Same binary, same model, same effort, same prompts — one
     # arm is told what its edit produced and the other is not. The switch
