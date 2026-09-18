@@ -143,6 +143,65 @@ This is not a tier. It is the guard against a **single big jump** — one
 tool result that clears the threshold and the window in the same step, so
 that "compact at the next settled round" never gets a next settled round.
 
+### 2a. What one compaction's OUTPUT costs — measured, and the diagnosis reversed
+
+The reserve guard above has to hold the summary's own output, and until
+2026-09-18 that figure was an assumption: the summary call carried a
+fixed 4,000-token budget (`SUMMARY_MAX_OUTPUT`), and `POLICY_RESERVE` was
+built on it. A live session broke the assumption — `/compact` on an
+unregistered DeepSeek model behind a gateway failed with
+`the summary turn ended with max_tokens` — and one authorised measurement
+on that profile, over a covered range of the reported size (~100k tokens
+of real source), gave:
+
+| output budget | stop | reasoning | checkpoint | sections |
+|---|---|---|---|---|
+| 4,000 | `max_tokens` | 3,093 | 828 | 3 of 7 |
+| 8,391 | `max_tokens` | 1,613 | 6,544 | 4 of 7 |
+| 32,000 | `end_turn` | 3,557 | 15,261 | 7 of 7 |
+
+**A complete checkpoint of a ~100k range took 18,837 output tokens.**
+
+**The diagnosis reversed, and the reversal is the finding.** At 4,000,
+reasoning was 77% of the budget, and the obvious reading was "thinking
+eats the budget — turn thinking off". With room, reasoning was about a
+fifth; **the checkpoint itself is the size.** Reasoning only looked
+dominant because the budget was too small for the checkpoint to start.
+Turning thinking off would have reduced the cost of the failing call and
+left it failing.
+
+What A1b must therefore plan for:
+
+- **The reserve.** A fire at a ~100k covered range needs room for a
+  ~15–19k-token checkpoint, not 4,000. `POLICY_RESERVE` as built
+  under-reserves by roughly 15k on exactly the sessions this ADR exists
+  for. The reserve guard (§2) and the threshold's arming point (§1) both
+  move with it, and moving them moves when every session compacts — which
+  is why 0.39.2 raised only the MANUAL gesture's budget and left the
+  policy byte-identical: that change belongs here, with the bench.
+- **The cost model.** Output is about a cent per compaction at this
+  model's price. It is not the term that matters; the reserve is. The
+  "Why 400K" section's cost model priced input re-reads and cache
+  behaviour — it should carry the checkpoint's output as a stated term,
+  so the next re-derivation does not reintroduce 4,000 by omission.
+- **The ratio is not a law.** 18,837 out of a ~21k-token SERIALIZED input
+  is barely compression; the saving comes from what serialisation
+  truncated (the ~100k projected range), not from the summary being
+  short. A different model, prompt or range will give a different ratio.
+  Planning numbers come from measurement per model family, not from this
+  one row generalised.
+- **Prefix identity (§1b) is unchanged** by any of this: a larger budget
+  is a request parameter, not a change to the prefix the summary call
+  shares.
+
+A budget rule scaled from the covered estimate (a twelfth: 8,391,
+doubling once to 16,782) was built BEFORE this measurement and would have
+failed both attempts on this data while its tests stayed green. It was
+removed in its own commit so the history shows the rule and what
+falsified it. The lesson for A1b's numbers is the same one the 400K
+section learned: a rule derived before the measurement is a guess about
+the measurement.
+
 ### 3. One recovery
 
 `context_overflow` → compact at the last settled round → retry **once** →
