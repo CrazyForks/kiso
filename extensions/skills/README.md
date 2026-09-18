@@ -25,6 +25,12 @@ built-in command has that name — a built-in always wins. `/skills` lists
 what is installed, where each skill lives, and any that cannot load with
 the reason.
 
+The frontmatter keys read are `name`, `description` and `user-invocable`.
+Values may be plain, quoted (`"…"` or `'…'`), or YAML block scalars (`>` or
+`|`, with the text on the following indented lines); the index shows the
+description on one line. A `>` or `|` with nothing under it is reported as
+a skill that cannot load.
+
 A skill whose frontmatter says `user-invocable: false` stays in the
 model's index and out of your reach. Only the literal `false` counts; a
 skill without the key is invocable.
