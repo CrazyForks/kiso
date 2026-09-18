@@ -89,6 +89,57 @@ export function decodeRate(outputTokens: number | null, elapsedMs: number): numb
 }
 
 /**
+ * THE ROW SEAM (0.40.0). One composer for every status row.
+ *
+ * Three rows grew their own string-building — the running row, the idle
+ * row, and the compacting row inline in dispatch — and three features of
+ * the launch build want to add to them at once (a retry state, a mode
+ * and floor indicator, a compaction progress bar). Each splicing its own
+ * segment into its own template is how a row ends up with two of its
+ * facts cut by invariant ① at 80 columns, because nobody decided what
+ * gives way first. So the decision is made HERE, once, and every row is
+ * a list of typed segments:
+ *
+ *   - `fact`  — a measurement or a state (the tier, ctx, a rate, a retry
+ *               count). NEVER dropped and never cut; a row that silently
+ *               drops a measurement is the defect DF-0330-F1 fixed;
+ *   - `hint`  — teaches a gesture (`esc stop`, `/mode to switch`). Dropped
+ *               first, from the END, because the row is not the only
+ *               place a gesture is taught;
+ *   - `label` — a name that may be ELIDED in its middle (the model id),
+ *               tried before any hint is dropped, because eliding gives
+ *               the row its budget back instead of re-allocating a deficit.
+ *
+ * The first entry is the row's HEAD and is never touched. Everything is
+ * joined with ` · `. With no `W` the row is the full composition — every
+ * caller that does not know its width gets exactly the row it had.
+ */
+export interface RowSegment {
+	readonly text: string;
+	readonly kind: "fact" | "hint" | "label";
+}
+
+export function composeRow(head: string, segments: readonly (RowSegment | null | undefined)[], W?: number): string {
+	const present = segments.filter((x): x is RowSegment => x != null && x.text !== "");
+	const join = (xs: readonly RowSegment[]): string => [head, ...xs.map((x) => x.text)].join(" · ");
+	const full = join(present);
+	if (W === undefined || displayWidth(full) <= W) return full;
+	// 1. elide every label in its middle
+	let row = present.map((x) => (x.kind === "label" ? { ...x, text: elideMiddle(x.text, LABEL_ON_ROW) } : x));
+	if (displayWidth(join(row)) <= W) return join(row);
+	// 2. drop hints from the end, one at a time
+	for (let i = row.length - 1; i >= 0; i -= 1) {
+		if (row[i]!.kind !== "hint") continue;
+		row = [...row.slice(0, i), ...row.slice(i + 1)];
+		if (displayWidth(join(row)) <= W) return join(row);
+	}
+	// 3. facts are never dropped: past this point the row is over budget,
+	//    and it is invariant ①'s to cut — which it will do to the LAST
+	//    segment, so the order of facts is the order of their importance.
+	return join(row);
+}
+
+/**
  * The RUNNING row: the rotating glyph, the wall seconds since `since`
  * (never below 1 — a run that just started still reads "1s", so the row
  * never claims a turn took no time), the streamed output tokens once the
@@ -98,15 +149,34 @@ export function decodeRate(outputTokens: number | null, elapsedMs: number): numb
  * — stop, and do THIS instead. The row is where the gesture is taught,
  * because it is on screen exactly when the gesture is useful.
  */
-export function runningStatus(glyph: string, since: number, outTokens: number | null, ctxRatio: number, tokPerSec: number | null = null): string {
+export function runningStatus(glyph: string, since: number, outTokens: number | null, ctxRatio: number, tokPerSec: number | null = null, W?: number): string {
 	const out = outTokens !== null ? ` ↓ ${kUnit(outTokens)} tokens` : "";
-	// TPS-1: after each call SETTLES within the turn, between the tokens
-	// segment and the stop hint. The default is null and that is the honest
-	// rule spelled as a default — the recovery flow has no per-call timing
-	// state, so its row says nothing rather than guessing.
-	const rate = tokPerSec !== null ? ` · ${tokPerSec} tok/s` : "";
 	const seconds = Math.max(1, Math.round((Date.now() - since) / 1000));
-	return `${glyph} working ${elapsedLabel(seconds)}${out}${rate} · esc stop · alt+⏎ redirect · ${ctxSegment(ctxRatio)}`;
+	return composeRow(`${glyph} working ${elapsedLabel(seconds)}${out}`, [
+		// TPS-1: after each call SETTLES within the turn, between the tokens
+		// segment and the stop hint. The default is null and that is the
+		// honest rule spelled as a default — the recovery flow has no
+		// per-call timing state, so its row says nothing rather than guessing.
+		tokPerSec !== null ? { kind: "fact", text: `${tokPerSec} tok/s` } : null,
+		{ kind: "hint", text: "esc stop" },
+		{ kind: "hint", text: "alt+⏎ redirect" },
+		{ kind: "fact", text: ctxSegment(ctxRatio) },
+	], W);
+}
+
+/**
+ * The COMPACTING row (W18): the covered rounds, the pre-call token
+ * estimate, and the elapsed seconds — all knowable before the one summary
+ * call returns, which has no fraction of its own. Moved here from an
+ * inline template in dispatch (0.40.0) so it composes like every other
+ * row and has a place for what the launch build adds to it.
+ */
+export function compactingStatus(glyph: string, rounds: number, tokens: number, elapsedSeconds: number, W?: number): string {
+	return composeRow(`${glyph} compacting`, [
+		{ kind: "fact", text: `${rounds} rounds` },
+		{ kind: "fact", text: `~${kUnit(tokens)} tokens` },
+		{ kind: "fact", text: `${Math.max(0, elapsedSeconds)}s` },
+	], W);
 }
 
 /**
@@ -141,11 +211,12 @@ export interface StatusMeter {
 	readonly tokPerSec: number | null;
 }
 
-/** DF-0330-F1 — how far the model id may be squeezed on the ROW. Twenty
- *  visible columns keeps a head and a tail: `deepseek-v…s-on-0910` still
- *  says which binding is driving, and the tail is where the parts that
- *  distinguish one id from its neighbours live (`-flash`, `-0910`). */
-const MODEL_ON_ROW = 20;
+/** DF-0330-F1 — how far a LABEL may be squeezed on the ROW; the model id
+ *  is the one there is. Twenty visible columns keeps a head and a tail:
+ *  `deepseek-v…s-on-0910` still says which binding is driving, and the
+ *  tail is where the parts that distinguish one id from its neighbours
+ *  live (`-flash`, `-0910`). Read by `composeRow`. */
+const LABEL_ON_ROW = 20;
 
 /** Elide in the MIDDLE, keeping the head and the tail. A string already
  *  within budget is returned untouched, so this is a no-op for every
@@ -205,21 +276,14 @@ function elideMiddle(text: string, max: number): string {
  * their width should get: today's row, unchanged.
  */
 export function idleStatus(tier: string, model: string, ctxRatio: number, meter?: StatusMeter, W?: number): string {
-	const compose = (label: string, hint: boolean): string => {
-		const parts = [`▸ ${tier}`];
-		if (hint) parts.push("/mode to switch");
-		parts.push(label);
-		if (meter?.cacheHitPct != null) parts.push(`CH ${Math.round(meter.cacheHitPct)}%`);
+	return composeRow(`▸ ${tier}`, [
+		{ kind: "hint", text: "/mode to switch" },
+		{ kind: "label", text: model },
+		meter?.cacheHitPct != null ? { kind: "fact", text: `CH ${Math.round(meter.cacheHitPct)}%` } : null,
 		// costUsd deliberately NOT rendered — see StatusMeter.costUsd.
-		parts.push(ctxSegment(ctxRatio));
-		if (meter?.tokPerSec != null) parts.push(`${meter.tokPerSec} tok/s`); // TPS-1: last, after the ctx estimate
-		return parts.join(" · ");
-	};
-	const full = compose(model, true);
-	if (W === undefined || displayWidth(full) <= W) return full;
-	const squeezed = compose(elideMiddle(model, MODEL_ON_ROW), true);
-	if (displayWidth(squeezed) <= W) return squeezed;
-	return compose(elideMiddle(model, MODEL_ON_ROW), false);
+		{ kind: "fact", text: ctxSegment(ctxRatio) },
+		meter?.tokPerSec != null ? { kind: "fact", text: `${meter.tokPerSec} tok/s` } : null, // TPS-1: last, after the ctx estimate
+	], W);
 }
 
 /** TUI2-R1 (E) — the cache hit rate the status row shows, from the usage

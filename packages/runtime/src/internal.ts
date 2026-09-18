@@ -36,3 +36,5 @@ export { BUILTIN_MANIFESTS, resolveContinuationScope, type ModelRef, type Provid
 // and the request-budget accounting the CLI's status line reads.
 export * from "./checkpoint.js";
 export * from "./request-budget.js";
+// 0.40.0: the listing reads the recorded workspace and profile name.
+export { readProfile, type ExecutionProfile, type ProfileReadResult } from "./profile.js";
