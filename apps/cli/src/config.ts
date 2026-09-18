@@ -12,7 +12,7 @@
  *                      "anthropic" | "openai-responses")
  *   models?: { [name]: { kind: "openai-compat"|"anthropic"|"openai-responses",
  *                        baseUrl?: string, model: string, apiKeyEnv: string } }
- *   mode?: "manual"|"default"|"accept-edits"|"plan"|"bypass"
+ *   mode?: "manual"|"default"|"accept-edits"|"plan"|"bypass"|"dontAsk"
  *   contextWindow?: number      — tokens
  *   autoCompact?: { thresholdRatio: number }   — 0<r<1; default off
  *   projectTrust?: "ask" | "never"             — no "always" (the ruling)
@@ -106,7 +106,7 @@ export interface ResolvedConfig {
 }
 
 const KINDS: readonly string[] = ["openai-compat", "anthropic", "openai-responses"];
-const MODES_LIST: readonly string[] = ["manual", "default", "accept-edits", "plan", "bypass"];
+const MODES_LIST: readonly string[] = ["manual", "default", "accept-edits", "plan", "bypass", "dontAsk"];
 
 export class ConfigError extends Error {}
 

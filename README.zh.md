@@ -71,7 +71,7 @@ Profile 存在 `~/.kiso/config.json`(ADR-0045)。**凭据永远不在里面**—
     // 订阅:不设 apiKeyEnv——由 `kiso login chatgpt` 拥有
     "chatgpt": { "kind": "openai-responses", "model": "gpt-5.5", "baseUrl": "https://chatgpt.com/backend-api" }
   },
-  "mode": "default"                          // manual/default/accept-edits/plan/bypass
+  "mode": "default"                          // default/accept-edits/plan/dontAsk/bypass
 }
 ```
 
@@ -111,10 +111,11 @@ kiso sessions                  列出持久会话及其状态
 | 档位 | 这一档的贡献 |
 |---|---|
 | `default` | 读放行,能证明只读的 shell 命令(`ls`、`cat`、`git status`/`log`/`diff`)也放行;write/edit/其余 shell 问人;扩展工具归扩展自己管 |
-| `manual` | 每个工具都问——已保存的放行规则照样放行 |
+| `manual` | 每个工具都问——已保存的放行规则照样放行。配置里仍然接受;`/mode` 和 shift+tab 不再提供 |
 | `accept-edits` | `default` 加上 write_file/edit_file 放行,但写入 `.git/` 或 `.kiso/` 除外(那里是会被执行的配置,总是问人);shell 除非能证明只读,否则问人——已保存的放行规则照样放行 |
 | `plan` | read/list/search/read_skill 放行;其余一律以 `plan mode: read-only` **拒绝**——而拒绝是谁也压不过的 |
 | `bypass` | 全部放行——但用户扩展的 `deny` 依然胜出 |
+| `dontAsk` | 从不问人:凡是要问的一律拒绝并给出一行提示,运行继续;所有放行照样放行(读、只读 shell、已保存的放行规则)。无人值守 / CI 用的档位 |
 
 **想被重新问,就删掉那条规则。** 「别再问了」的授权写在
 `~/.kiso/extensions/dont-ask-again.mjs`,这个文件可以人工编辑、人工删除:

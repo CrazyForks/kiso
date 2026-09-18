@@ -618,10 +618,11 @@ export function classifyReadOnly(commandLine: string, workspaceRoot: string, pro
 	return { allow: true };
 }
 
-/** The modes in which a provable read runs unasked. Manual promises that
- *  every tool asks; plan denies shell outright; bypass allows everything
- *  already — this member has nothing to add to any of them. */
-const ALLOWING_MODES: ReadonlySet<Mode> = new Set<Mode>(["default", "accept-edits"]);
+/** The modes in which a provable read runs unasked. dontAsk is one: an
+ *  allow is what it still honours. Manual promises that every tool asks;
+ *  plan denies shell outright; bypass allows everything already — this
+ *  member has nothing to add to any of them. */
+const ALLOWING_MODES: ReadonlySet<Mode> = new Set<Mode>(["default", "accept-edits", "dontAsk"]);
 
 const ABSTAIN: PolicyVerdict = { action: "abstain" };
 

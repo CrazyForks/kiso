@@ -120,7 +120,7 @@ a comment-free minimal profile you can paste directly.
     // the subscription: no apiKeyEnv — `kiso login chatgpt` owns it
     "chatgpt": { "kind": "openai-responses", "model": "gpt-5.5", "baseUrl": "https://chatgpt.com/backend-api" }
   },
-  "mode": "default"                          // manual/default/accept-edits/plan/bypass
+  "mode": "default"                          // default/accept-edits/plan/dontAsk/bypass
 }
 ```
 
@@ -180,10 +180,11 @@ rules you already granted.
 | tier | its contribution |
 |---|---|
 | `default` | reads allow, and shell commands proven read-only (`ls`, `cat`, `git status`/`log`/`diff`); write/edit/other shell ask the human; extension tools are the extensions' business |
-| `manual` | every tool asks — a saved allow still allows |
+| `manual` | every tool asks — a saved allow still allows. Still accepted in config; no longer offered by `/mode` or shift+tab |
 | `accept-edits` | `default` + write_file/edit_file allow, except into `.git/` or `.kiso/` (configuration that runs — those always ask); shell asks unless proven read-only — a saved allow still allows |
 | `plan` | read/list/search/read_skill allow; everything else **denied** with `plan mode: read-only` — and a deny is what nothing overrides |
 | `bypass` | everything allows — but a user extension's `deny` still wins |
+| `dontAsk` | never asks: whatever would ask is denied with a one-line notice, and the run goes on; every allow still allows (reads, read-only shell, a saved allow). The unattended / CI tier |
 
 **To be asked again, remove the rule.** Grants from "don't ask again" are
 written to `~/.kiso/extensions/dont-ask-again.mjs`, which is human-editable and

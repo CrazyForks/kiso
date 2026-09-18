@@ -44,7 +44,7 @@ import {
 import { readProfile } from "@vincemakes/kiso-runtime/internal";
 import { createFauxProvider } from "@vincemakes/kiso-evals";
 import { createCodingTools } from "@vincemakes/kiso-tools-node";
-import { MODES, getMode, modeExtensions, modeFromEnv, modeSystemPrompt, setMode } from "./mode.js";
+import { MODES, OFFERED_MODES, getMode, modeExtensions, modeFromEnv, modeSystemPrompt, setMode } from "./mode.js";
 import { readOnlyShellExtension } from "./readonly-shell.js";
 import type { PolicyCall } from "@vincemakes/kiso-core";
 import { guardSavedAllow, isProtectedWrite } from "./protected-writes.js";
@@ -1376,7 +1376,7 @@ async function main(): Promise<void> {
 	if (modeFlag !== -1) {
 		const m = MODES.find((x) => x === args[modeFlag + 1]);
 		if (m === undefined) {
-			console.error(`unknown mode: ${args[modeFlag + 1]} (tiers: ${MODES.join(", ")})`);
+			console.error(`unknown mode: ${args[modeFlag + 1]} (tiers: ${OFFERED_MODES.join(", ")})`);
 			process.exit(2);
 		}
 		setMode(m);
@@ -1747,7 +1747,7 @@ async function main(): Promise<void> {
 						"  kiso help               this help\n\n" +
 						"flags (any position):\n" +
 						"  --model <profile|provider/model>   pick the model (also /model in-session)\n" +
-						"  --mode <tier>            approval tier: manual|default|accept-edits|plan|bypass\n" +
+						"  --mode <tier>            approval tier: default|accept-edits|plan|dontAsk|bypass\n" +
 						"  --version                print the version\n\n" +
 						"configuration:\n" +
 						"  no key                   keyless faux demo (a scripted four-round session)\n" +

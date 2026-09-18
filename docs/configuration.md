@@ -48,7 +48,7 @@ a broken config file fails loudly with the file named.
       "streamIdleMs": 300000                 // the stream watchdog: 5 min of silence before a retry (default 120 s; 0 off)
     }
   },
-  "mode": "default",                         // manual/default/accept-edits/plan/bypass
+  "mode": "default",                         // default/accept-edits/plan/dontAsk/bypass
   "contextWindow": 160000,                   // tokens
   "autoCompact": { "thresholdRatio": 0.8 },  // opt-in, env KISO_AUTO_COMPACT wins
   "projectTrust": "ask"                      // "ask" | "never" — no "always"

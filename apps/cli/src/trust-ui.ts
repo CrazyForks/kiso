@@ -148,6 +148,13 @@ export function parseFallbackAnswer(answer: string): { action: "allow" | "deny";
 export function askUi(input: LineInput): AskUI {
 	return {
 		ask: async (spec: AskSpec): Promise<AskResult> => {
+			// Launch-weekend plan §2: dontAsk asks nobody anything — a
+			// question the model puts is declined, recorded as unanswered,
+			// exactly as a non-interactive session declines it.
+			if (getMode() === "dontAsk") {
+				bodyLog("[dontAsk] the model's question was declined — nothing asks in dontAsk");
+				return askDeclineAll(spec);
+			}
 			const verdict = await askPanel(input, askView(spec));
 			return verdict.action === "answers" ? verdict.result : askDeclineAll(spec);
 		},

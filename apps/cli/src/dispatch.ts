@@ -8,7 +8,7 @@ import { contextRows, contextUnavailableRows, displayVerb, escapeTerminal, helpR
 import { newSessionId } from "./session-id.js";
 import { buildAdapter, lookupModelMetadata, resolveContinuationScope, resolveReasoning } from "@vincemakes/kiso-runtime/internal";
 import type { AgentSession } from "@vincemakes/kiso-runtime";
-import { MODES, MODE_NOTE, getMode, setMode } from "./mode.js";
+import { MODES, MODE_NOTE, OFFERED_MODES, getMode, setMode } from "./mode.js";
 import { clipboardWrite, lastAnswer } from "./clipboard.js";
 import { agentModel, body, bodyLog, codingToolOptions, kisoHome, configModels, dock, lastBinding, loadedSkillsCatalog, mergedConfig, readContextLedger, retryOnRow, sessionsDir, setAgentModel, setConfiguredWindow, setCurrentModelName, setModelChoice, setRetryShown, type LineInput , setLastBinding } from "./state.js";
 import { adapterOptionsFor } from "./auth/adapter-options.js";
@@ -525,7 +525,7 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 							modePickView(
 								{
 									header: `mode — current: ${current}`,
-									options: MODES.map((name) => ({ label: name, note: [MODE_NOTE[name], ...(name === current ? ["current"] : [])].join(" · ") })),
+									options: OFFERED_MODES.map((name) => ({ label: name, note: [MODE_NOTE[name], ...(name === current ? ["current"] : [])].join(" · ") })),
 								},
 								// DC-12 (design §4): a panel WAITING ON A HUMAN says ❯.
 								ctx.isRunning() ? "❯ run paused" : `▸ ${current}`,
@@ -538,10 +538,10 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 						ctx.input.prompt();
 						return; // esc — nothing switched, nothing said
 					}
-					const chosen = "index" in picked ? MODES[picked.index] : MODES.find((x) => x === picked.custom.trim());
+					const chosen = "index" in picked ? OFFERED_MODES[picked.index] : MODES.find((x) => x === picked.custom.trim());
 					if (chosen === undefined) {
 						bodyLog(`no such mode: ${"index" in picked ? String(picked.index) : picked.custom.trim()}`);
-						bodyLog(`tiers: ${MODES.join(" ")}`);
+						bodyLog(`tiers: ${OFFERED_MODES.join(" ")}`);
 					} else {
 						setMode(chosen);
 						body.notice(`mode → ${chosen}`);
@@ -551,10 +551,10 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 					return;
 				}
 				bodyLog(`mode ${getMode()}`);
-				bodyLog(`tiers: ${MODES.join(" ")}`);
+				bodyLog(`tiers: ${OFFERED_MODES.join(" ")}`);
 			} else if (m === undefined) {
 				bodyLog(`no such mode: ${trimmed.slice(5).trim()}`);
-				bodyLog(`tiers: ${MODES.join(" ")}`);
+				bodyLog(`tiers: ${OFFERED_MODES.join(" ")}`);
 			} else {
 				setMode(m);
 				body.notice(`mode → ${m}`);

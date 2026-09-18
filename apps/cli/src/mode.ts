@@ -1,5 +1,5 @@
 /**
- * Modes — the five built-in approval tiers, built ON the E1 policy chain
+ * Modes — the six built-in approval tiers, built ON the E1 policy chain
  * (the kernel is untouched). Each tier is an in-process "mode:<name>"
  * extension whose decide() is live — it only speaks when it is the
  * CURRENT tier (otherwise abstain = no opinion, ADR-0042), so /mode
@@ -14,9 +14,18 @@ import type { PolicyCall, PolicyVerdict } from "@vincemakes/kiso-core";
 import type { KisoExtension } from "@vincemakes/kiso-runtime";
 import { isProtectedWrite } from "./protected-writes.js";
 
-export type Mode = "manual" | "default" | "accept-edits" | "plan" | "bypass";
+export type Mode = "manual" | "default" | "accept-edits" | "plan" | "bypass" | "dontAsk";
 
-export const MODES: readonly Mode[] = ["manual", "default", "accept-edits", "plan", "bypass"];
+/** Every tier kiso ACCEPTS — from a config, KISO_MODE, --mode, or
+ *  `/mode <name>`. */
+export const MODES: readonly Mode[] = ["manual", "default", "accept-edits", "plan", "bypass", "dontAsk"];
+
+/** The tiers kiso OFFERS a person (launch-weekend plan §2): the picker,
+ *  shift+tab, the printed list, the help. `manual` left the offer — a
+ *  saved allow outranks its ask, so "asks for every tool" was never
+ *  quite what it did — and stays accepted, so no config that names it
+ *  breaks. `dontAsk` joined: the unattended tier. */
+export const OFFERED_MODES: readonly Mode[] = ["default", "accept-edits", "plan", "dontAsk", "bypass"];
 
 /** DC-36 — one line per tier, for the picker, TRANSCRIBED FROM decide()
  *  below rather than written fresh. A description that drifts from the
@@ -31,12 +40,17 @@ export const MODES: readonly Mode[] = ["manual", "default", "accept-edits", "pla
  *  no new question. The composition (deny > allow > ask) is the ruling and
  *  is unchanged; the copy was the thing that was wrong. `plan` needs no
  *  qualification because it DENIES, and a deny is what nothing overrides. */
+// 0.40.0: every OFFERED note fits the picker at 80 columns — 60 columns:
+// 80, less the 19 of the label column, less the last column, which is
+// never written — so the qualification at the END of a note is never the
+// part that is cut (the PTY picker gate asserts them whole).
 export const MODE_NOTE: Readonly<Record<Mode, string>> = {
 	manual: "asks for every tool — a saved allow still allows",
-	default: "reads and read-only shell run; the rest asks — a saved allow still allows",
-	"accept-edits": "edits and read-only shell run; other shell asks — a saved allow still allows",
-	plan: "reads run; everything else is denied — read-only, and a deny wins",
+	default: "read-only runs; the rest asks — a saved allow still allows",
+	"accept-edits": "read-only, edits run; rest asks — a saved allow still allows",
+	plan: "reads run; all else is denied — read-only, and a deny wins",
 	bypass: "everything runs, nothing asks — a user deny still wins",
+	dontAsk: "asks nothing: an ask is denied — a saved allow still allows",
 };
 
 /** The read-only tool set (plan): reading is allowed, everything else
@@ -67,7 +81,13 @@ function tierVerdict(tier: Mode, call: PolicyCall, workspaceRoot: () => string):
 	switch (tier) {
 		case "manual":
 			return { action: "ask" }; // every tool asks
+		// dontAsk decides exactly as default does. What makes it dontAsk is
+		// what happens to the chain's final ASK: the CLI denies it at the
+		// ask endpoint instead of asking (chat.ts). Not a tier deny — that
+		// would outrank every allow, and a saved allow and the read-only
+		// shell allow must still allow.
 		case "default":
+		case "dontAsk":
 			if (READ_TOOLS.has(call.name)) return { action: "allow" };
 			if (call.name === "write_file" || call.name === "edit_file" || call.name === "shell") return { action: "ask" };
 			// Abstain (ADR-0042): an extension-provided tool is the
@@ -91,7 +111,7 @@ function tierVerdict(tier: Mode, call: PolicyCall, workspaceRoot: () => string):
 	}
 }
 
-/** The five built-in mode tiers as chain extensions — named "mode:<tier>"
+/** The six built-in mode tiers as chain extensions — named "mode:<tier>"
  *  so the runtime's decidedBy records exactly that (the runtime derives
  *  approvalPolicies from extensions[].approvals, tagging each with the
  *  extension name). The CURRENT tier is first: an all-allow chain records
