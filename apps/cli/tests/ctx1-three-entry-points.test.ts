@@ -25,6 +25,12 @@ import { SessionStore } from "@vincemakes/kiso-runtime";
  * So the control flips exactly one field, the recorded model id, to one the
  * registry does not know: at the 200k fallback the same history MUST
  * compact. Absence only counts as evidence when presence is also shown.
+ *
+ * ADR-0055 Amendment 1 (A1b): the standing microcompact at half the window
+ * is gone (A4). What travels with the model now is the WINDOW the in-run
+ * tiers are drawn from, and the observable is the tiers' summary: at 200k
+ * ~180k is over every tier, so the door fires whatever the phase; at 1M
+ * the soft tier is 400k, and the same history stays whole.
  */
 
 const CLI = join(new URL("../..", import.meta.url).pathname, "cli", "dist", "index.js");
@@ -39,7 +45,11 @@ const SESSION = "s";
  *  then dies. Enough responses to outlast the seed, by a wide margin. */
 function fauxScript(): string {
 	const f = join(mkdtempSync(join(tmpdir(), "kiso-ctx1-faux-")), "faux.json");
-	writeFileSync(f, JSON.stringify(Array.from({ length: 200 }, () => ({ events: [{ type: "stop", reason: "end_turn" }] }))));
+	// Every response is a valid checkpoint, so a summary call gets one and an
+	// ordinary turn ends on harmless text (A1b: the tiers' summary is the
+	// observable, and it is only written when the checkpoint validates).
+	const checkpoint = "## Goal\ng\n## Constraints\nc\n## User requests\nu\n## Files and changes\nf\n## Errors and fixes\nnone\n## Current work\nw\n## Next steps\nn";
+	writeFileSync(f, JSON.stringify(Array.from({ length: 200 }, () => ({ events: [{ type: "text_delta", text: checkpoint }, { type: "stop", reason: "end_turn" }] }))));
 	return f;
 }
 
@@ -57,8 +67,9 @@ function completedTerminals(home: string): number {
 	return n;
 }
 
-/** A history whose projected estimate lands between the two thresholds:
- *  well over 100,000, comfortably under 500,000.
+/** A history whose projected estimate lands between the two windows' tiers:
+ *  over the 200k window's emergency (168k), under the 1M window's soft
+ *  (400k).
  *
  *  Written through the STORE, not by appending lines. A hand-written record
  *  is rejected — `line 4 is not a session record` — because the durable
@@ -69,8 +80,14 @@ async function seedHistory(home: string): Promise<void> {
 	const existing = store.load(SESSION).map((r) => r.event);
 	let seq = existing.reduce((m, e) => Math.max(m, (e as { seq: number }).seq), -1) + 1;
 	const chunk = "line of a read file\n".repeat(600); // ~12,000 chars ≈ 3,000 tokens
-	for (let i = 0; i < 50; i++) {
+	// A1b: SETTLED rounds (call, stop, result), as a real log has them — a
+	// summary cuts only at a settled round, and a crash-shaped history of
+	// stop-less calls is one round still in flight, which no tier may cut.
+	// Sixty rounds ≈ 180k: over the 200k window's emergency tier (168k), so
+	// every door fires whatever the phase; under the 1M window's soft 400k.
+	for (let i = 0; i < 60; i++) {
 		await store.append(SESSION, "seed", { seq: seq++, type: "tool_call_end", callId: `c${i}`, name: "read_file", input: { path: `f${i}.ts` } } as never);
+		await store.append(SESSION, "seed", { seq: seq++, type: "stop", reason: "tool_use" } as never);
 		await store.append(SESSION, "seed", { seq: seq++, type: "tool_result", callId: `c${i}`, content: chunk, isError: false } as never);
 	}
 	// RELEASE THE LOCK. Appending acquires this session's writer lock, and the
@@ -96,7 +113,7 @@ function recordModel(home: string, modelId: string): void {
 
 function boundaries(home: string): number {
 	const log = join(home, "sessions", `${SESSION}.jsonl`);
-	return readFileSync(log, "utf8").split("\n").filter((l) => l.includes('"type":"microcompacted"')).length;
+	return readFileSync(log, "utf8").split("\n").filter((l) => l.includes('"type":"summarized"')).length;
 }
 
 /** One door, from a clean isolated home: create, seed, record, reopen. */
@@ -134,11 +151,11 @@ describe("CTX-1 F34-1: every entry point binds the restored session's threshold"
 		["kiso chat", ["chat", SESSION]],
 	];
 
-	it.each(doors)("%s: the CONTROL compacts — an unknown model falls back to 200k, so 100k fires", async (_name, args) => {
+	it.each(doors)("%s: the CONTROL compacts — an unknown model falls back to 200k, so ~180k is over its tiers", async (_name, args) => {
 		expect(await openThrough(args, "no-such-model-the-registry-knows")).toBeGreaterThanOrEqual(1);
 	}, 60_000);
 
-	it.each(doors)("%s: a session recorded on a 1M model does NOT compact at the startup threshold", async (_name, args) => {
+	it.each(doors)("%s: a session recorded on a 1M model does NOT compact at the startup window", async (_name, args) => {
 		expect(await openThrough(args, "claude-sonnet-5")).toBe(0);
 	}, 60_000);
 });

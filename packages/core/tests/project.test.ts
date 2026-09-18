@@ -20,6 +20,7 @@ import type { EventInput } from "../src/index.js";
 import { createFauxProvider } from "@vincemakes/kiso-evals";
 import { defineTool } from "../src/tools/tool.js";
 import { ToolRegistry } from "../src/tools/registry.js";
+import { standingPrune } from "./standing-prune.js";
 
 const seed: readonly Message[] = [
 	{ role: "user", content: "hello" },
@@ -169,7 +170,7 @@ describe("a real run's trajectory is its own truth", () => {
 			model: "faux",
 			registry,
 			log,
-			microcompact: { thresholdTokens: 200 },
+			compact: standingPrune(200),
 		})) {
 			// no-op
 		}

@@ -36,6 +36,7 @@ import type { Event } from "../src/protocol/events.js";
 import { estimateTokens } from "../src/kernel/compaction.js";
 import { ToolRegistry } from "../src/tools/registry.js";
 import { EventLog, loop } from "../src/index.js";
+import { standingPrune } from "./standing-prune.js";
 
 const text = (s: string): ContentBlock => ({ type: "text", text: s });
 const image = (): ContentBlock => ({ type: "image", sourceType: "url", url: "https://x/y.png" });
@@ -144,7 +145,7 @@ async function runOverThreshold(log: EventLog, thresholdTokens: number): Promise
 		model: "faux",
 		registry,
 		log,
-		microcompact: { thresholdTokens },
+		compact: standingPrune(thresholdTokens),
 	})) {
 		events.push(ev);
 	}

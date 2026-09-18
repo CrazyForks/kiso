@@ -152,8 +152,8 @@ export function renderEvent(ev: RenderInput, prevThinking = false, resolvePath: 
 		case "compacted":
 			return { text: `${p.dim}  [compacted ${ev.cleared.length} results]${p.reset}\n`, newline: true, prompt: false };
 		case "summarized":
-			// ADR-0044: the /compact event is OFF-LOOP — it never appears in
-			// a run stream; rendered for the switch's completeness only.
+			// ADR-0044: /compact's event is off-loop; since ADR-0055 Amendment 1
+			// the in-run tiers also append one mid-run, and this is its line.
 			return { text: `${p.dim}  [summarized up to seq ${ev.coversToSeq}]${p.reset}\n`, newline: true, prompt: false };
 		case "uncertain_pending":
 			return {
