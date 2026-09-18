@@ -162,6 +162,33 @@ export function unansweredAskView(executionId: string): PanelView {
 	};
 }
 
+/**
+ * 0.40.0 (the owner's session) — the cold resume. A session resumed 27
+ * minutes after its last request re-sent a 727k prefix the provider had
+ * evicted. The first request after a long pause pays for the whole prefix
+ * either way; compacting first turns that one expensive request into a
+ * summary call, and every turn after it is small. The line names the size
+ * and the age, so the person can judge.
+ */
+export function coldResumeLine(tokens: number, minutesAgo: number): string {
+	return `this session is ${Math.round(tokens / 1000)}k tokens, last used ${minutesAgo} min ago, and its cache is cold`;
+}
+
+export function coldResumeView(tokens: number, minutesAgo: number): PanelView {
+	const line = coldResumeLine(tokens, minutesAgo);
+	return {
+		flavor: "simple",
+		name: "cold cache",
+		title: `compact first? (${Math.round(tokens / 1000)}k tokens, ${minutesAgo} min idle)`,
+		speaker: "kiso",
+		statusText: "❯ resumed session",
+		args: { kind: "text", lines: [line, "compacting first is one summary call, then every turn is cheap"] },
+		ruleOverride: `${line} — compact first? (one summary call, then every turn is cheap)`,
+		simpleOptions: ["compact first", "keep the full history"],
+		fallbackQuestion: `${line} — compact first? (y)es / (n)o `,
+	};
+}
+
 /** An extension as the banner names it — the live `connecting` flag is
  *  the MCP bridge's in-flight state ("mcp (connecting…)"). Structural on
  *  purpose: the runtime's KisoExtension satisfies it without this
@@ -169,6 +196,9 @@ export function unansweredAskView(executionId: string): PanelView {
 export interface BannerExtension {
 	readonly name: string;
 	readonly connecting?: boolean;
+	/** A fact about the extension in this session, printed in parentheses
+	 *  after its name — "ask (off in dontAsk)". `connecting` wins. */
+	readonly note?: string;
 }
 
 /**
@@ -189,7 +219,8 @@ export function extensionsBannerText(
 ): string {
 	const total = builtIn.length + user.length + project.length;
 	if (total === 0) return "";
-	const label = (e: BannerExtension): string => (e.connecting === true ? `${e.name} (connecting…)` : e.name);
+	const label = (e: BannerExtension): string =>
+		e.connecting === true ? `${e.name} (connecting…)` : e.note !== undefined ? `${e.name} (${e.note})` : e.name;
 	const parts: string[] = [];
 	if (builtIn.length > 0) parts.push(`built-in: ${builtIn.map(label).join(", ")}`);
 	if (user.length > 0) parts.push(user.map(label).join(", "));

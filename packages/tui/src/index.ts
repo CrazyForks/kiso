@@ -107,14 +107,13 @@ export { AT_CAP, AT_SKIP, AT_VISIBLE, atEmbed, atFilter, atPanelRows, atWindow, 
 // the row (picked or printed), the band, and the filter. The CARDS are
 // the cli's projection (session-cards.ts); this turns them into bytes.
 export {
-	BADGE_GLYPH,
 	idColumn,
 	sessionAge,
-	sessionBadge,
 	sessionCounterRow,
 	sessionFilter,
 	sessionListFooter,
 	sessionListHeader,
+	sessionListUnknownLine,
 	sessionListRow,
 	sessionNote,
 	sessionPickerRows,
@@ -162,4 +161,4 @@ export { resolveGround, type Ground } from "@vincemakes/kiso-tui-cells";
 // one duration form: the CLI's own surfaces label a settled duration the
 // way a settled card does, rather than writing a second one.
 export { settledLabel } from "@vincemakes/kiso-tui-cells";
-export { KEY_BINDINGS, PANEL_KEYS_ROW, displayVerb, extensionsBannerText, helpRows, keysHelpRow, keysSheetRows, slashCommandNames, unansweredAskView, type BannerExtension, type KeyBinding } from "./strings.js";
+export { KEY_BINDINGS, PANEL_KEYS_ROW, coldResumeLine, coldResumeView, displayVerb, extensionsBannerText, helpRows, keysHelpRow, keysSheetRows, slashCommandNames, unansweredAskView, type BannerExtension, type KeyBinding } from "./strings.js";

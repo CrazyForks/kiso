@@ -4,7 +4,7 @@
  * verbatim from session.ts.
  */
 
-import { denialResult, loop, type AbortSignalLike, type Adapter, type ApprovalChain, type ChainVerdict, type ContentBlock, type Event, type EventLog, type HookHost, type PermissionDecision, type ToolCallPayload, type ToolResult } from "@vincemakes/kiso-core";
+import { denialResult, estimateTokens, loop, type AbortSignalLike, type Adapter, type ApprovalChain, type ChainVerdict, type ContentBlock, type Event, type EventLog, type HookHost, type PermissionDecision, type ToolCallPayload, type ToolResult } from "@vincemakes/kiso-core";
 import type { SessionStore } from "./store.js";
 import { ABORTED, MergedSignal, abortable, openRunId } from "./recovery.js";
 import { resolveReasoning, type WireReasoning } from "./provider/metadata.js";
@@ -135,7 +135,13 @@ export class Run implements AsyncIterable<Event> {
 			// extension providing a compaction config supplies it. E6: the
 			// contextPolicy override beats the session's own, and its minTurns
 			// no-fire guard may omit the config below the floor.
-			const microcompact = microcompactFor(this.#config, log.all);
+			const configured = microcompactFor(this.#config, log.all);
+			// 0.40.0: the trigger reads the context as the last BILL measured
+			// it (context-anchor.ts), the estimate only when no bill describes it.
+			const microcompact =
+				configured === undefined
+					? undefined
+					: { ...configured, measure: (events: readonly Event[], messages: Parameters<typeof estimateTokens>[0]) => this.#session.contextAnchor(events) ?? estimateTokens(messages) };
 			// E2: the session's own systemPrompt first, then every extension
 			// append in LOAD order — deterministic (same extensions → same
 			// prompt); no appends → byte-identical to the extension-less run.
@@ -297,6 +303,9 @@ export class Run implements AsyncIterable<Event> {
 			//    stream.
 			const inputEvent = log.append({ type: "user_input", content: this.#input!, ...(this.#source !== undefined ? { source: this.#source } : {}), ...(this.#via !== undefined ? { via: this.#via } : {}) });
 			await this.#session.persist(this.runId, inputEvent);
+			// 0.40.0 dogfood: the list's row says "open" from here — a run
+			// killed mid-way reads as interrupted, which is the truth
+			this.#session.recordSummary(true);
 			yield inputEvent;
 
 			// 2. The loop projects from the session log — multi-turn context
@@ -313,6 +322,9 @@ export class Run implements AsyncIterable<Event> {
 				// the flush itself failed (poisoned session) — the error
 				// already poisoned everything; nothing more can be done.
 			}
+			// 0.40.0 dogfood: the row at the run's end — its terminal, or the
+			// pause it stopped at (pending asks counted); best-effort
+			this.#session.recordSummary(this.#session.log.all.at(-1)?.type !== "terminal");
 			// The run is over (or abandoned): its unanswered approvals must
 			// fall back to the direct-persist path, so a late approve() is
 			// still durable.

@@ -80,4 +80,25 @@ describe("0.40.0 — user-invoked skills (PTY)", () => {
 		expect(resumed).toContain("/skill hello world");
 		expect(resumed, "the resume tail printed the SKILL.md body").not.toContain(BODY_MARK);
 	}, 300_000);
+
+	it("0.40.1 — typing `/b` offers the installed boss-call skill in the menu", () => {
+		const { env, dirs } = isolatedEnv({ KISO_FAUX_SCRIPT: fauxScript([...spares(3)]) });
+		skill(dirs.skills, "boss-call", "description: mailbox between sessions\n", "Body.");
+		const out = strip(
+			ptyRun(["--mode", "bypass", "skill-menu"], env as NodeJS.ProcessEnv, {
+				feeds: [
+					// "ctx left" is the BOOT status row, painted after the agent
+					// (and its extensions) exist — "/ commands" is painted
+					// earlier, and a key typed then reads an empty catalog
+					["ctx left", "/b"],
+					// the menu styles the typed prefix, so the raw bytes split
+					// "/b" from the rest — the needle is the unsplit part
+					["oss-call", "\x15exit\r"],
+				],
+			}),
+		);
+		// the menu draws its entries without the leading slash
+		expect(out).toMatch(/▸ boss-call\s+mailbox between sessions · skill/);
+	}, 300_000);
 });
+

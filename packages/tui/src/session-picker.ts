@@ -2,20 +2,12 @@
  * TUI2-R2 slices ①–③ — the session picker's PURE half: the durability
  * badge, the row, the band, and the filter.
  *
- * The badge is the round's whole argument. kiso's claim is that a
- * session survives kill -9 and resumes from its durable prefix; until
- * now that claim was a sentence in a README. A badge per row makes it a
- * thing you can SEE before you pick: this one completed, this one was
- * cut mid-run and will resume exactly, this one is holding a question
- * for you.
- *
- * The vocabulary (the palette's functional set — no new colour):
- *
- *   ✓ green   the run's terminal event says completed
- *   ✗ red     the terminal says anything else
- *   ▌ bold    no terminal event — interrupted mid-run
- *   ? warn    the uncertain ledger is not empty (overrides ▌)
- *   ◌ dim     a permission request nobody has answered
+ * The row's STATE is the round's whole argument. kiso's claim is that a
+ * session survives kill -9 and resumes from its durable prefix; the note
+ * column makes it a thing you can READ before you pick: this one completed,
+ * this one was cut mid-run and will resume exactly, this one is holding a
+ * question for you. (0.40.1, owner's ruling: words, never glyphs — the
+ * ✓ ✗ ▌ ? ◌ column that stood here said nothing the words did not.)
  *
  * Purity, as everywhere in this package: the cards are DATA the CLI
  * projects (session-cards.ts) and this module turns them into bytes. It
@@ -37,8 +29,9 @@ export interface SessionCardView {
 	 *  a caller that has not got one still renders — the row simply
 	 *  carries no title, which is where this picker started. */
 	readonly title?: string;
-	readonly badge: "uncertain" | "ask" | "interrupted" | "completed" | "failed";
-	readonly turns: number;
+	readonly badge: "uncertain" | "ask" | "interrupted" | "completed" | "failed" | "unknown";
+	/** null when unknown — the row then says nothing about turns */
+	readonly turns: number | null;
 	readonly updatedAt: number;
 	readonly uncertain: number;
 	readonly asks: number;
@@ -51,15 +44,19 @@ export interface SessionCardView {
 }
 
 /** 0.40.0 — which sessions the picker shows. `here` is the running
- *  workspace's realpath; `all` is the person's choice; `fellBack` is the
- *  picker's own — CURRENT was empty while other sessions exist, and an
- *  empty picker over a non-empty store would read as "they are gone". */
+ *  workspace's realpath; `all` is the person's choice; `unknown` counts
+ *  the sessions with no recorded workspace (0.40.1), which the default view
+ *  hides behind one header row.
+ *
+ *  0.40.1 (owner's ruling): the default view NEVER falls back to all. The
+ *  fallback made every directory list every older session — 118 of them —
+ *  which is the view the scope exists to prevent. */
 export interface PickScopeState {
 	readonly here: string;
 	readonly all: boolean;
 	readonly inHere: number;
 	readonly total: number;
-	readonly fellBack: boolean;
+	readonly unknown: number;
 }
 
 /** The scope, as a pure function of the cards: CURRENT is the sessions
@@ -67,15 +64,13 @@ export interface PickScopeState {
  *  workspace is never "here" — unknown history is shown under ALL only. */
 export function scopeSessions(cards: readonly SessionCardView[], here: string, wantAll: boolean): { readonly cards: readonly SessionCardView[]; readonly scope: PickScopeState } {
 	const inHere = cards.filter((c) => c.workspace === here);
-	const fellBack = !wantAll && inHere.length === 0 && cards.length > 0;
-	const all = wantAll || fellBack;
-	return { cards: all ? cards : inHere, scope: { here, all, inHere: inHere.length, total: cards.length, fellBack } };
+	const unknown = cards.filter((c) => c.workspace === null || c.workspace === undefined).length;
+	return { cards: wantAll ? cards : inHere, scope: { here, all: wantAll, inHere: inHere.length, total: cards.length, unknown } };
 }
 
 /** The band's title — the scope and both counts, and the key that flips it. */
 export function scopeTitle(scope: PickScopeState | null): string {
 	if (scope === null) return "sessions";
-	if (scope.fellBack) return `sessions \u00b7 none from this workspace yet \u2014 all ${scope.total}`;
 	return scope.all
 		? `sessions \u00b7 all ${scope.total} \u00b7 tab this workspace (${scope.inHere})`
 		: `sessions \u00b7 this workspace ${scope.inHere} of ${scope.total} \u00b7 tab all`;
@@ -110,30 +105,6 @@ function fitTags(card: SessionCardView, here: string | null, room: number): stri
 	return "";
 }
 
-/** The glyph per state — one cell each, so the badge column never
- *  shifts the id column (a column that moves per row reads as damage). */
-export const BADGE_GLYPH: Readonly<Record<SessionCardView["badge"], string>> = {
-	completed: "✓", // ✓
-	failed: "✗", // ✗
-	interrupted: "▌", // ▌ — the input brick: this session is mid-sentence
-	uncertain: "?",
-	ask: "◌", // ◌ — the dotted circle: a question with no answer in it yet
-};
-
-/** The badge, styled. The colour IS the meaning here (the mono
- *  discipline's three functional exceptions), so NO_COLOR degrades to
- *  the glyph alone — which is why the glyphs are distinct shapes and
- *  not three coloured dots. */
-export function sessionBadge(badge: SessionCardView["badge"]): string {
-	const p = palette();
-	const g = BADGE_GLYPH[badge];
-	if (badge === "completed") return `${p.green}${g}${p.reset}`;
-	if (badge === "failed") return `${p.red}${g}${p.reset}`;
-	if (badge === "interrupted") return `${p.bold}${g}${p.reset}`;
-	if (badge === "uncertain") return `${p.warn}${g}${p.reset}`;
-	return `${p.dim}${g}${p.reset}`;
-}
-
 /**
  * What the row SAYS about the state. The interrupted note is the
  * product's promise stated in the place the promise matters: the run
@@ -155,6 +126,10 @@ export function sessionNote(card: SessionCardView): string {
 			return "interrupted mid-run — resumes exactly";
 		case "completed":
 			return "completed clean";
+		case "unknown":
+			// 0.40.0 dogfood: no summary, or a log that could not be read —
+			// said, never guessed
+			return card.outcome ?? "no summary";
 		default:
 			return card.outcome === null || card.outcome === "error" ? "failed" : card.outcome.replaceAll("_", " ");
 	}
@@ -261,12 +236,9 @@ function rowSpans(card: SessionCardView, budget: number, now: number, idCol: num
 		text += styled;
 		w += cells;
 	};
-	// the badge: one glyph + one space, styled as a unit (the glyph's own
-	// SGR spans make it unmeasurable by `put`'s plain/styled pair)
-	if (w + 2 <= budget) {
-		text += `${sessionBadge(card.badge)} `;
-		w += 2;
-	}
+	// 0.40.1 (owner's ruling): NO status glyph. The ✓ ✗ ▌ ? ◌ column is
+	// gone; the state is a WORD, in the note column (sessionNote), where it
+	// already said everything the glyph did.
 	// R2 (owner, 2026-08-27) — the TITLE LEADS and the id is gone.
 	//
 	// The id was four characters of machine identity sitting in the column
@@ -287,7 +259,7 @@ function rowSpans(card: SessionCardView, budget: number, now: number, idCol: num
 		const cut = widthCut(escapeTerminal(title), room);
 		if (cut !== "") put(cut, `${p.bold}${cut}${p.reset}`);
 	}
-	const meta = `  ${sessionAge(card.updatedAt, now)} · ${card.turns} turn${card.turns === 1 ? "" : "s"}`;
+	const meta = `  ${sessionAge(card.updatedAt, now)}${card.turns === null ? "" : ` · ${card.turns} turn${card.turns === 1 ? "" : "s"}`}`;
 	put(meta, `${p.dim}${meta}${p.reset}`);
 	// 0.40.0: the tags are their OWN span, after the meta and before the
 	// note, and they give way first — a long workspace path must never take
@@ -358,13 +330,21 @@ export interface SessionPickState {
 export function sessionPickerRows(state: SessionPickState, W: number, now: number): string[] {
 	const scope = state.scope ?? null;
 	const rows: string[] = [bandHeader(scopeTitle(scope), W)];
+	// 0.40.1: the sessions without a workspace, as ONE row under CURRENT —
+	// counted, never listed (tab shows them, labelled)
+	if (scope !== null && !scope.all && scope.unknown > 0) {
+		const p = palette();
+		rows.push(`${p.dim}${widthCut(`  ${scope.unknown} older session${scope.unknown === 1 ? "" : "s"} without a workspace \u00b7 tab all`, W)}${p.reset}`);
+	}
 	// a row is tagged with its workspace only when ALL is showing — under
 	// CURRENT every row is from here, and saying so eight times is noise
 	const here = scope !== null && scope.all ? scope.here : null;
 	const col = idColumn(state.cards);
 	if (state.matches.length === 0) {
 		const p = palette();
-		rows.push(`${p.dim}${widthCut("  no session matches", W)}${p.reset}`);
+		// an empty CURRENT view says why, rather than an empty band
+		const empty = scope !== null && !scope.all && scope.inHere === 0 ? "  no session from this workspace yet" : "  no session matches";
+		rows.push(`${p.dim}${widthCut(empty, W)}${p.reset}`);
 		rows.push(sessionCounterRow(0, 0, W));
 		return rows;
 	}
@@ -404,6 +384,15 @@ export function sessionListRow(card: SessionCardView, W: number, now: number, id
 export function sessionListFooter(count: number, W: number): string {
 	const p = palette();
 	return `${p.dim}${widthCut(`${count} session${count === 1 ? "" : "s"} · kiso resume picks interactively`, W)}${p.reset}`;
+}
+
+/** 0.40.1 — the `kiso sessions` TTY listing's line for the sessions with no
+ *  recorded workspace: counted, never listed, and the flag that lists them.
+ *  Empty when there are none. */
+export function sessionListUnknownLine(unknown: number, W: number): string {
+	if (unknown === 0) return "";
+	const p = palette();
+	return `${p.dim}${widthCut(`${unknown} older session${unknown === 1 ? "" : "s"} without a workspace \u00b7 --all`, W)}${p.reset}`;
 }
 
 /** 0.40.0 — the `kiso sessions` TTY listing's FIRST line: which sessions

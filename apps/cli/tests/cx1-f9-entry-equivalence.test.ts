@@ -25,8 +25,11 @@ const SUMMARY =
 function fixture(): { env: NodeJS.ProcessEnv; home: string } {
 	const { env, dirs } = isolatedEnv();
 	delete env.KISO_AUTO_COMPACT;
-	// a threshold any single turn clears — the config path is the subject
-	writeFileSync(join(dirs.home, "config.json"), `${JSON.stringify({ autoCompact: { thresholdRatio: 0.0001 } })}\n`, "utf8");
+	// a threshold any single turn clears — the config path is the subject.
+	// 0.40.0: 2 tokens of the 200k fallback window. The unbilled ratio is the
+	// message estimate now, not chars/4 of the projection's JSON, so a
+	// "hi"/"reply" turn is ~3 tokens rather than the ~20 its JSON punctuation read.
+	writeFileSync(join(dirs.home, "config.json"), `${JSON.stringify({ autoCompact: { thresholdRatio: 0.00001 } })}\n`, "utf8");
 	const dir = mkdtempSync(join(tmpdir(), "kiso-cx1-f9-"));
 	const script = join(dir, "faux.json");
 	const turns = Array.from({ length: 5 }, (_, i) => ({ events: [{ type: "text_delta", text: `reply ${i + 1}` }, { type: "stop", reason: "end_turn" }] }));

@@ -121,3 +121,21 @@ export function skillsRows(catalog: SkillsCatalog | null, sourceOf: (dir: string
 	rows.push("/<name> [args] or /skill <name> [args] runs one · a built-in command wins a shared name");
 	return rows;
 }
+
+/**
+ * 0.40.1 (owner's ruling, revoking the 0.41.0 deferral) — the installed
+ * skills as `/` menu entries. The same rule the dispatcher follows, so the
+ * menu never offers what `/<name>` would not run: invocable skills only
+ * (`user-invocable: false` stays the model's), a name a person can type
+ * after `/`, and never a name a built-in claims — the built-in wins. The
+ * description is cut so a long one cannot crowd the band.
+ */
+export function skillMenuItems(catalog: SkillsCatalog | null, builtins: readonly string[]): { readonly name: string; readonly desc: string }[] {
+	if (catalog === null) return [];
+	const taken = new Set(builtins);
+	const cut = (text: string, n: number): string => (text.length <= n ? text : `${text.slice(0, n - 1)}…`);
+	return catalog.entries
+		.filter((e) => e.userInvocable && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(e.name) && !taken.has(`/${e.name}`))
+		.map((e) => ({ name: `/${e.name}`, desc: `${cut(e.description, 56)} · skill` }));
+}
+

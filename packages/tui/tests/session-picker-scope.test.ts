@@ -11,7 +11,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Editor } from "../src/editor.js";
-import { scopeSessions, scopeTitle, sessionListFooter, sessionListHeader, sessionPickerRows, type SessionCardView } from "../src/session-picker.js";
+import { scopeSessions, scopeTitle, sessionListFooter, sessionListHeader, sessionListUnknownLine, sessionPickerRows, type SessionCardView } from "../src/session-picker.js";
 
 const enc = (s: string) => new TextEncoder().encode(s);
 const strip = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "");
@@ -53,21 +53,38 @@ describe("0.40.0 — the scope rule", () => {
 	it("CURRENT is the sessions that started here; unknown history is never here", () => {
 		const { cards, scope } = scopeSessions(CARDS, HERE, false);
 		expect(cards.map((c) => c.id)).toEqual(["a", "c"]);
-		expect(scope).toEqual({ here: HERE, all: false, inHere: 2, total: 4, fellBack: false });
+		expect(scope).toEqual({ here: HERE, all: false, inHere: 2, total: 4, unknown: 1 });
 	});
 
 	it("ALL is every session", () => {
 		const { cards, scope } = scopeSessions(CARDS, HERE, true);
 		expect(cards.map((c) => c.id)).toEqual(["a", "b", "c", "d"]);
 		expect(scope.all).toBe(true);
-		expect(scope.fellBack).toBe(false);
 	});
 
-	it("nothing from here but sessions elsewhere: falls back to ALL, and says so — never an empty picker over a full store", () => {
+	it("0.40.1 (owner's ruling): nothing from here does NOT fall back to all — the default view is this workspace only", () => {
 		const { cards, scope } = scopeSessions(CARDS, "/somewhere/new", false);
-		expect(cards).toHaveLength(4);
-		expect(scope.fellBack).toBe(true);
-		expect(scopeTitle(scope)).toBe("sessions · none from this workspace yet — all 4");
+		expect(cards).toHaveLength(0);
+		expect(scope.all).toBe(false);
+		expect(scopeTitle(scope)).toBe("sessions · this workspace 0 of 4 · tab all");
+	});
+
+	it("0.40.1: sessions with no recorded workspace are hidden behind ONE header row, with their count", () => {
+		const { cards, scope } = scopeSessions(CARDS, HERE, false);
+		const rows = sessionPickerRows({ cards, matches: cards, selected: 0, scope }, 100, NOW).map(strip);
+		expect(rows.filter((r) => r.includes("older session"))).toEqual(["  1 older session without a workspace · tab all"]);
+		expect(rows.join("\n")).not.toContain("an old session");
+		// under ALL they are listed, labelled, and the header row is gone
+		const all = scopeSessions(CARDS, HERE, true);
+		const allRows = sessionPickerRows({ cards: all.cards, matches: all.cards, selected: 0, scope: all.scope }, 100, NOW).map(strip);
+		expect(allRows.join("\n")).toContain("an old session");
+		expect(allRows.join("\n")).not.toContain("older session");
+	});
+
+	it("0.40.1: an empty CURRENT view says so in a row, rather than an empty band", () => {
+		const { cards, scope } = scopeSessions(CARDS, "/somewhere/new", false);
+		const rows = sessionPickerRows({ cards, matches: cards, selected: 0, scope }, 100, NOW).map(strip);
+		expect(rows.some((r) => r.includes("no session from this workspace yet"))).toBe(true);
 	});
 
 	it("the title names the scope and both counts, and the key that flips it", () => {
@@ -125,6 +142,14 @@ describe("0.40.0 — the rows under each scope", () => {
 });
 
 describe("0.40.0 — the keys", () => {
+	it("tab flips CURRENT ↔ ALL even when CURRENT is empty (no fallback left to be stuck in)", () => {
+		const e = new Editor(() => {});
+		e.beginPick(() => CARDS, () => {}, "/somewhere/new");
+		expect(e.pickState()!.matches).toEqual([]);
+		e.feed(enc("\t"));
+		expect(e.pickState()!.matches).toHaveLength(4);
+	});
+
 	it("tab flips CURRENT ↔ ALL; the filter runs inside the scope", () => {
 		const editor = new Editor(() => {});
 		editor.beginPick(() => CARDS, () => {}, HERE);
@@ -151,6 +176,14 @@ describe("0.40.0 — the keys", () => {
 		editor.beginPick(() => CARDS, () => {});
 		expect(editor.pickState()!.scope).toBeNull();
 		expect(editor.pickState()!.matches).toHaveLength(4);
+	});
+});
+
+describe("0.40.1 — `kiso sessions` unknown-workspace line", () => {
+	it("one line counts the sessions without a workspace, and names the flag", () => {
+		expect(strip(sessionListUnknownLine(116, 100))).toBe("116 older sessions without a workspace · --all");
+		expect(strip(sessionListUnknownLine(1, 100))).toBe("1 older session without a workspace · --all");
+		expect(sessionListUnknownLine(0, 100)).toBe("");
 	});
 });
 

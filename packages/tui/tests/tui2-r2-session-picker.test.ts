@@ -59,23 +59,27 @@ describe("TUI2-R2 ② — the picker band (the picker-surface class)", () => {
 		expect(rows).toHaveLength(1 + 5 + 1); // header + the five rows + the counter
 		expect(strip(rows.at(-1)!)).toBe("  (1/5)");
 		const body = rows.slice(1, -1).map(strip);
-		expect(body[0]).toContain("▌ tui2-dogfood");
+		// 0.40.1 (owner's ruling) — the state is a WORD in the note column,
+		// never a glyph: each row starts with the title
+		expect(body[0]).toMatch(/^\s*tui2-dogfood\b/);
 		expect(body[0]).toContain("1h · 8 turns · interrupted mid-run — resumes exactly");
-		expect(body[1]).toContain("✓ fix-auth-race");
+		expect(body[1]).toMatch(/^\s*fix-auth-race\b/);
 		expect(body[1]).toContain("2h · 14 turns · completed clean");
-		expect(body[2]).toContain("? bench-refactor");
+		expect(body[2]).toMatch(/^\s*bench-refactor\b/);
 		expect(body[2]).toContain("3d · 21 turns · 1 uncertain — needs your verdict");
-		expect(body[3]).toContain("◌ release-notes");
+		expect(body[3]).toMatch(/^\s*release-notes\b/);
 		expect(body[3]).toContain("5d · 3 turns · 1 ask pending");
-		expect(body[4]).toContain("✓ wrapper-probe");
+		expect(body[4]).toMatch(/^\s*wrapper-probe\b/);
 	});
 
-	it("the four badges wear the functional set and NOTHING else — ✓ green, ✗ red, ▌ bold, ? warn, ◌ dim", () => {
+	it("0.40.1 — no status glyph anywhere in a row (owner's ruling): the note's words carry the state", () => {
+		for (const W of [60, 80, 120]) {
+			const rows = sessionPickerRows({ cards: CARDS, matches: CARDS, selected: 99 }, W, NOW).slice(1, -1).map(strip);
+			for (const r of rows) expect(r, `W=${W}: ${r}`).not.toMatch(/[✓✗▌◌]|(^\s*\?)/);
+		}
+		// the uncertain row's words keep the warn tint — the one note a person must act on
 		const rows = sessionPickerRows({ cards: CARDS, matches: CARDS, selected: 99 }, 80, NOW).slice(1, -1);
-		expect(rows[0]).toContain(`${COLOR_ON.bold}▌${COLOR_ON.reset}`);
-		expect(rows[1]).toContain(`${COLOR_ON.green}✓${COLOR_ON.reset}`);
-		expect(rows[2]).toContain(`${COLOR_ON.warn}?${COLOR_ON.reset}`);
-		expect(rows[3]).toContain(`${COLOR_ON.dim}◌${COLOR_ON.reset}`);
+		expect(rows[2]).toContain(`${COLOR_ON.warn}1 uncertain — needs your verdict${COLOR_ON.reset}`);
 	});
 
 	it("the selection is a FULL-ROW reverse bar spanning the whole width (the R1.5 ⑧ shape), and exactly one row wears it", () => {

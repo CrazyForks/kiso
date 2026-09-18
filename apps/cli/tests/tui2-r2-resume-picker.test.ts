@@ -75,7 +75,13 @@ describe("TUI2-R2 ② — bare `kiso resume`: the picker is a TTY surface", () =
 		const raw = ptyRun(["resume"], env as NodeJS.ProcessEnv, {
 			// the picker is up as soon as the band names itself; type a
 			// filter that can only mean one session, then take it
-			feeds: [["sessions", "ben"]],
+			// 0.40.1 — a DECLARED change (owner's ruling): the fixtures predate
+			// the recorded workspace, so the default view lists none of them
+			// and counts them in ONE row; tab shows them, then the filter runs
+			feeds: [
+				["3 older sessions without a workspace", "\t"],
+				["all 3", "ben"],
+			],
 			// the pick lands in the recovery flow's uncertainty gate (that IS
 			// the proof it went into the existing resume path), so the gate
 			// gets an answer — otherwise the flow waits for a human and the
@@ -93,6 +99,8 @@ describe("TUI2-R2 ② — bare `kiso resume`: the picker is a TTY surface", () =
 		// session's first prompt — and the id is gone from it. The
 		// fixtures' ids are still what the FILTER accepts (DC-13), which
 		// is what the feed above types.
+		expect(raw).toContain("3 older sessions without a workspace · tab all");
+		expect(raw).toContain("no session from this workspace yet");
 		expect(raw).toContain("refactor the bench");
 		expect(raw).toContain("probe the wrapper");
 		expect(raw).toContain("(1/3)");
@@ -147,6 +155,7 @@ describe("TUI2-R2 ③ — `kiso sessions`: the badges on a TTY, the same bytes i
 		// the flag; the projection this gate pins is under --all, unchanged.
 		const scoped = ptyRun(["sessions"], env as NodeJS.ProcessEnv, { timeout: 30 });
 		expect(scoped).toContain("0 of 3 sessions from this workspace · --all lists every one");
+		expect(scoped).toContain("3 older sessions without a workspace · --all");
 		const raw = ptyRun(["sessions", "--all"], env as NodeJS.ProcessEnv, { timeout: 30 });
 		expect(raw).toContain("all 3 sessions");
 		expect(raw).toContain("refactor the bench"); // R2: the title leads the row

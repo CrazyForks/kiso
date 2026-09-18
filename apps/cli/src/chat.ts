@@ -23,7 +23,7 @@ import {
 	type RenderInput,
 	type RunUsage,
 } from "@vincemakes/kiso-tui";
-import { askView, deletionRiskHint, editFileDiff, writeFileDiff, type DiffResult, type SaferAnswer, type SaferFailure, type SaferOption } from "@vincemakes/kiso-tui";
+import { askView, coldResumeLine, coldResumeView, deletionRiskHint, editFileDiff, writeFileDiff, type DiffResult, type SaferAnswer, type SaferFailure, type SaferOption } from "@vincemakes/kiso-tui";
 import { canonicalTargetPath, shellProgressPath } from "@vincemakes/kiso-tools-node";
 import { echoText } from "@vincemakes/kiso-tui-cells/render";
 import { canonicalizeUsage } from "@vincemakes/kiso-runtime";
@@ -164,13 +164,13 @@ export function microcompactThresholdFor(of?: { readonly model: string; readonly
 }
 
 /**
- * B area: approximate context ratio — chars/4 of the projected messages vs
- * the model window. Marked ~ everywhere it is shown; no counting API.
+ * B area: approximate context ratio vs the model window. Marked ~
+ * everywhere it is shown. 0.40.0: the context as the last bill measured it
+ * (session.contextUsed — the estimate only when no bill describes it);
+ * chars/4 alone read the owner's 730k Chinese-heavy context as ~470k.
  */
 export function estimateCtxRatio(session: AgentSession): number {
-	const projected = session.projected();
-	const chars = JSON.stringify(projected).length;
-	return chars / 4 / contextWindowTokens();
+	return session.contextUsed() / contextWindowTokens();
 }
 
 /** A1a: the ratio the STATUS LINE and the ctx displays show — the request
@@ -195,7 +195,31 @@ export function displayCtxRatio(session: AgentSession): number {
 	// NaN reaches the status row as `ctx ?`.
 	const window = knownContextWindow();
 	if (window === null) return Number.NaN;
+	// 0.40.0: the last bill is the truth when one describes the context;
+	// the parts estimate is for a session no bill describes yet.
+	const anchored = session.contextAnchor();
+	if (anchored !== undefined) return anchored / window;
 	return requestBudget(session.requestParts(), window).ratio;
+}
+
+/** 0.40.0 item 9: how long a prompt cache is assumed to live. PROVISIONAL:
+ *  DeepSeek does not publish its TTL (the owner's cache was gone after 27
+ *  minutes); Anthropic's default is 5 minutes. */
+export const COLD_AFTER_MS = 5 * 60_000;
+
+/**
+ * 0.40.0 item 9 — the cold resume. When the last BILL put the context over
+ * the microcompact threshold and that bill is older than COLD_AFTER_MS, the
+ * next request re-sends the whole prefix uncached. Compacting first turns
+ * that one expensive request into a summary call. Anchored only: a session
+ * no bill describes has no known size, and no age to call cold.
+ */
+export function coldResumeOffer(session: AgentSession, now: number = Date.now()): { tokens: number; minutes: number } | null {
+	const tokens = session.contextAnchor();
+	const at = session.lastUsageAt;
+	if (tokens === undefined || at === undefined) return null;
+	if (tokens <= microcompactThresholdFor() || now - at < COLD_AFTER_MS) return null;
+	return { tokens, minutes: Math.floor((now - at) / 60_000) };
 }
 
 /** A1a: the number the auto-compact decision reads — the pre-A1a estimate,
@@ -1682,6 +1706,20 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 		input.close();
 		await input.closed;
 		return { next: "exit" };
+	}
+	// 0.40.0 item 9: a big session whose cache has gone cold compacts BEFORE
+	// its first request, on the person's word — or without asking in
+	// dontAsk, where compacting is not an approval. A piped session is left
+	// to the auto policy, which fires above the hard tier on its own. Lines
+	// typed meanwhile queue behind the compaction.
+	const cold = process.stdin.isTTY ? coldResumeOffer(session) : null;
+	if (cold !== null) {
+		if (getMode() === "dontAsk") {
+			body.notice(`[dontAsk] ${coldResumeLine(cold.tokens, cold.minutes)} — compacting first`);
+			dispatch("/compact", dispatchCtx);
+		} else if ((await askPanel(input, coldResumeView(cold.tokens, cold.minutes))).action === "allow") {
+			dispatch("/compact", dispatchCtx);
+		}
 	}
 	// The REPL is ready: replay anything that arrived during recovery.
 	replReady = true;
