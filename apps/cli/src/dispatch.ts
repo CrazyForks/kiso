@@ -4,7 +4,7 @@
  * the context (the chain, the run state, the prompt arming).
  */
 
-import { contextRows, contextUnavailableRows, displayVerb, escapeTerminal, helpRows, kUnit, modePickView, modelPickView, compactingStatus, palette, renderEvent, settledLabel, slashCommandNames, type PickOption, type PickResult } from "@vincemakes/kiso-tui";
+import { contextRows, contextUnavailableRows, displayVerb, escapeTerminal, helpRows, kUnit, modePickView, modelPickView, compactingStatus, type CompactingProgress, palette, renderEvent, settledLabel, slashCommandNames, type PickOption, type PickResult } from "@vincemakes/kiso-tui";
 import { newSessionId } from "./session-id.js";
 import { buildAdapter, lookupModelMetadata, resolveContinuationScope, resolveReasoning } from "@vincemakes/kiso-runtime/internal";
 import type { AgentSession } from "@vincemakes/kiso-runtime";
@@ -788,6 +788,7 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 			};
 			ctx.input.onEscape(onEscape);
 			let compactStart = 0;
+			let repaintCompacting: () => void = () => {};
 			let compactTimer: ReturnType<typeof setInterval> | null = null;
 			// the `as` on the initializer keeps the flow type the full union —
 			// onStart fills this during the call, but a closure assignment
@@ -796,10 +797,16 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 			// the ctx estimate BEFORE the summarized event lands (the used
 			// fraction — the recap's "ctx 91% → 34%" drops after compacting)
 			let ctxBefore: string | null = null;
+			// 0.40.0: the summary call's progress against its output budget —
+			// the latest report, read by the row; the runtime reports per
+			// streamed chunk and the row repaints at most every 200 ms
+			let progress: CompactingProgress | null = null;
+			let lastProgressPaint = 0;
 			const compacting = (info: { rounds: number; tokens: number }): void => {
 				// 0.40.0: composed by the row seam, not a template here — the row
 				// is where the launch build's progress segment plugs in.
-				const text = (elapsed: number): string => compactingStatus("▘", info.rounds, info.tokens, elapsed, undefined, retryOnRow());
+				const text = (elapsed: number): string => compactingStatus("▘", info.rounds, info.tokens, elapsed, undefined, retryOnRow(), progress);
+				repaintCompacting = () => dock.setStatus(text(Math.round((Date.now() - compactStart) / 1000)), "esc to cancel");
 				compactStart = Date.now();
 				ctxBefore = ctxPercent(ctx.estimateCtx());
 				dock.setStatus(text(0), "esc to cancel");
@@ -825,6 +832,13 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 					onStart: (info) => {
 						compactInfo = info;
 						compacting(info);
+					},
+					onProgress: (p) => {
+						progress = { produced: p.produced, budget: p.budget, reasoningUnseen: p.reasoningUnseen };
+						const now = Date.now();
+						if (now - lastProgressPaint < 200) return;
+						lastProgressPaint = now;
+						repaintCompacting();
 					},
 				});
 				if (result === null) {
