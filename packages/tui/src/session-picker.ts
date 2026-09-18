@@ -51,15 +51,19 @@ export interface SessionCardView {
 }
 
 /** 0.40.0 — which sessions the picker shows. `here` is the running
- *  workspace's realpath; `all` is the person's choice; `fellBack` is the
- *  picker's own — CURRENT was empty while other sessions exist, and an
- *  empty picker over a non-empty store would read as "they are gone". */
+ *  workspace's realpath; `all` is the person's choice; `unknown` counts
+ *  the sessions with no recorded workspace (0.40.1), which the default view
+ *  hides behind one header row.
+ *
+ *  0.40.1 (owner's ruling): the default view NEVER falls back to all. The
+ *  fallback made every directory list every older session — 118 of them —
+ *  which is the view the scope exists to prevent. */
 export interface PickScopeState {
 	readonly here: string;
 	readonly all: boolean;
 	readonly inHere: number;
 	readonly total: number;
-	readonly fellBack: boolean;
+	readonly unknown: number;
 }
 
 /** The scope, as a pure function of the cards: CURRENT is the sessions
@@ -67,15 +71,13 @@ export interface PickScopeState {
  *  workspace is never "here" — unknown history is shown under ALL only. */
 export function scopeSessions(cards: readonly SessionCardView[], here: string, wantAll: boolean): { readonly cards: readonly SessionCardView[]; readonly scope: PickScopeState } {
 	const inHere = cards.filter((c) => c.workspace === here);
-	const fellBack = !wantAll && inHere.length === 0 && cards.length > 0;
-	const all = wantAll || fellBack;
-	return { cards: all ? cards : inHere, scope: { here, all, inHere: inHere.length, total: cards.length, fellBack } };
+	const unknown = cards.filter((c) => c.workspace === null || c.workspace === undefined).length;
+	return { cards: wantAll ? cards : inHere, scope: { here, all: wantAll, inHere: inHere.length, total: cards.length, unknown } };
 }
 
 /** The band's title — the scope and both counts, and the key that flips it. */
 export function scopeTitle(scope: PickScopeState | null): string {
 	if (scope === null) return "sessions";
-	if (scope.fellBack) return `sessions \u00b7 none from this workspace yet \u2014 all ${scope.total}`;
 	return scope.all
 		? `sessions \u00b7 all ${scope.total} \u00b7 tab this workspace (${scope.inHere})`
 		: `sessions \u00b7 this workspace ${scope.inHere} of ${scope.total} \u00b7 tab all`;
@@ -358,13 +360,21 @@ export interface SessionPickState {
 export function sessionPickerRows(state: SessionPickState, W: number, now: number): string[] {
 	const scope = state.scope ?? null;
 	const rows: string[] = [bandHeader(scopeTitle(scope), W)];
+	// 0.40.1: the sessions without a workspace, as ONE row under CURRENT —
+	// counted, never listed (tab shows them, labelled)
+	if (scope !== null && !scope.all && scope.unknown > 0) {
+		const p = palette();
+		rows.push(`${p.dim}${widthCut(`  ${scope.unknown} older session${scope.unknown === 1 ? "" : "s"} without a workspace \u00b7 tab all`, W)}${p.reset}`);
+	}
 	// a row is tagged with its workspace only when ALL is showing — under
 	// CURRENT every row is from here, and saying so eight times is noise
 	const here = scope !== null && scope.all ? scope.here : null;
 	const col = idColumn(state.cards);
 	if (state.matches.length === 0) {
 		const p = palette();
-		rows.push(`${p.dim}${widthCut("  no session matches", W)}${p.reset}`);
+		// an empty CURRENT view says why, rather than an empty band
+		const empty = scope !== null && !scope.all && scope.inHere === 0 ? "  no session from this workspace yet" : "  no session matches";
+		rows.push(`${p.dim}${widthCut(empty, W)}${p.reset}`);
 		rows.push(sessionCounterRow(0, 0, W));
 		return rows;
 	}
@@ -404,6 +414,15 @@ export function sessionListRow(card: SessionCardView, W: number, now: number, id
 export function sessionListFooter(count: number, W: number): string {
 	const p = palette();
 	return `${p.dim}${widthCut(`${count} session${count === 1 ? "" : "s"} · kiso resume picks interactively`, W)}${p.reset}`;
+}
+
+/** 0.40.1 — the `kiso sessions` TTY listing's line for the sessions with no
+ *  recorded workspace: counted, never listed, and the flag that lists them.
+ *  Empty when there are none. */
+export function sessionListUnknownLine(unknown: number, W: number): string {
+	if (unknown === 0) return "";
+	const p = palette();
+	return `${p.dim}${widthCut(`${unknown} older session${unknown === 1 ? "" : "s"} without a workspace \u00b7 --all`, W)}${p.reset}`;
 }
 
 /** 0.40.0 — the `kiso sessions` TTY listing's FIRST line: which sessions

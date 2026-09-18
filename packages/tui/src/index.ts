@@ -115,6 +115,7 @@ export {
 	sessionFilter,
 	sessionListFooter,
 	sessionListHeader,
+	sessionListUnknownLine,
 	sessionListRow,
 	sessionNote,
 	sessionPickerRows,

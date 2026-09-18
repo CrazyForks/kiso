@@ -146,7 +146,9 @@ kiso sessions [--all|--current]  list durable sessions, with their state
 
 `kiso resume` with no id opens a picker: one row per session, arrows to walk,
 type to filter, enter to continue. It opens on the sessions that started in
-this directory; tab shows every session, each tagged with where it started. Each row wears a **durability badge** — the
+this directory — only those; tab shows every session, each tagged with where it
+started. Sessions from before 0.40.0 recorded no workspace (no event in their
+log names one); they are counted in one line and listed under tab. Each row wears a **durability badge** — the
 state kiso will resume into, read from the session's own durable log:
 
 | badge | means | what `kiso resume` will do |

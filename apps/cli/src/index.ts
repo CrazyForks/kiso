@@ -31,7 +31,7 @@ import { createInterface } from "node:readline";
 import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
-import { Body, Editor, PROMPT, bannerLines, currentGround, resolveGround, setGround, escapeTerminal, extensionsBannerText, idColumn, idleStatus, interactivePrompt, palette, renderSessionLine, sessionListFooter, sessionListHeader, sessionListRow, type ResumeMeta, type SessionCardView } from "@vincemakes/kiso-tui";
+import { Body, Editor, PROMPT, bannerLines, currentGround, resolveGround, setGround, escapeTerminal, extensionsBannerText, idColumn, idleStatus, interactivePrompt, palette, renderSessionLine, sessionListFooter, sessionListHeader, sessionListRow, sessionListUnknownLine, type ResumeMeta, type SessionCardView } from "@vincemakes/kiso-tui";
 import {
 	createAgent,
 	disposeExtensions,
@@ -1635,6 +1635,12 @@ async function main(): Promise<void> {
 					const col = idColumn(cards);
 					const now = Date.now();
 					console.log(sessionListHeader(inHere.length, every.length, all, W));
+					// 0.40.1: the sessions with no workspace — one counted line, never
+					// listed, unless --all
+					if (!all) {
+						const unknownLine = sessionListUnknownLine(every.filter((c) => c.workspace === null).length, W);
+						if (unknownLine !== "") console.log(unknownLine);
+					}
 					for (const card of cards) console.log(sessionListRow(card, W, now, col, all ? here : null));
 					console.log(sessionListFooter(cards.length, W));
 				} else {
