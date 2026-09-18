@@ -89,8 +89,16 @@ export interface LoopConfig {
 	 * the projection derives the same cleared view from the same events,
 	 * byte for byte, across crash/resume. Never a per-turn progressive
 	 * clearing.
+	 *
+	 * `measure` (0.40.0): what the context holds, as the caller knows it —
+	 * the runtime anchors it on the last BILLED request. Absent, the
+	 * estimate over the projected messages decides, as before.
 	 */
-	readonly microcompact?: { readonly thresholdTokens: number; readonly keepResults?: number };
+	readonly microcompact?: {
+		readonly thresholdTokens: number;
+		readonly keepResults?: number;
+		readonly measure?: (events: readonly Event[], messages: readonly Message[]) => number;
+	};
 	readonly signal?: AbortSignalLike;
 	readonly temperature?: number;
 	readonly maxTokens?: number;
@@ -581,8 +589,9 @@ export async function* loop(config: LoopConfig): AsyncGenerator<Event> {
 		turns += 1;
 
 		// ── C area: one-shot microcompact boundary when over the threshold ──
-		if (config.microcompact !== undefined && estimateTokens(messages) > config.microcompact.thresholdTokens) {
-			const beforeSeq = microcompactBoundarySeq(log.all, config.microcompact.keepResults ?? KEEP_COMPACTABLE_RESULTS);
+		const mc = config.microcompact;
+		if (mc !== undefined && (mc.measure !== undefined ? mc.measure(log.all, messages) : estimateTokens(messages)) > mc.thresholdTokens) {
+			const beforeSeq = microcompactBoundarySeq(log.all, mc.keepResults ?? KEEP_COMPACTABLE_RESULTS);
 			if (beforeSeq !== undefined) {
 				const full = log.append({ type: "microcompacted", beforeSeq });
 				if (hooks.onEvent) await hooks.onEvent(full, {}).catch(() => {});

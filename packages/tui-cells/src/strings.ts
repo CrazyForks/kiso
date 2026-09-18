@@ -162,6 +162,33 @@ export function unansweredAskView(executionId: string): PanelView {
 	};
 }
 
+/**
+ * 0.40.0 (the owner's session) — the cold resume. A session resumed 27
+ * minutes after its last request re-sent a 727k prefix the provider had
+ * evicted. The first request after a long pause pays for the whole prefix
+ * either way; compacting first turns that one expensive request into a
+ * summary call, and every turn after it is small. The line names the size
+ * and the age, so the person can judge.
+ */
+export function coldResumeLine(tokens: number, minutesAgo: number): string {
+	return `this session is ${Math.round(tokens / 1000)}k tokens, last used ${minutesAgo} min ago, and its cache is cold`;
+}
+
+export function coldResumeView(tokens: number, minutesAgo: number): PanelView {
+	const line = coldResumeLine(tokens, minutesAgo);
+	return {
+		flavor: "simple",
+		name: "cold cache",
+		title: `compact first? (${Math.round(tokens / 1000)}k tokens, ${minutesAgo} min idle)`,
+		speaker: "kiso",
+		statusText: "❯ resumed session",
+		args: { kind: "text", lines: [line, "compacting first is one summary call, then every turn is cheap"] },
+		ruleOverride: `${line} — compact first? (one summary call, then every turn is cheap)`,
+		simpleOptions: ["compact first", "keep the full history"],
+		fallbackQuestion: `${line} — compact first? (y)es / (n)o `,
+	};
+}
+
 /** An extension as the banner names it — the live `connecting` flag is
  *  the MCP bridge's in-flight state ("mcp (connecting…)"). Structural on
  *  purpose: the runtime's KisoExtension satisfies it without this

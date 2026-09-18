@@ -61,3 +61,19 @@ describe("A1a — display counts the parts, the policy does not move", () => {
 		expect(Number.isFinite(autoCompactRatio(session))).toBe(true);
 	});
 });
+
+describe("0.40.0 — the row and the policy read the last BILL when one describes the context", () => {
+	it("a CJK context billed at 600k on a 1M window reads ~60% used on the row and to the policy, not the estimate's sliver", async () => {
+		const store = new SessionStore(mkdtempSync(join(tmpdir(), "kiso-a1a-bill-")));
+		await store.append("b", "r1", { seq: 0, type: "user_input", content: "\u4e2d\u6587".repeat(500) });
+		await store.append("b", "r1", { seq: 1, type: "usage", inputTokens: 600_000, outputTokens: 2_000, cacheRead: 599_000, cacheWrite: null, known: true });
+		await store.append("b", "r1", { seq: 2, type: "stop", reason: "end_turn" });
+		await store.append("b", "r1", { seq: 3, type: "terminal", outcome: { kind: "completed" } });
+		const agent = createAgent({ model: "faux", store, tools: [], adapter });
+		const session = await agent.session({ id: "b" });
+		setConfiguredWindow(1_000_000);
+		expect(displayCtxRatio(session)).toBeCloseTo(0.602, 3);
+		expect(autoCompactRatio(session)).toBeCloseTo(0.602, 3);
+		setConfiguredWindow(undefined);
+	});
+});

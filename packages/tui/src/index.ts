@@ -162,4 +162,4 @@ export { resolveGround, type Ground } from "@vincemakes/kiso-tui-cells";
 // one duration form: the CLI's own surfaces label a settled duration the
 // way a settled card does, rather than writing a second one.
 export { settledLabel } from "@vincemakes/kiso-tui-cells";
-export { KEY_BINDINGS, PANEL_KEYS_ROW, displayVerb, extensionsBannerText, helpRows, keysHelpRow, keysSheetRows, slashCommandNames, unansweredAskView, type BannerExtension, type KeyBinding } from "./strings.js";
+export { KEY_BINDINGS, PANEL_KEYS_ROW, coldResumeLine, coldResumeView, displayVerb, extensionsBannerText, helpRows, keysHelpRow, keysSheetRows, slashCommandNames, unansweredAskView, type BannerExtension, type KeyBinding } from "./strings.js";

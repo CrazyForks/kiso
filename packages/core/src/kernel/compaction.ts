@@ -38,12 +38,31 @@ const NON_TEXT_BLOCK_TOKENS = 8;
  * tokens, and the live microcompact threshold believed it.
  */
 function contentTokens(content: string | readonly ContentBlock[]): number {
-	if (typeof content === "string") return Math.ceil(content.length / 4);
+	if (typeof content === "string") return textTokens(content);
 	let tokens = 0;
 	for (const block of content) {
-		tokens += block.type === "text" ? Math.ceil(block.text.length / 4) : NON_TEXT_BLOCK_TOKENS;
+		tokens += block.type === "text" ? textTokens(block.text) : NON_TEXT_BLOCK_TOKENS;
 	}
 	return tokens;
+}
+
+/**
+ * 0.40.0 (the owner's session): chars/4, except that a CJK character counts
+ * as one token — which is about what a tokenizer spends on one. Plain
+ * chars/4 read a Chinese-heavy 730k context as ~470k, so the thresholds
+ * never fired and the ctx row lied. Text without CJK scores exactly what
+ * it scored before. A counting loop, not a regex match: the text can be
+ * megabytes, and a match array would hold one entry per character.
+ */
+function textTokens(text: string): number {
+	let cjk = 0;
+	for (let i = 0; i < text.length; i++) {
+		const c = text.charCodeAt(i);
+		// kana, CJK ext A, unified ideographs, Hangul syllables,
+		// compatibility ideographs, full-width forms
+		if ((c >= 0x3040 && c <= 0x30ff) || (c >= 0x3400 && c <= 0x4dbf) || (c >= 0x4e00 && c <= 0x9fff) || (c >= 0xac00 && c <= 0xd7af) || (c >= 0xf900 && c <= 0xfaff) || (c >= 0xff00 && c <= 0xffef)) cjk++;
+	}
+	return cjk + Math.ceil((text.length - cjk) / 4);
 }
 
 /**
@@ -62,8 +81,8 @@ export function estimateTokens(messages: readonly Message[]): number {
 			for (const block of msg.blocks) {
 				total +=
 					block.type === "text"
-						? Math.ceil(block.text.length / 4)
-						: Math.ceil(JSON.stringify(block.input).length / 4) + 20;
+						? textTokens(block.text)
+						: textTokens(JSON.stringify(block.input)) + 20;
 			}
 		} else {
 			total += contentTokens(msg.content) + 10;
