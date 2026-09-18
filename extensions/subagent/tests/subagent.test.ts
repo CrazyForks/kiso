@@ -125,6 +125,8 @@ describe("④ subagent: real child processes", () => {
 		const r = (await delegate.execute({ tasks: [{ role: "tester", task: "slow work" }] }, ctx)) as { content: string; isError: boolean };
 		expect(r.isError).toBe(true);
 		expect(String(r.content)).toContain("timed out");
+		// 0.40.0: the settled row's marker says WHY it failed
+		expect(String(r.content).split("\n")[0]).toMatch(/^summary: 1 task · \d+ tool calls · 1 role · 1 failed \(1 timeout\)$/);
 		expect(Date.now() - started).toBeLessThan(10_000); // timely — never the full 30s
 		// The child process group is dead.
 		await sleep(500);
@@ -202,7 +204,7 @@ describe("④ subagent: real child processes", () => {
 		const { logPeak, psPeak, snapshot, psSnapshot } = await probe;
 		// 1. every child completed — a failed child is a different finding than a broken cap
 		expect(r.isError).toBe(false);
-		expect(r.content.split("\n")[0]).toMatch(/^summary: \d+ tool calls · 1 role · 0 failed$/);
+		expect(r.content.split("\n")[0]).toMatch(/^summary: 6 tasks · \d+ tool calls · 1 role · 0 failed$/);
 		// 2. the cap, on the metric it governs
 		expect(psPeak, `live child processes at the peak:\n${psSnapshot.join("\n")}`).toBeLessThanOrEqual(4);
 		expect(psPeak, "live child processes at the peak").toBeGreaterThanOrEqual(2); // genuinely concurrent
@@ -253,7 +255,7 @@ describe("④ subagent: real child processes", () => {
 		// W12: the blob OPENS with the machine-readable summary line the
 		// TUI's settled row renders (the per-section text is preserved
 		// below it — the model's view is unchanged)
-		expect(String(r2.content)).toMatch(/^summary: 0 tool calls · 1 role · 0 failed\n/);
+		expect(String(r2.content)).toMatch(/^summary: 1 task · 0 tool calls · 1 role · 0 failed\n/);
 	}, 120_000);
 
 	it("P3: the child session id uses ctx.sessionId when the loop provides it", async () => {
