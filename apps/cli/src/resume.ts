@@ -6,7 +6,7 @@
 import { idleStatus, runningStatus, type RunUsage } from "@vincemakes/kiso-tui";
 import type { AgentSession } from "@vincemakes/kiso-runtime";
 import { getMode } from "./mode.js";
-import { agentModel, dock, type LineInput } from "./state.js";
+import { agentModel, dock, retryOnRow, type LineInput } from "./state.js";
 import { pendingAsk, resolveUncertains } from "./trust-ui.js";
 import { failOnFauxExhaustion } from "./faux-glue.js";
 import { consumeRun, estimateCtxRatio, startStatusSpinner } from "./chat.js";
@@ -30,7 +30,7 @@ export async function resume(session: AgentSession, prompt: string | undefined, 
 	// ONE formatter now — the running row was duplicated verbatim.
 	const statusCb = (u: RunUsage, ctx: number): void => {
 		runUsage = u;
-		if (dock.active) dock.setStatus(runningStatus(runGlyph, runStart, u.out, ctx));
+		if (dock.active) dock.setStatus(runningStatus(runGlyph, runStart, u.out, ctx, null, process.stdout.columns > 0 ? process.stdout.columns : 80, retryOnRow()));
 	};
 	// the recovery flow prints the BARE mode (chat spells plan's posture) —
 	// the extraction keeps that difference, it was not asked to settle it.

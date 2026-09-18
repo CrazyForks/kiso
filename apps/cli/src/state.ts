@@ -347,6 +347,30 @@ export function setMergedConfig(value: import("./config.js").KisoConfig): void {
 	mergedConfig = value;
 }
 
+/** ADR-0005 Amendment 2: the retry the kernel announced and is waiting
+ *  on, for the running and compacting rows — `until` is the wall-clock
+ *  end of the wait. Null when no retry is pending. Cleared by the next
+ *  event from the run, which means the attempt got through, and wherever
+ *  a run or a compaction starts and ends. */
+export interface RetryShown {
+	readonly attempt: number;
+	readonly maxRetries: number;
+	readonly code: string;
+	readonly until: number;
+}
+export let retryShown: RetryShown | null = null;
+export function setRetryShown(value: RetryShown | null): void {
+	retryShown = value;
+}
+
+/** The pending retry as a row shows it, with the time left computed NOW:
+ *  the rows repaint on their own timers, so the countdown moves between
+ *  the kernel's announcements. */
+export function retryOnRow(): import("@vincemakes/kiso-tui").RetryOnRow | null {
+	const r = retryShown;
+	return r === null ? null : { attempt: r.attempt, maxRetries: r.maxRetries, code: r.code, remainingMs: r.until - Date.now() };
+}
+
 /** merge round B: the resolved context window (env > config.contextWindow) —
  *  chat.ts's contextWindowTokens() consults it before the env. */
 export let configuredWindow: number | undefined;

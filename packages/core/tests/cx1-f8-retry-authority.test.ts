@@ -53,15 +53,24 @@ describe("CX-1 F8 — the kernel honors Retry-After", () => {
 		expect(terminalOf(events)?.outcome.kind).toBe("completed");
 	});
 
-	it("no Retry-After: the ladder is 250, 500 — computed before the attempt counter advances (the 2026-09-07 review's P3 measured 502 ms for the first)", async () => {
+	// RETIRED at 0.40.0 with the rule it stated: "the ladder is 250, 500"
+	// — CX-1 F8's `max(n × 250 ms, Retry-After)`. ADR-0005 Amendment 2
+	// replaced that curve: it spent the whole default budget in 750 ms,
+	// which is no budget against a gateway that drops a stream and comes
+	// back. What SURVIVES from this case is the half that was never about
+	// the numbers — the 2026-09-07 review's P3: the first retry's delay is
+	// computed for attempt ONE, before the counter advances. It is asserted
+	// again below against the new curve, where the off-by-one would show as
+	// a first wait from the n = 2 band (1,000–1,250 ms) instead of n = 1's.
+	it("no Retry-After: the new ladder is 500 then 1,000 (+≤25% jitter) — and the FIRST wait is attempt one's (P3)", async () => {
 		const f = flaky({ code: "rate_limit", retryable: true, message: "429" }, 2);
 		const events = await run(f.adapter, 2);
 		expect(f.calls()).toBe(3);
 		const [t0, t1, t2] = f.at() as [number, number, number];
-		expect(t1 - t0).toBeGreaterThanOrEqual(240);
-		expect(t1 - t0).toBeLessThan(450); // the off-by-one gave ~500
-		expect(t2 - t1).toBeGreaterThanOrEqual(490);
-		expect(t2 - t1).toBeLessThan(700); // the off-by-one gave ~750
+		expect(t1 - t0).toBeGreaterThanOrEqual(490);
+		expect(t1 - t0).toBeLessThan(900); // the off-by-one would give 1,000–1,250
+		expect(t2 - t1).toBeGreaterThanOrEqual(990);
+		expect(t2 - t1).toBeLessThan(1_600);
 		expect(terminalOf(events)?.outcome.kind).toBe("completed");
 	});
 

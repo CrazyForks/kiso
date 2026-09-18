@@ -74,6 +74,7 @@
   "apps/cli/tests/reload-pty.test.ts",
   "apps/cli/tests/resume-clear.test.ts",
   "apps/cli/tests/resume-workspace-scope-pty.test.ts",
+  "apps/cli/tests/retry-row-pty.test.ts",
   "apps/cli/tests/scoped-read-e2e.test.ts",
   "apps/cli/tests/scrollback-flood.test.ts",
   "apps/cli/tests/session-id-identity.test.ts",

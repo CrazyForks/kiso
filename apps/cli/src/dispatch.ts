@@ -10,7 +10,7 @@ import { buildAdapter, lookupModelMetadata, resolveContinuationScope, resolveRea
 import type { AgentSession } from "@vincemakes/kiso-runtime";
 import { MODES, MODE_NOTE, getMode, setMode } from "./mode.js";
 import { clipboardWrite, lastAnswer } from "./clipboard.js";
-import { agentModel, body, bodyLog, codingToolOptions, kisoHome, configModels, dock, lastBinding, loadedSkillsCatalog, mergedConfig, readContextLedger, sessionsDir, setAgentModel, setConfiguredWindow, setCurrentModelName, setModelChoice, type LineInput , setLastBinding } from "./state.js";
+import { agentModel, body, bodyLog, codingToolOptions, kisoHome, configModels, dock, lastBinding, loadedSkillsCatalog, mergedConfig, readContextLedger, retryOnRow, sessionsDir, setAgentModel, setConfiguredWindow, setCurrentModelName, setModelChoice, setRetryShown, type LineInput , setLastBinding } from "./state.js";
 import { adapterOptionsFor } from "./auth/adapter-options.js";
 import { microcompactThresholdFor } from "./chat.js";
 import { authForProfile, directWriteProfile, profileAvailable, resolveContextWindow, unavailableReason, type ModelProfile } from "./config.js";
@@ -799,7 +799,7 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 			const compacting = (info: { rounds: number; tokens: number }): void => {
 				// 0.40.0: composed by the row seam, not a template here — the row
 				// is where the launch build's progress segment plugs in.
-				const text = (elapsed: number): string => compactingStatus("▘", info.rounds, info.tokens, elapsed);
+				const text = (elapsed: number): string => compactingStatus("▘", info.rounds, info.tokens, elapsed, undefined, retryOnRow());
 				compactStart = Date.now();
 				ctxBefore = ctxPercent(ctx.estimateCtx());
 				dock.setStatus(text(0), "esc to cancel");
@@ -812,6 +812,7 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 				// the summary ("keep the auth details"); bare /compact is
 				// byte-identical to the pre-round call.
 				const focus = trimmed.slice(8).trim();
+				setRetryShown(null);
 				const result = await ctx.session.summarize({
 					signal: abort.signal,
 					// 0.39.2: the gesture gets the measured output budget and
@@ -884,6 +885,9 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 				}
 			} finally {
 				if (compactTimer !== null) clearInterval(compactTimer);
+				// ADR-0005 Amendment 2: a retry belongs to the call that
+				// announced it — none may outlive the compaction into the idle row.
+				setRetryShown(null);
 				ctx.paintIdle();
 			}
 			ctx.input.prompt();
