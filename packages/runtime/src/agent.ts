@@ -236,7 +236,16 @@ export class AgentRuntime {
 			...(this.#definition.streamIdleMs !== undefined ? { streamIdleMs: this.#definition.streamIdleMs } : {}),
 			...(this.#definition.extensions !== undefined ? { extensions: this.#definition.extensions } : {}),
 		};
-		return new AgentSession(options.id, log, store, adapter, config);
+		// 0.40.0: the last bill's time rides the RECORD, not the event.
+		let lastUsageAt: number | undefined;
+		for (let i = records.length - 1; i >= 0; i--) {
+			const e = records[i]!.event;
+			if (e.type === "usage" && e.known) {
+				lastUsageAt = records[i]!.ts;
+				break;
+			}
+		}
+		return new AgentSession(options.id, log, store, adapter, config, lastUsageAt);
 	}
 }
 

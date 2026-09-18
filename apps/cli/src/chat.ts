@@ -23,7 +23,7 @@ import {
 	type RenderInput,
 	type RunUsage,
 } from "@vincemakes/kiso-tui";
-import { askView, deletionRiskHint, editFileDiff, writeFileDiff, type DiffResult, type SaferAnswer, type SaferFailure, type SaferOption } from "@vincemakes/kiso-tui";
+import { askView, coldResumeLine, coldResumeView, deletionRiskHint, editFileDiff, writeFileDiff, type DiffResult, type SaferAnswer, type SaferFailure, type SaferOption } from "@vincemakes/kiso-tui";
 import { canonicalTargetPath, shellProgressPath } from "@vincemakes/kiso-tools-node";
 import { echoText } from "@vincemakes/kiso-tui-cells/render";
 import { canonicalizeUsage } from "@vincemakes/kiso-runtime";
@@ -200,6 +200,26 @@ export function displayCtxRatio(session: AgentSession): number {
 	const anchored = session.contextAnchor();
 	if (anchored !== undefined) return anchored / window;
 	return requestBudget(session.requestParts(), window).ratio;
+}
+
+/** 0.40.0 item 9: how long a prompt cache is assumed to live. PROVISIONAL:
+ *  DeepSeek does not publish its TTL (the owner's cache was gone after 27
+ *  minutes); Anthropic's default is 5 minutes. */
+export const COLD_AFTER_MS = 5 * 60_000;
+
+/**
+ * 0.40.0 item 9 — the cold resume. When the last BILL put the context over
+ * the microcompact threshold and that bill is older than COLD_AFTER_MS, the
+ * next request re-sends the whole prefix uncached. Compacting first turns
+ * that one expensive request into a summary call. Anchored only: a session
+ * no bill describes has no known size, and no age to call cold.
+ */
+export function coldResumeOffer(session: AgentSession, now: number = Date.now()): { tokens: number; minutes: number } | null {
+	const tokens = session.contextAnchor();
+	const at = session.lastUsageAt;
+	if (tokens === undefined || at === undefined) return null;
+	if (tokens <= microcompactThresholdFor() || now - at < COLD_AFTER_MS) return null;
+	return { tokens, minutes: Math.floor((now - at) / 60_000) };
 }
 
 /** A1a: the number the auto-compact decision reads — the pre-A1a estimate,
@@ -1686,6 +1706,20 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 		input.close();
 		await input.closed;
 		return { next: "exit" };
+	}
+	// 0.40.0 item 9: a big session whose cache has gone cold compacts BEFORE
+	// its first request, on the person's word — or without asking in
+	// dontAsk, where compacting is not an approval. A piped session is left
+	// to the auto policy, which fires above the hard tier on its own. Lines
+	// typed meanwhile queue behind the compaction.
+	const cold = process.stdin.isTTY ? coldResumeOffer(session) : null;
+	if (cold !== null) {
+		if (getMode() === "dontAsk") {
+			body.notice(`[dontAsk] ${coldResumeLine(cold.tokens, cold.minutes)} — compacting first`);
+			dispatch("/compact", dispatchCtx);
+		} else if ((await askPanel(input, coldResumeView(cold.tokens, cold.minutes))).action === "allow") {
+			dispatch("/compact", dispatchCtx);
+		}
 	}
 	// The REPL is ready: replay anything that arrived during recovery.
 	replReady = true;

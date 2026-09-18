@@ -222,6 +222,14 @@ export class AgentSession {
 	#summaryFailures = 0;
 	/** 0.40.0: usage at or before this seq was billed under another model — never an anchor. */
 	#anchorFloorSeq = -1;
+	#lastUsageAt: number | undefined;
+
+	/** 0.40.0: when the provider last billed this session (epoch ms) — the
+	 *  record's time on load, the write's time after. A provider's prompt
+	 *  cache expires with time, so an old bill means a cold prefix. */
+	get lastUsageAt(): number | undefined {
+		return this.#lastUsageAt;
+	}
 
 	/** Permanently invalidate the session after a rejected disk write (round 1). */
 	poison(reason: string): void {
@@ -234,7 +242,8 @@ export class AgentSession {
 
 	readonly #activeRuns = new Set<Run>();
 
-	constructor(id: string, log: EventLog, store: SessionStore, adapter: Adapter, config: SessionConfig) {
+	constructor(id: string, log: EventLog, store: SessionStore, adapter: Adapter, config: SessionConfig, lastUsageAt?: number) {
+		this.#lastUsageAt = lastUsageAt;
 		this.id = id;
 		this.log = log;
 		this.#store = store;
@@ -287,6 +296,7 @@ export class AgentSession {
 		this.ensureHealthy();
 		try {
 			await this.#store.append(this.id, runId, event);
+			if (event.type === "usage" && event.known) this.#lastUsageAt = Date.now();
 		} catch (err) {
 			// round 4: ANY rejected write poisons — not only the typed
 			// stale/corruption errors. A live external writer's lock error
