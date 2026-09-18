@@ -24,12 +24,12 @@ list of things the core deliberately refuses to own.
 $ npm run size
 
 core:
-  packages/core/src/kernel/loop.ts      888
+  packages/core/src/kernel/loop.ts      897
   packages/core/src/protocol/events.ts  490
   packages/core/src/kernel/project.ts   360
   ...
-  total                                2159  / 2200
-  ✓ 41 lines of headroom remaining.
+  total                                2176  / 2200
+  ✓ 24 lines of headroom remaining.
 
 cli:
   apps/cli/src/index.ts     981

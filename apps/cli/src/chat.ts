@@ -32,7 +32,7 @@ import type { AgentSession, Run } from "@vincemakes/kiso-runtime";
 import type { UserInputVia } from "@vincemakes/kiso-core";
 import { dispatch, type DispatchCtx, abortBangCommand } from "./dispatch.js";
 import { paintWindowTitle } from "./window-title.js";
-import { agentBaseUrl, agentModel, body, bodyLog, configuredWindow, dock, type LineInput } from "./state.js";
+import { agentBaseUrl, agentModel, body, bodyLog, configuredWindow, dock, retryOnRow, retryShown, setRetryShown, type LineInput } from "./state.js";
 import { attachImages } from "./attachments.js";
 import { lookupModelMetadata } from "@vincemakes/kiso-runtime/internal";
 import { addDontAskAgainRule, askPanel, fixHintFor, pendingAsk, resolveUncertains } from "./trust-ui.js";
@@ -397,6 +397,11 @@ export function turnUsageLedger(): {
  *  is gone) — docked only, 200ms rotation between the request and the
  *  first event. */
 export function startStatusSpinner(onTick: (glyph: string) => void): () => void {
+	// ADR-0005 Amendment 2: a retry belongs to the run that announced it.
+	// Cleared where every run starts and stops — the chat's and the
+	// recovery flow's alike — so a stale countdown can never survive into
+	// the idle row or the next turn.
+	setRetryShown(null);
 	if (!dock.active) return () => {};
 	// v3 §03/§05: the working glyph family ▖▘▝▗, 200ms rotation — the
 	// callback repaints the running status line with the new glyph.
@@ -404,7 +409,10 @@ export function startStatusSpinner(onTick: (glyph: string) => void): () => void 
 	let i = 0;
 	const timer = setInterval(() => onTick(STATUS_GLYPHS[i++ % STATUS_GLYPHS.length]!), 200);
 	timer.unref();
-	return () => clearInterval(timer);
+	return () => {
+		clearInterval(timer);
+		setRetryShown(null);
+	};
 }
 
 /**
@@ -829,6 +837,9 @@ export async function consumeRun(
 	try {
 	for await (const ev of run) {
 		last = ev;
+		// ADR-0005 Amendment 2: an event from the run means the retried
+		// attempt got through — the row stops saying it is waiting.
+		if (retryShown !== null) setRetryShown(null);
 		// LT2B-F1: a turn count is not evidence of a loop. Keep consuming
 		// healthy runs without a periodic presence check; explicit cancellation,
 		// the stream watchdog and the repeated-failure breaker remain active.
@@ -1441,7 +1452,11 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 	// KC2 §5: the STATE (the glyph, the run's start, the usage, the dock)
 	// stays here; the ROW's text is the tui's status formatter.
 	const paintRunning = (): void => {
-		if (dock.active) dock.setStatus(runningStatus(runGlyph, runStart, runUsage.out, displayCtxRatio(session), lastTokPerSec));
+		// ADR-0005 Amendment 2: the running row gets the idle row's budget
+		// (DF-0330-F1). A pending retry makes it thirty columns longer, and
+		// composed blind it would be cut from the END — the context figure,
+		// a fact, going before the gesture hints.
+		if (dock.active) dock.setStatus(runningStatus(runGlyph, runStart, runUsage.out, displayCtxRatio(session), lastTokPerSec, rowWidth(), retryOnRow()));
 	};
 	// W19: under plan the idle row makes the posture unmistakable — the W4
 	// parentheses idiom names the read-only constraint. The tier is the

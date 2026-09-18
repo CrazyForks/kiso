@@ -643,6 +643,13 @@ export class AgentSession {
 					? { maxOutputTokens: MANUAL_SUMMARY_BUDGET, ...summaryReasoning(binding.model, binding.baseUrl) }
 					: { maxOutputTokens: SUMMARY_MAX_OUTPUT }),
 				...(options.signal !== undefined ? { signal: options.signal } : {}),
+				// ADR-0005 Amendment 2: the kernel's retry budget and its
+				// announcement, for the one call that does not go through the
+				// kernel — the manual gesture and the auto policy alike.
+				...(this.#config.maxRetries !== undefined ? { maxRetries: this.#config.maxRetries } : {}),
+				onRetry: async (info) => {
+					await this.#config.hooks?.onRetry?.(info, {});
+				},
 			});
 			summary = call.text;
 			usage = call.usage;

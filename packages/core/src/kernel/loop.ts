@@ -145,10 +145,28 @@ export interface LoopConfig {
  * as they were, and one line says what changed.
  */
 export const DEFAULT_MAX_TURNS = Number.POSITIVE_INFINITY;
-export const DEFAULT_MAX_RETRIES = 2;
+/** ADR-0005 Amendment 2: ten, about 2.7 minutes of backoff before a turn
+ *  gives up. It was 2 — three attempts inside 750 ms, which is no budget
+ *  at all against a gateway that drops a stream and comes back. */
+export const DEFAULT_MAX_RETRIES = 10;
 /** CX-1 F8: the longest Retry-After the kernel will honor; beyond it the
  *  run stops with an explicit error rather than waiting or retrying early. */
 export const RETRY_AFTER_MAX_MS = 60_000;
+
+/**
+ * ADR-0005 Amendment 2 — the n-th retry's delay: exponential from 500 ms,
+ * capped at 32 s, plus up to 25% of that as jitter, and never shorter than
+ * the provider's Retry-After. 0.5 / 1 / 2 / 4 / 8 / 16 / 32 … seconds.
+ *
+ * It replaced `max(n × 250 ms, Retry-After)` (CX-1 F8), under which the
+ * whole default budget was spent in 750 ms. The jitter keeps many sessions
+ * behind one gateway from retrying in lockstep. `random` is a parameter so
+ * the curve can be asserted; the loop uses the real one.
+ */
+export function retryDelayMs(n: number, retryAfterMs?: number, random: () => number = Math.random): number {
+	const base = Math.min(500 * 2 ** (n - 1), 32_000);
+	return Math.max(retryAfterMs ?? 0, Math.round(base + random() * 0.25 * base));
+}
 
 export async function* loop(config: LoopConfig): AsyncGenerator<Event> {
 	const log = config.log ?? new EventLog();
@@ -729,13 +747,22 @@ export async function* loop(config: LoopConfig): AsyncGenerator<Event> {
 					return;
 				}
 				let structured = toStructuredError(err);
-				// CX-1 F8 (ruled: the kernel owns retries): the n-th retry waits
-				// max(n × 250 ms, the provider's Retry-After), abortable — computed
-				// BEFORE `attempts` advances (the 2026-09-07 review's P3: computed
-				// after it, the first wait was 500 ms). A wait above the cap is
-				// never shortened — the run stops with an explicit error instead.
-				const retryWait = (): number => Math.max((attempts + 1) * 250, structured.retryAfterMs ?? 0);
-				if (structured.retryable && attempts < maxRetries && retryWait() > RETRY_AFTER_MAX_MS) {
+				// CX-1 F8 (ruled: the kernel owns retries), ADR-0005 Amendment 2:
+				// the delay for THIS failure, computed once — BEFORE `attempts`
+				// advances (the 2026-09-07 review's P3), and ONCE, because it is
+				// jittered: the cap check and the sleep must read the same number,
+				// or they could disagree about whether the wait was allowed. A wait
+				// above the cap is never shortened — the run stops with an explicit
+				// error instead.
+				const delay = retryDelayMs(attempts + 1, structured.retryAfterMs);
+				// Observation only (Amendment 2): the retry is announced before the
+				// wait so a surface can show it — a long retry with nothing on
+				// screen is indistinguishable from a hung session. It cannot change
+				// the decision, and a throw is swallowed exactly as onEvent's is.
+				const announce = async (midStream: boolean): Promise<void> => {
+					if (hooks.onRetry) await hooks.onRetry({ attempt: attempts + 1, maxRetries, code: structured.code, delayMs: delay, midStream }, {}).catch(() => {});
+				};
+				if (structured.retryable && attempts < maxRetries && delay > RETRY_AFTER_MAX_MS) {
 					structured = {
 						...structured,
 						retryable: false,
@@ -746,7 +773,8 @@ export async function* loop(config: LoopConfig): AsyncGenerator<Event> {
 				// content — duplicates are worse than failures. Nothing streamed
 				// yet: the cheap in-place retry (no draft exists to void).
 				if (structured.retryable && !streamed && attempts < maxRetries) {
-					await sleep(retryWait(), signal); // abortable backoff, Retry-After honored
+					await announce(false);
+					await sleep(delay, signal); // abortable backoff, Retry-After honored
 					attempts += 1;
 					continue;
 				}
@@ -761,7 +789,8 @@ export async function* loop(config: LoopConfig): AsyncGenerator<Event> {
 				// F4 — the mid-stream retry: same classification, same per-turn
 				// budget (ADR-0005 Amendment 1: frame state, per-process).
 				if (structured.retryable && attempts < maxRetries && !unsafeStartedInDraft()) {
-					await sleep(retryWait(), signal); // the same abortable backoff, Retry-After honored
+					await announce(true);
+					await sleep(delay, signal); // the same abortable backoff, Retry-After honored
 					attempts += 1;
 					// Fresh per-attempt state — the marker is the boundary now.
 					pending.length = 0;

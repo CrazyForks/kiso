@@ -54,6 +54,10 @@ export interface FauxFail {
 	readonly status?: number;
 	readonly retryable: boolean;
 	readonly message?: string;
+	/** ADR-0005 Amendment 2: a provider's Retry-After, normalized the way
+	 *  the real adapters normalize it — the floor under the kernel's wait,
+	 *  so a gate can hold a retry on screen for as long as it needs to. */
+	readonly retryAfterMs?: number;
 }
 
 export type FauxScript = readonly FauxTurn[];
@@ -93,6 +97,7 @@ export function createFauxProvider(script: FauxScript): Adapter {
 								...(ev.status !== undefined ? { status: ev.status } : {}),
 								retryable: ev.retryable,
 								message: ev.message ?? ev.code,
+								...(ev.retryAfterMs !== undefined ? { retryAfterMs: ev.retryAfterMs } : {}),
 							};
 						}
 						yield { ...ev, seq: seq++ } as AdapterEvent;
