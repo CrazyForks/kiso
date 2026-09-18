@@ -31,7 +31,7 @@ export type SkillOutcome =
 export function resolveSkillLine(trimmed: string, catalog: SkillsCatalog | null, builtins: readonly string[]): SkillOutcome | null {
 	if (trimmed.includes("\n") || !trimmed.startsWith("/")) return null;
 	const [word = "", ...rest] = trimmed.split(/\s+/);
-	if (word === "/skills") return rest.length === 0 ? { kind: "list" } : null;
+	if (word === "/skills") return rest.length === 0 ? { kind: "list" } : { kind: "error", message: "usage: /skills (no arguments) — /skill <name> [args] runs one" };
 	if (word === "/skill") {
 		const [name = ""] = rest;
 		if (name === "") return { kind: "error", message: "usage: /skill <name> [args…] — /skills lists them" };
@@ -98,18 +98,26 @@ function distance(a: string, b: string): number {
 	return row[b.length]!;
 }
 
-/** `/skills` — one row per skill, `name — description`, a `model only` tag
- *  for `user-invocable: false`, then the broken entries with the loader's
- *  own reason. Each row names the directory the skill really lives in:
- *  project and user skills are merged into one scan directory by symlink,
- *  so the scan root would name a temp directory nobody can find —
- *  `sourceOf` resolves the entry's directory to where it came from. */
+/** `/skills` — the skills grouped by the directory they really live in,
+ *  each directory named ONCE as a header: project and user skills are
+ *  merged into one scan directory by symlink, so the scan root would name a
+ *  temp directory nobody can find — `sourceOf` resolves an entry's
+ *  directory to where it came from. Under each: `/name — description`, a
+ *  `model only` tag for `user-invocable: false`, then the broken entries
+ *  with the loader's own reason. */
 export function skillsRows(catalog: SkillsCatalog | null, sourceOf: (dir: string) => string, userDir: string): string[] {
 	const entries = catalog?.entries ?? [];
 	const broken = catalog?.broken ?? [];
 	if (entries.length === 0 && broken.length === 0) return [`no skills installed — add one as ${userDir}/<name>/SKILL.md`];
-	const rows = entries.map((e) => `/${e.name} — ${e.description}${e.userInvocable ? "" : " (model only)"} · ${sourceOf(e.dir)}`);
-	for (const b of broken) rows.push(`${b.dir} — cannot load: ${b.reason} · ${sourceOf(b.dir)}`);
+	const groups = new Map<string, string[]>();
+	const add = (dir: string, row: string): void => {
+		const src = sourceOf(dir);
+		groups.set(src, [...(groups.get(src) ?? []), row]);
+	};
+	for (const e of entries) add(e.dir, `  /${e.name} — ${e.description}${e.userInvocable ? "" : " (model only)"}`);
+	for (const b of broken) add(b.dir, `  ${b.dir} — cannot load: ${b.reason}`);
+	const rows: string[] = [];
+	for (const [src, list] of groups) rows.push(src, ...list);
 	rows.push("/<name> [args] or /skill <name> [args] runs one · a built-in command wins a shared name");
 	return rows;
 }

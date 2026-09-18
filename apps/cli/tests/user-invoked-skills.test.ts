@@ -73,6 +73,8 @@ describe("0.40.0 — resolveSkillLine", () => {
 
 	it("`/skills` lists; a multi-line paste that begins with / is prose; no catalog means no skills", () => {
 		expect(resolveSkillLine("/skills", catalog, builtins)).toEqual({ kind: "list" });
+		// an argument is a one-line usage, never "unknown command: /skills"
+		expect(resolveSkillLine("/skills review", catalog, builtins)).toEqual({ kind: "error", message: "usage: /skills (no arguments) — /skill <name> [args] runs one" });
 		expect(resolveSkillLine("/review\nand more", catalog, builtins)).toBeNull();
 		expect(resolveSkillLine("/review", null, builtins)).toBeNull();
 		expect(resolveSkillLine("/skill review", null, builtins)).toEqual({ kind: "error", message: 'no skill named "review" (/skills lists them)' });
@@ -80,12 +82,18 @@ describe("0.40.0 — resolveSkillLine", () => {
 });
 
 describe("0.40.0 — /skills rows", () => {
-	it("name — description · real source dir, model-only tagged, broken with the loader's reason", () => {
-		const rows = skillsRows(catalog, (dir) => `~/proj/.kiso/skills/${dir}`.replace(/\/[^/]+$/, ""), "~/.kiso/skills");
-		expect(rows).toContain("/review — review code · ~/proj/.kiso/skills");
-		expect(rows).toContain("/internal — for the model (model only) · ~/proj/.kiso/skills");
-		expect(rows).toContain("half — cannot load: no description · ~/proj/.kiso/skills");
-		expect(rows.at(-1)).toMatch(/a built-in command wins a shared name/);
+	it("each real source directory is named ONCE, its skills under it; model-only tagged; broken with the loader's reason", () => {
+		const rows = skillsRows(catalog, (dir) => (dir === "review" ? "~/proj/.kiso/skills" : "~/.kiso/skills"), "~/.kiso/skills");
+		expect(rows).toEqual([
+			"~/.kiso/skills",
+			"  /compact — shadowed by the built-in",
+			"  /internal — for the model (model only)",
+			"  /huge — too big",
+			"  half — cannot load: no description",
+			"~/proj/.kiso/skills",
+			"  /review — review code",
+			"/<name> [args] or /skill <name> [args] runs one · a built-in command wins a shared name",
+		]);
 	});
 	it("nothing installed says where a skill goes", () => {
 		expect(skillsRows(null, (d) => d, "~/.kiso/skills")).toEqual(["no skills installed — add one as ~/.kiso/skills/<name>/SKILL.md"]);
