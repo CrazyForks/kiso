@@ -18,7 +18,8 @@ import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
-import { classifyReadOnly, READ_ONLY_COMMANDS } from "../src/readonly-shell.js";
+import { setMode } from "../src/mode.js";
+import { classifyReadOnly, READ_ONLY_COMMANDS, readOnlyShellExtension } from "../src/readonly-shell.js";
 import { parseShell, realCase, resolveShellPath } from "../src/shell-words.js";
 
 let root = "";
@@ -42,6 +43,12 @@ beforeAll(() => {
 	// a kiso home INSIDE the workspace — the DC-49 home-workspace shape
 	mkdirSync(join(root, "khome"));
 	writeFileSync(join(root, "khome", "auth.json"), "{}");
+	// B4: the shell's own credential set
+	writeFileSync(join(root, ".npmrc"), "//registry/:_authToken=x\n");
+	mkdirSync(join(root, ".aws"));
+	writeFileSync(join(root, ".aws", "credentials"), "[default]\n");
+	mkdirSync(join(root, ".config", "gh"), { recursive: true });
+	writeFileSync(join(root, ".config", "gh", "hosts.yml"), "github.com:\n");
 });
 
 const verdict = (cmd: string) => classifyReadOnly(cmd, root);
@@ -113,6 +120,18 @@ const ALLOW: readonly (readonly [string, string])[] = [
 	["ls src; cat README.md", "ls"],
 	["cat README.md | head -5 | wc -l", "cat"],
 	["cd src && ls -la", "ls"],
+	// S1: past the first command, rg reads stdin
+	["cat log.txt | rg KEY", "rg"],
+	["rg --files src", "rg"],
+	["rg --version", "rg"],
+	// S2: after `cd x &&` the cd provably worked
+	["cd src && cd .. && ls", "ls"],
+	// S3
+	["git log --no-decorate -3", "git"],
+	["git log HEAD@{1} -1", "git"],
+	["git log @{u}..HEAD --oneline", "git"],
+	["du -sP src", "du"],
+	["find -d src -name a.ts", "find"],
 	// the redirections that write nothing
 	["ls missing 2>/dev/null", "ls"],
 	["git log -1 2>&1", "git"],
@@ -176,6 +195,23 @@ const REFUSE: readonly (readonly [string, string])[] = [
 	["grep KEY .ENV", "credential"],
 	["cat < .ENV", "credential"],
 	["cat src/../.ENV", "credential"],
+	// B3: git prints what these name — the CONTENT predicate applies
+	["git diff .env", "credential"],
+	["git diff -- .env", "credential"],
+	["git log -p -- .env", "credential"],
+	["git show HEAD:.env", "credential"],
+	["git show HEAD -- .env", "credential"],
+	["git diff --no-index README.md .env", "credential"],
+	["git diff --no-index src build", "--no-index over the directory src"],
+	// B4: credentials the search corpus's names do not cover
+	["cat .npmrc", "credential"],
+	["cat .aws/credentials", "credential"],
+	["cat .config/gh/hosts.yml", "credential"],
+	["head .docker/config.json", "credential"],
+	["cat .kube/config", "credential"],
+	["cat .pypirc", "credential"],
+	["cat .git-credentials", "credential"],
+	["cat .htpasswd", "credential"],
 	// paths out of the workspace, or into a credential
 	["cat /etc/passwd", "outside"],
 	["cat ../outside/secret.txt", "outside"],
@@ -394,9 +430,29 @@ describe("the shared resolver — real components, in the disk's case (review B1
 		expect(resolveShellPath(root, root, "nope/deeper/../x").inside).toBe(true);
 	});
 
-	it("a protected root is matched in the disk's case", () => {
-		const v = classifyReadOnly("cat KHOME/auth.json", root, [join(root, "khome")]);
-		expect(v.allow).toBe(false);
-		expect(v.allow === false ? v.why : "").toContain("kiso's own home");
+	it("a protected root is matched in the disk's case, and LISTING under it asks too (B4)", () => {
+		for (const cmd of ["cat KHOME/auth.json", "ls khome", "ls -la KHOME", "file khome/auth.json"]) {
+			const v = classifyReadOnly(cmd, root, [join(root, "khome")]);
+			expect(v.allow, cmd).toBe(false);
+			expect(v.allow === false ? v.why : "", cmd).toContain("protected directory");
+		}
+	});
+
+	it("the chain member protects the home subtrees when the workspace IS home (B4)", async () => {
+		// a temporary HOME: no shell runs, nothing of the machine's is read
+		const home = realpathSync(mkdtempSync(join(tmpdir(), "kiso-ros-home-")));
+		for (const d of [".ssh", ".config", ".aws", ".gnupg", ".kiso"]) mkdirSync(join(home, d));
+		writeFileSync(join(home, "notes.md"), "x");
+		const saved = process.env.HOME;
+		process.env.HOME = home;
+		try {
+			setMode("default");
+			const ext = readOnlyShellExtension(() => ({ workspaceRoot: home, excludeRoots: [join(home, ".kiso")] }));
+			const decide = (command: string) => ext.approvals![0]!.decide({ name: "shell", input: { command } }, {} as never);
+			for (const cmd of ["ls .ssh", "ls -la .config", "cat .aws/config", "ls .gnupg", "ls .kiso"]) expect(await decide(cmd), cmd).toEqual({ action: "abstain" });
+			expect(await decide("cat notes.md")).toEqual({ action: "allow" });
+		} finally {
+			process.env.HOME = saved;
+		}
 	});
 });

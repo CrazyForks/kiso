@@ -154,7 +154,18 @@ export function parseShell(src: string): ParseResult {
 		// ── what this reader refuses ─────────────────────────────────────
 		if (c === "$" || c === "`") return fail("an expansion");
 		if (c === "(" || c === ")") return fail("a subshell or grouping");
-		if (c === "{" || c === "}") return fail("a brace");
+		// A brace EXPANDS only as `{a,b}` or `{a..b}`; anything else is a
+		// character (`HEAD@{u}`, `@{1}`). A `{` or `}` standing alone as a
+		// word is a group, which this reader refuses.
+		if (c === "{") {
+			const close = src.indexOf("}", i + 1);
+			const body = close < 0 ? "" : src.slice(i + 1, close);
+			if (close < 0 || !inWord || /[\s;&|(){}<>]/.test(body) || body.includes(",") || body.includes("..")) return fail("a brace");
+			word += src.slice(i, close + 1);
+			i = close + 1;
+			continue;
+		}
+		if (c === "}") return fail("a brace");
 		if (GLOB.has(c)) return fail("a glob");
 		// A tilde expands at the start of a word and, in bash, after the `=`
 		// or `:` of anything shaped like an assignment (`--prefix=~/x`). In
@@ -265,6 +276,11 @@ export interface ResolvedPath {
 	readonly canonical: string;
 	readonly inside: boolean;
 }
+
+/** The well-known home subtrees that hold credentials or configuration
+ *  that runs — one list for both chain members: the read-only allow
+ *  never reads or lists under them, the floor never deletes them. */
+export const HOME_SUBTREES: readonly string[] = [".ssh", ".config", ".kiso", ".gnupg", ".aws"];
 
 /** A real path in the case the DISK holds it. The JS realpath keeps the
  *  case it was given, so on a case-insensitive disk `.ENV` stayed `.ENV`

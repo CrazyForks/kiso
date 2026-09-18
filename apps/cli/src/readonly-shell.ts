@@ -32,12 +32,13 @@
  */
 
 import { statSync } from "node:fs";
-import { basename, isAbsolute, relative } from "node:path";
+import { homedir } from "node:os";
+import { basename, isAbsolute, join, relative } from "node:path";
 import type { PolicyVerdict } from "@vincemakes/kiso-core";
 import type { KisoExtension } from "@vincemakes/kiso-runtime";
 import { isCredentialName } from "@vincemakes/kiso-tools-node";
 import { getMode, type Mode } from "./mode.js";
-import { parseShell, realCase, resolveShellPath, type Redirect, type SimpleCommand } from "./shell-words.js";
+import { HOME_SUBTREES, parseShell, realCase, resolveShellPath, type Redirect, type SimpleCommand } from "./shell-words.js";
 
 export type ReadOnlyVerdict = { readonly allow: true } | { readonly allow: false; readonly why: string };
 
@@ -50,6 +51,9 @@ interface Ctx {
 	/** Every directory the command might be running in — a `cd` that fails
 	 *  leaves the old one, so a path must hold from all of them. */
 	readonly cwds: readonly string[];
+	/** The command's place in its pipeline: past the first, stdin is the
+	 *  previous command's output. */
+	readonly stage: number;
 }
 
 // ── the predicates ──────────────────────────────────────────────────────
@@ -57,9 +61,29 @@ interface Ctx {
 function scope(ctx: Ctx, word: string): string | null {
 	if (word === "-") return null; // stdin
 	for (const cwd of ctx.cwds) {
-		if (!resolveShellPath(ctx.root, cwd, word).inside) return `${word} is outside the workspace`;
+		const { canonical, inside } = resolveShellPath(ctx.root, cwd, word);
+		if (!inside) return `${word} is outside the workspace`;
+		// B4: under a protected directory NOTHING is read or listed unasked —
+		// kiso's own home, and ~/.ssh ~/.config ~/.aws ~/.gnupg ~/.kiso when
+		// the workspace is the home directory. Over-asking is an ask.
+		for (const p of ctx.protectedRoots) {
+			const rel = relative(p, canonical);
+			if (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))) return `${word} is inside a protected directory (${p})`;
+		}
 	}
 	return null;
+}
+
+/** B4: credentials by the shell's own list — names the search corpus's
+ *  rule does not cover, on the canonical path. (The corpus rule itself,
+ *  shared with read_file and search_text, is not moved before the freeze:
+ *  finding RO-F4, 0.41.0.) */
+const SHELL_CREDENTIAL_NAMES = new Set([".npmrc", ".pypirc", ".git-credentials", ".htpasswd"]);
+const SHELL_CREDENTIAL_PATHS = ["/.aws/credentials", "/.config/gh/hosts.yml", "/.docker/config.json", "/.kube/config"];
+
+function shellCredential(canonical: string): boolean {
+	const folded = canonical.toLowerCase();
+	return SHELL_CREDENTIAL_NAMES.has(basename(folded)) || SHELL_CREDENTIAL_PATHS.some((s) => folded.endsWith(s));
 }
 
 function content(ctx: Ctx, word: string): string | null {
@@ -71,11 +95,7 @@ function content(ctx: Ctx, word: string): string | null {
 	if (isCredentialName(basename(word).toLowerCase())) return `${word} is a credential file`;
 	for (const cwd of ctx.cwds) {
 		const { canonical } = resolveShellPath(ctx.root, cwd, word);
-		if (isCredentialName(basename(canonical).toLowerCase())) return `${word} leads to a credential file`;
-		for (const p of ctx.protectedRoots) {
-			const rel = relative(p, canonical);
-			if (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))) return `${word} is inside kiso's own home`;
-		}
+		if (isCredentialName(basename(canonical).toLowerCase()) || shellCredential(canonical)) return `${word} leads to a credential file`;
 	}
 	return null;
 }
@@ -226,6 +246,7 @@ const LOG_LIKE_LONG = [
 	"children", "no-prefix", "mailmap", "no-mailmap", "use-mailmap", "regexp-ignore-case", "invert-grep", "all-match",
 	"ignore-all-space", "ignore-space-change", "ignore-blank-lines", "ignore-space-at-eol", "relative", "no-relative",
 	"no-textconv", "no-ext-diff", "walk-reflogs", "remerge-diff", "no-diff-merges", "cc", "expand-tabs", "no-expand-tabs", "log-size",
+	"no-decorate",
 ];
 /** Every git option that takes a value, accepted ONLY attached
  *  (`--author=x`). git consumes the next argument for some of these when
@@ -246,10 +267,32 @@ const LOG_LIKE_SHORT = [/^-\d+$/, /^-[puswiEFPbzRWaqmctr]+$/, /^-[MCB](\d+%?)?$/
 
 function gitLogLike(args: readonly string[], ctx: Ctx): string | null {
 	const spec: Opts = { long: LOG_LIKE_LONG, longOptArg: LOG_LIKE_VALUED, shortPatterns: LOG_LIKE_SHORT };
-	// Revisions and pathspecs share the operand position; a revision
-	// resolves to a path that does not exist, which is inside. Pathspec
-	// MAGIC (`:(top)x`, `:/x`) is read by git, not by this resolver.
-	return operandsAll(args, spec, (w) => (w.startsWith(":") ? `the pathspec ${w}` : scope(ctx, w)));
+	const noIndex = args.includes("--no-index");
+	// B3 (the lead's review): these PRINT what they name — `git diff .env`,
+	// `git log -p -- .env`, `git show HEAD:.env` — so an operand takes the
+	// CONTENT predicate, not only the scope one. A revision resolves to a
+	// path that does not exist and passes; in `rev:path` the path is what
+	// is printed. Pathspec MAGIC (`:(top)x`, `:/x`) is read by git, not by
+	// this resolver. `--no-index` over a directory compares every file in
+	// it. Stated residual, not refused: `git log -p` / `git show` with no
+	// pathspec prints every tracked file — a committed credential is the
+	// repository's own exposure.
+	return operandsAll(args, spec, (w) => {
+		if (w.startsWith(":")) return `the pathspec ${w}`;
+		const colon = w.indexOf(":");
+		const path = colon > 0 ? w.slice(colon + 1) : w;
+		if (path === "") return null;
+		if (noIndex) {
+			for (const cwd of ctx.cwds) {
+				try {
+					if (statSync(resolveShellPath(ctx.root, cwd, path).canonical).isDirectory()) return `git diff --no-index over the directory ${path}`;
+				} catch {
+					// missing: git fails on its own
+				}
+			}
+		}
+		return content(ctx, path);
+	});
 }
 
 function gitBranch(args: readonly string[]): string | null {
@@ -337,7 +380,7 @@ function git(args: readonly string[], ctx: Ctx): string | null {
 function find(args: readonly string[], ctx: Ctx): string | null {
 	let i = 0;
 	// BSD options before the paths; -L/-H follow symbolic links out.
-	while (i < args.length && /^-[Exs]+$/.test(args[i]!)) i += 1;
+	while (i < args.length && /^-[Exsd]+$/.test(args[i]!)) i += 1;
 	while (i < args.length && !args[i]!.startsWith("-") && args[i] !== "!" && args[i] !== "(" && args[i] !== ")") {
 		const s = scope(ctx, args[i]!);
 		if (s !== null) return s;
@@ -389,6 +432,9 @@ function grep(args: readonly string[], ctx: Ctx): string | null {
 }
 
 function rg(args: readonly string[], ctx: Ctx): string | null {
+	if (args.length === 1 && args[0] === "--version") return null;
+	// `rg --files [dir]` lists NAMES under the ignore rules, reads no content
+	if (args[0] === "--files") return operandsAll(args.slice(1), {}, (w) => scope(ctx, w));
 	const p = parseOpts(args, {
 		short: "iSswxnNlcvFoHIUP0q",
 		shortArg: "etTABCmgM",
@@ -397,7 +443,8 @@ function rg(args: readonly string[], ctx: Ctx): string | null {
 	});
 	if (failed(p)) return p.why;
 	const files = p.values.has("e") || p.values.has("regexp") ? p.operands : p.operands.slice(1);
-	if (files.length === 0) return "rg with no file searches the whole tree";
+	// S1: past a pipeline's first command, rg with no file reads stdin
+	if (files.length === 0) return ctx.stage > 0 ? null : "rg with no file searches the whole tree";
 	for (const w of files) {
 		const e = regularFile(ctx, w);
 		if (e !== null) return e;
@@ -442,7 +489,7 @@ const TABLE: Readonly<Record<string, Rule>> = {
 	du: (args, ctx) =>
 		operandsAll(
 			args,
-			{ short: "shackmgxAH0", shortArg: "dBI", long: ["summarize", "human-readable", "all", "total", "apparent-size", "one-file-system", "si", "null", "bytes"], longArg: ["max-depth", "exclude", "block-size", "threshold"] },
+			{ short: "shackmgxAHP0", shortArg: "dBI", long: ["summarize", "human-readable", "all", "total", "apparent-size", "one-file-system", "si", "null", "bytes"], longArg: ["max-depth", "exclude", "block-size", "threshold"] },
 			(w) => scope(ctx, w),
 		),
 	// df reports filesystem usage and nothing else; its operands only pick
@@ -540,23 +587,31 @@ export function classifyReadOnly(commandLine: string, workspaceRoot: string, pro
 	if (!parsed.ok) return { allow: false, why: parsed.why };
 	const canonicalProtected = protectedRoots.map(realCase);
 	let cwds: readonly string[] = [workspaceRoot];
+	// S2: where the next command runs after `cd x` depends on the joiner —
+	// `&&` only if the cd worked (x), `||` only if it failed (where it was),
+	// `;` either. Held until a joiner other than `&&` settles it.
+	// the `as` keeps the flow type the full union (a closure-free loop
+	// otherwise narrows it to null for good)
+	let lastCd = null as { readonly to: readonly string[]; readonly from: readonly string[] } | null;
 	for (const pipeline of parsed.list) {
-		const ctx: Ctx = { root: workspaceRoot, protectedRoots: canonicalProtected, cwds };
+		if (lastCd !== null) {
+			cwds = pipeline.joinedBy === "&&" ? lastCd.to : pipeline.joinedBy === "||" ? lastCd.from : [...new Set([...lastCd.to, ...lastCd.from])];
+			if (pipeline.joinedBy !== "&&") lastCd = null;
+		}
+		const ctx: Ctx = { root: workspaceRoot, protectedRoots: canonicalProtected, cwds, stage: 0 };
 		const first = pipeline.stages[0]!;
 		if (first.argv[0] === "cd") {
-			// `cd DIR` on its own, into the workspace: later segments resolve
-			// against it — and, because a cd can fail, against the old
-			// directory too.
+			// `cd DIR` on its own, into the workspace
 			if (pipeline.stages.length !== 1 || first.argv.length !== 2 || first.redirects.length > 0) return { allow: false, why: "a cd that is not `cd DIR` on its own" };
 			const dir = first.argv[1]!;
 			if (dir.startsWith("-")) return { allow: false, why: `cd ${dir}` };
 			const s = scope(ctx, dir);
 			if (s !== null) return { allow: false, why: s };
-			cwds = [...new Set([...cwds, ...cwds.map((c) => resolveShellPath(workspaceRoot, c, dir).canonical)])];
+			lastCd = { to: [...new Set(cwds.map((c) => resolveShellPath(workspaceRoot, c, dir).canonical))], from: lastCd?.from ?? cwds };
 			continue;
 		}
-		for (const stage of pipeline.stages) {
-			const e = command(stage, ctx);
+		for (const [stage, cmd] of pipeline.stages.entries()) {
+			const e = command(cmd, { ...ctx, stage });
 			if (e !== null) return { allow: false, why: e };
 		}
 	}
@@ -587,7 +642,8 @@ export function readOnlyShellExtension(roots: () => { readonly workspaceRoot: st
 					const command = call.input.command;
 					if (typeof command !== "string") return ABSTAIN;
 					const { workspaceRoot, excludeRoots } = roots();
-					return classifyReadOnly(command, workspaceRoot, excludeRoots).allow ? { action: "allow" } : ABSTAIN;
+					const protectedRoots = [...excludeRoots, ...HOME_SUBTREES.map((s) => join(homedir(), s))];
+					return classifyReadOnly(command, workspaceRoot, protectedRoots).allow ? { action: "allow" } : ABSTAIN;
 				},
 			},
 		],
