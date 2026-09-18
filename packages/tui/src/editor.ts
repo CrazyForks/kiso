@@ -126,8 +126,14 @@ export const MENU_ITEMS: readonly MenuItem[] = [
 	// the /resume+/clear mini-spec: the session-navigation pair
 	{ name: "/clear", desc: "start a fresh conversation (the old session stays resumable)" },
 	{ name: "/resume", desc: "switch to another session; /resume <id> goes directly" },
+	// 0.39.2: `/reload` has been dispatchable since §2.5 and `/help` lists
+	// it, and typing `/` never offered it — the one place a person who does
+	// not know a command exists goes to find one. Caught with `/copy` by the
+	// gate that now holds the three lists together.
+	{ name: "/reload", desc: "reread extensions, skills and config into this session" },
 	{ name: "/think", desc: "show the last full thinking block" },
 	{ name: "/last", desc: "show the most recent tool call's input and output" },
+	{ name: "/copy", desc: "copy the last answer (raw markdown) — ctrl+x does the same" },
 	// R4 (C4d): the committed transcript belongs to the terminal and can
 	// never be re-wrapped in place (ADR-0046); this appends it re-folded.
 	{ name: "/rewrap", desc: "re-print the recent prose at the current width" },
