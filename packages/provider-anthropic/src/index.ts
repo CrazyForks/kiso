@@ -18,7 +18,7 @@ import type { MessageStreamEvent } from "@anthropic-ai/sdk/resources/messages";
 import type { Adapter, StreamOptions } from "@vincemakes/kiso-core";
 import type { AdapterEvent, Event, StopReason } from "@vincemakes/kiso-core";
 import type { AssistantBlock, ContentBlock, Message, ToolSpec } from "@vincemakes/kiso-core";
-import { mapApiError, parseRetryAfter, streamFailure } from "@vincemakes/kiso-core";
+import { connectionFailure, mapApiError, parseRetryAfter, streamFailure } from "@vincemakes/kiso-core";
 
 /** Config accepted by the high-level factory (round 7: the provider owns its SDK). */
 export interface AnthropicProviderConfig {
@@ -468,7 +468,7 @@ function toAnthropicError(err: unknown): unknown {
 		return { code: "timeout", retryable: true, message: label + err.message };
 	}
 	if (err instanceof Anthropic.APIConnectionError) {
-		return { code: "network", retryable: true, message: label + err.message };
+		return connectionFailure(err, label + err.message);
 	}
 	if (err instanceof Anthropic.APIError) {
 		// CX-1 F8: the kernel owns retries — Retry-After travels with the error
