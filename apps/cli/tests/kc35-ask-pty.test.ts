@@ -327,7 +327,14 @@ describe("T-Q5 — THE MOAT: the ask survives kill -9", () => {
 		const third = pty({ ...env, KISO_FAUX_SCRIPT: script(dir, [say("nothing to do")]) }, ["resume", "q5"], "q5", [], ["/ commands · \u2191 history"], {
 			timeout: 20,
 		});
-		expect(third).not.toContain("which bundler?");
+		// DECLARED CHANGE (4c): this leg used to assert the question's WORDS
+		// were absent. The reopened session now replays its history into
+		// cells, so the ANSWERED ask is on screen as history — its settled
+		// card names the questions it asked. What "asks nothing" means is
+		// that no PANEL comes up: the panel's own status row is absent.
+		expect(third).not.toContain("answers are durable facts");
+		expect(third).not.toContain("question 1 of 2");
+		expect(third.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "")).toContain("asked 2 questions (answered)");
 		expect(third).not.toContain("ask it again?");
 		expect(third).not.toContain("did the interrupted execution apply?");
 		// nothing re-executed: no new ask, no new started execution

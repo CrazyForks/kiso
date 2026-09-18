@@ -44,6 +44,12 @@ describe("R3i — the answered block", () => {
 		expect(plain(rows).split("\n")[0]).toContain("asked 3 questions (answered, 41.2s)");
 	});
 
+	it("4c: a card replayed from the log (no clock) names the outcome and says nothing about time", () => {
+		const head = plain(askedBlock(ANSWERED, null, 90)).split("\n")[0]!;
+		expect(head).toContain("asked 3 questions (answered)");
+		expect(head).not.toMatch(/\ds\)/);
+	});
+
 	it("one question is singular", () => {
 		const rows = askedBlock(JSON.stringify({ answers: [{ q: "target", choice: "staging" }] }), 2, 90);
 		expect(plain(rows)).toContain("asked 1 question");

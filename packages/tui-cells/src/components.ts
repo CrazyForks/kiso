@@ -761,7 +761,7 @@ class ToolExecution implements Component {
 			// that is not the ask's own JSON, so a payload this renderer
 			// did not write can never be guessed at.
 			if (c.name === "ask_user" && c.reason === null && !c.isError) {
-				const asked = askedBlock(c.resultText, c.startedAt !== null && c.doneAt !== null ? (c.doneAt - c.startedAt) / 1000 : 0, W);
+				const asked = askedBlock(c.resultText, c.startedAt !== null && c.doneAt !== null ? (c.doneAt - c.startedAt) / 1000 : c.startedAt === null && c.doneAt === null ? null : 0, W);
 				if (asked.length > 0) return asked;
 			}
 			// W19: the pinned deny — the claimed shape verbatim: the FULL
@@ -1235,7 +1235,9 @@ export function foldTerms(reads: number, edits: number, others: readonly [string
  * reads a payload it did not write, and a guess about what it means
  * would be a row the product cannot stand behind.
  */
-export function askedBlock(resultText: string, seconds: number, W: number): string[] {
+/** `seconds` null: 4c's replayed card, settled from a log with no clock —
+ *  the head names the outcome and says nothing about time. */
+export function askedBlock(resultText: string, seconds: number | null, W: number): string[] {
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(resultText);
@@ -1246,7 +1248,7 @@ export function askedBlock(resultText: string, seconds: number, W: number): stri
 	const asked = parsed as { answers?: { q?: string; choice?: string; choices?: string[]; custom?: string }[]; declined?: string[] };
 	const p = palette();
 	const head = (n: number, outcome: string): string =>
-		cutLine(`  ${p.bold}asked${p.reset} ${n} ${n === 1 ? "question" : "questions"} ${p.dim}(${outcome}, ${seconds.toFixed(1)}s)${p.reset}`, W);
+		cutLine(`  ${p.bold}asked${p.reset} ${n} ${n === 1 ? "question" : "questions"} ${p.dim}(${seconds === null ? outcome : `${outcome}, ${seconds.toFixed(1)}s`})${p.reset}`, W);
 	const row = (body: string): string => cutLine(`  ${p.dim}│${p.reset} ${body}`, W);
 
 	if (Array.isArray(asked.declined) && asked.declined.length > 0) {
