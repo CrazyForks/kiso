@@ -975,8 +975,8 @@ export class Editor {
 	// ── TUI2-R2 ② — the session picker ───────────────────────────────
 
 	/** Open the picker on a bound card source (PickInput, S5). */
-	beginPick(cards: () => readonly SessionCardView[], onPick: (id: string | null) => void): void {
-		this.#pickInput.begin(cards, onPick);
+	beginPick(cards: () => readonly SessionCardView[], onPick: (id: string | null) => void, here?: string): void {
+		this.#pickInput.begin(cards, onPick, here);
 	}
 
 	pickState(): SessionPickState | null {
@@ -1526,6 +1526,9 @@ export class Editor {
 					this.#reflow();
 					this.#refreshMenu();
 				}
+				i += 1;
+			} else if (c === "\t" && this.#pickInput.toggleScope()) {
+				// 0.40.0: the session picker's scope — this workspace ↔ all
 				i += 1;
 			} else if (c === "\t" && this.#atUp()) {
 				// KC3 §3: Tab accepts the selected path — the token becomes

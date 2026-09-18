@@ -58,6 +58,11 @@ export interface SessionCard {
 	 *  open. The ✗ note names it rather than inventing one word for six
 	 *  different endings. */
 	readonly outcome: string | null;
+	/** 0.40.0: where the session started (its profile's `workspace`);
+	 *  null when unknown. */
+	readonly workspace: string | null;
+	/** 0.40.0: the config profile its latest revision names. */
+	readonly profileName: string | null;
 }
 
 /**
@@ -82,6 +87,8 @@ export function projectSessionCard(input: {
 	readonly updatedAt: number;
 	readonly records: readonly StoreRecord[];
 	readonly asks: number;
+	readonly workspace?: string | null;
+	readonly profileName?: string | null;
 }): SessionCard {
 	const events = input.records.map((r) => r.event);
 	// the ledger's own expression — the same one the recovery plan and the
@@ -111,7 +118,18 @@ export function projectSessionCard(input: {
 					: outcome === "completed"
 						? "completed"
 						: "failed";
-	return { id: input.id, title: sessionTitle(input.records), badge, turns, updatedAt: input.updatedAt, uncertain, asks: input.asks, outcome };
+	return {
+		id: input.id,
+		title: sessionTitle(input.records),
+		badge,
+		turns,
+		updatedAt: input.updatedAt,
+		uncertain,
+		asks: input.asks,
+		outcome,
+		workspace: input.workspace ?? null,
+		profileName: input.profileName ?? null,
+	};
 }
 
 /** The shapes this module needs from the agent — structural, so the
@@ -130,7 +148,11 @@ interface CardSource {
  * loads its records and builds an event log, and writes nothing (no
  * lock, no file creation) — the read-only listing rule holds.
  */
-export async function collectSessionCards(agent: CardSource, load: (id: string) => readonly StoreRecord[]): Promise<SessionCard[]> {
+export async function collectSessionCards(
+	agent: CardSource,
+	load: (id: string) => readonly StoreRecord[],
+	profileOf: (id: string) => { readonly workspace: string | null; readonly profileName: string | null } = () => ({ workspace: null, profileName: null }),
+): Promise<SessionCard[]> {
 	const cards: SessionCard[] = [];
 	for (const meta of [...agent.sessions()].sort((a, b) => b.updatedAt - a.updatedAt)) {
 		// XP-1: the LISTING never enforces the profile contract — a session
@@ -145,7 +167,7 @@ export async function collectSessionCards(agent: CardSource, load: (id: string) 
 		} catch {
 			// blocked by the profile contract — the card carries no ask badge
 		}
-		cards.push(projectSessionCard({ id: meta.id, updatedAt: meta.updatedAt, records: load(meta.id), asks }));
+		cards.push(projectSessionCard({ id: meta.id, updatedAt: meta.updatedAt, records: load(meta.id), asks, ...profileOf(meta.id) }));
 	}
 	return cards;
 }

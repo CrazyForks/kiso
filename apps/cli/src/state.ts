@@ -276,7 +276,7 @@ export interface LineInput {
 	 *  picked id, or null when the human leaves without picking.
 	 *  OPTIONAL: only the raw-mode editor has it, and the picker only
 	 *  ever opens on a TTY (a pipe has nobody to pick). */
-	pick?(cards: () => readonly SessionCardView[], onPick: (id: string | null) => void): void;
+	pick?(cards: () => readonly SessionCardView[], onPick: (id: string | null) => void, here?: string): void;
 	/** W22: bind the pending-turn queue — the ↑ pop walks the CLI's
 	 *  live slots (each pop cancels the turn), esc ends the walk after
 	 *  one more pop. The chips are the compositor's own bindQueue. */
@@ -465,6 +465,9 @@ export interface LastBinding {
 	readonly baseUrl?: string;
 	readonly scope?: import("@vincemakes/kiso-core").ContinuationScope;
 	readonly reasoning?: import("@vincemakes/kiso-runtime/internal").ReasoningSetting;
+	/** 0.40.0: the config profile that named the binding (null for a direct
+	 *  provider/model) — a /clear-fresh session records it too. */
+	readonly profileName?: string | null;
 }
 let lastBindingValue: LastBinding | null = null;
 export function setLastBinding(b: LastBinding): void {

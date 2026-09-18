@@ -43,6 +43,71 @@ export interface SessionCardView {
 	readonly uncertain: number;
 	readonly asks: number;
 	readonly outcome: string | null;
+	/** 0.40.0: the realpath the session STARTED in, from its profile; null
+	 *  when unknown (a legacy session). Absent = the caller did not say. */
+	readonly workspace?: string | null;
+	/** 0.40.0: the config profile its latest revision names, for a dim tag. */
+	readonly profileName?: string | null;
+}
+
+/** 0.40.0 — which sessions the picker shows. `here` is the running
+ *  workspace's realpath; `all` is the person's choice; `fellBack` is the
+ *  picker's own — CURRENT was empty while other sessions exist, and an
+ *  empty picker over a non-empty store would read as "they are gone". */
+export interface PickScopeState {
+	readonly here: string;
+	readonly all: boolean;
+	readonly inHere: number;
+	readonly total: number;
+	readonly fellBack: boolean;
+}
+
+/** The scope, as a pure function of the cards: CURRENT is the sessions
+ *  whose recorded workspace IS the running one; a session with no recorded
+ *  workspace is never "here" — unknown history is shown under ALL only. */
+export function scopeSessions(cards: readonly SessionCardView[], here: string, wantAll: boolean): { readonly cards: readonly SessionCardView[]; readonly scope: PickScopeState } {
+	const inHere = cards.filter((c) => c.workspace === here);
+	const fellBack = !wantAll && inHere.length === 0 && cards.length > 0;
+	const all = wantAll || fellBack;
+	return { cards: all ? cards : inHere, scope: { here, all, inHere: inHere.length, total: cards.length, fellBack } };
+}
+
+/** The band's title — the scope and both counts, and the key that flips it. */
+export function scopeTitle(scope: PickScopeState | null): string {
+	if (scope === null) return "sessions";
+	if (scope.fellBack) return `sessions \u00b7 none from this workspace yet \u2014 all ${scope.total}`;
+	return scope.all
+		? `sessions \u00b7 all ${scope.total} \u00b7 tab this workspace (${scope.inHere})`
+		: `sessions \u00b7 this workspace ${scope.inHere} of ${scope.total} \u00b7 tab all`;
+}
+
+/** A workspace path as a person reads it: the home directory as `~`. */
+function tildePath(path: string): string {
+	const home = process.env.HOME;
+	return home !== undefined && home !== "" && (path === home || path.startsWith(`${home}/`)) ? `~${path.slice(home.length)}` : path;
+}
+
+/** 0.40.0 — the row's dim tags: the profile the session last ran under,
+ *  and — only when the row is from ANOTHER workspace than `here` — where
+ *  it came from. `here === null` means the listing is not scoped at all,
+ *  so no row is foreign.
+ *
+ *  Fitted to `room`, degrading by the DC-2 rule (drop or shorten a whole
+ *  part, never cut one mid-word): the full path, then `…/<last dir>`, then
+ *  the path alone without the profile, then nothing. */
+function fitTags(card: SessionCardView, here: string | null, room: number): string {
+	const profile = typeof card.profileName === "string" && card.profileName !== "" ? card.profileName : null;
+	const foreign = here !== null && card.workspace !== undefined && card.workspace !== here;
+	const where = !foreign ? null : card.workspace === null || card.workspace === undefined ? "workspace unknown" : tildePath(card.workspace);
+	const short = where === null || card.workspace === null || card.workspace === undefined ? where : `\u2026/${card.workspace.split("/").filter((x) => x !== "").at(-1) ?? ""}`;
+	const join = (parts: readonly (string | null)[]): string => {
+		const kept = parts.filter((x): x is string => x !== null);
+		return kept.length === 0 ? "" : ` \u00b7 ${kept.join(" \u00b7 ")}`;
+	};
+	for (const candidate of [join([profile, where]), join([profile, short]), join([short]), join([profile])]) {
+		if (candidate !== "" && visibleWidth(candidate) <= room) return candidate;
+	}
+	return "";
 }
 
 /** The glyph per state — one cell each, so the badge column never
@@ -185,7 +250,7 @@ export function sessionFilter(cards: readonly SessionCardView[], query: string):
 const TITLE_MAX = 44;
 const NOTE_RESERVE = 22;
 
-function rowSpans(card: SessionCardView, budget: number, now: number, idCol: number): { text: string; width: number } {
+function rowSpans(card: SessionCardView, budget: number, now: number, idCol: number, here: string | null = null): { text: string; width: number } {
 	const p = palette();
 	let text = "";
 	let w = 0;
@@ -224,6 +289,14 @@ function rowSpans(card: SessionCardView, budget: number, now: number, idCol: num
 	}
 	const meta = `  ${sessionAge(card.updatedAt, now)} · ${card.turns} turn${card.turns === 1 ? "" : "s"}`;
 	put(meta, `${p.dim}${meta}${p.reset}`);
+	// 0.40.0: the tags are their OWN span, after the meta and before the
+	// note, and they give way first — a long workspace path must never take
+	// the age and the turn count down with it, nor the note's reserve.
+	// the note is what the person acts on ("needs your verdict"), so it keeps
+	// its WHOLE width — a tag that cut it would trade an action for a label
+	const noteCells = sessionNote(card) === "" ? 0 : visibleWidth(sessionNote(card)) + 3;
+	const tags = fitTags(card, here, Math.max(0, budget - w - noteCells));
+	if (tags !== "") put(tags, `${p.dim}${tags}${p.reset}`);
 	const note = widthCut(sessionNote(card), Math.max(0, budget - w - 3));
 	if (note !== "") {
 		// the ? note carries the warn tint — the row's own words are what
@@ -243,13 +316,13 @@ function rowSpans(card: SessionCardView, budget: number, now: number, idCol: num
  * The inner spans close with rvEnd inside the bar (never SGR 0, which
  * would punch a hole in it) — the same composition atRow uses.
  */
-export function sessionRow(card: SessionCardView, selected: boolean, W: number, now: number, idCol: number): string {
+export function sessionRow(card: SessionCardView, selected: boolean, W: number, now: number, idCol: number, here: string | null = null): string {
 	const p = palette();
 	// both forms spend two cells of the width on their frame — the
 	// unselected row's indent, the bar's own leading/trailing cell — so
 	// the spans are built against the same budget either way and the
 	// selection cannot change the columns
-	const { text, width } = rowSpans(card, Math.max(0, W - 2), now, idCol);
+	const { text, width } = rowSpans(card, Math.max(0, W - 2), now, idCol, here);
 	if (!selected) return `  ${text}`;
 	// R2: one bar, in one place — and with it §2.1's rule that dim never
 	// sits on the wash. The age/turns/note spans were dim INSIDE the bar,
@@ -270,6 +343,8 @@ export interface SessionPickState {
 	readonly cards: readonly SessionCardView[];
 	readonly matches: readonly SessionCardView[];
 	readonly selected: number;
+	/** 0.40.0: null when the picker was opened without a workspace. */
+	readonly scope?: PickScopeState | null;
 }
 
 /**
@@ -281,7 +356,11 @@ export interface SessionPickState {
  * channel.
  */
 export function sessionPickerRows(state: SessionPickState, W: number, now: number): string[] {
-	const rows: string[] = [bandHeader("sessions", W)];
+	const scope = state.scope ?? null;
+	const rows: string[] = [bandHeader(scopeTitle(scope), W)];
+	// a row is tagged with its workspace only when ALL is showing — under
+	// CURRENT every row is from here, and saying so eight times is noise
+	const here = scope !== null && scope.all ? scope.here : null;
 	const col = idColumn(state.cards);
 	if (state.matches.length === 0) {
 		const p = palette();
@@ -290,7 +369,7 @@ export function sessionPickerRows(state: SessionPickState, W: number, now: numbe
 		return rows;
 	}
 	const { first, count } = atWindow(state.matches.length, state.selected, AT_VISIBLE);
-	for (let i = first; i < first + count; i += 1) rows.push(sessionRow(state.matches[i]!, i === state.selected, W, now, col));
+	for (let i = first; i < first + count; i += 1) rows.push(sessionRow(state.matches[i]!, i === state.selected, W, now, col, here));
 	rows.push(sessionCounterRow(state.selected, state.matches.length, W));
 	return rows;
 }
@@ -312,10 +391,10 @@ export function sessionPickerRows(state: SessionPickState, W: number, now: numbe
  * id goes LAST and dim — present for the hand that needs it, out of the
  * way of the eye that does not.
  */
-export function sessionListRow(card: SessionCardView, W: number, now: number, idCol: number): string {
+export function sessionListRow(card: SessionCardView, W: number, now: number, idCol: number, here: string | null = null): string {
 	const p = palette();
 	const tail = `  ${card.id}`;
-	const { text, width } = rowSpans(card, Math.max(1, W - visibleWidth(tail)), now, idCol);
+	const { text, width } = rowSpans(card, Math.max(1, W - visibleWidth(tail)), now, idCol, here);
 	if (width + visibleWidth(tail) > W) return text; // a terminal too narrow for both keeps the words
 	return `${text}${p.dim}${tail}${p.reset}`;
 }
@@ -325,4 +404,15 @@ export function sessionListRow(card: SessionCardView, W: number, now: number, id
 export function sessionListFooter(count: number, W: number): string {
 	const p = palette();
 	return `${p.dim}${widthCut(`${count} session${count === 1 ? "" : "s"} · kiso resume picks interactively`, W)}${p.reset}`;
+}
+
+/** 0.40.0 — the `kiso sessions` TTY listing's FIRST line: which sessions
+ *  follow, and both counts. The listing never falls back the way the
+ *  picker does: a listing that says "0 of 5 from this workspace" and how
+ *  to see the rest is already the honest answer. */
+export function sessionListHeader(inHere: number, total: number, all: boolean, W: number): string {
+	const p = palette();
+	const plural = (n: number): string => `${n} session${n === 1 ? "" : "s"}`;
+	const text = all ? `all ${plural(total)}` : `${inHere} of ${plural(total)} from this workspace \u00b7 --all lists every one`;
+	return `${p.dim}${widthCut(text, W)}${p.reset}`;
 }

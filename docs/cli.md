@@ -24,7 +24,7 @@ kiso [sessionId]               interactive session (default command)
 kiso chat [sessionId]          same as above
 kiso resume                    pick a session to continue (the picker)
 kiso resume <id> [prompt]      continue a session in a new process
-kiso sessions                  list durable sessions, with their state
+kiso sessions [--all|--current]  list durable sessions, with their state
 kiso help                      this help
 ```
 
