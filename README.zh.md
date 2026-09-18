@@ -121,7 +121,17 @@ kiso sessions                  列出持久会话及其状态
 `~/.kiso/extensions/dont-ask-again.mjs`,这个文件可以人工编辑、人工删除:
 把某个工具从集合里去掉,或者整个删掉文件,下一次调用就会问。
 该文件按设计**只会放行**——永远不会产生 deny 或 ask——所以 mode 与 safe-defaults
-两道护城河的牙齿都还在。
+两道护城河的牙齿都还在。它也永远不会替你放行破坏性命令,或写入 `.git/`、`.kiso/`:
+这些每次都会问你。
+
+**灾难兜底。** 在任何模式下(包括 bypass),kiso 都拒绝目标无法恢复的破坏性命令
+(`rm`、`git clean -f`、`git reset --hard`、`git checkout -- <路径>`、`find … -delete`):
+`/` 或系统根目录、你的家目录、工作区根目录或它之上的任何目录、`~/.ssh`、`~/.config`、
+`~/.kiso`、`~/.gnupg`、`~/.aws` 及其内部、覆盖以上任何一处的通配符,以及只有一个变量的
+目标(`rm -rf $DIR/`)。其余一切按模式执行——`rm -rf /tmp/probe` 在 bypass 下照样运行。
+拒绝会记为 `decidedBy: floor`,并告诉模型原因。兜底读的是命令行,不是沙箱。在
+`~/.kiso/config.json` 里写 `"floor": "off"` 可以关掉它(项目配置不行),此时状态行会显示
+`floor off`。
 
 启动时:`--mode <name>` 或 `KISO_MODE=<name>`。状态栏写出当前档位,约束是看得见的,而不是编码在色相里。
 

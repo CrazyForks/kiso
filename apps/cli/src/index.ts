@@ -48,9 +48,10 @@ import { MODES, OFFERED_MODES, getMode, modeExtensions, modeFromEnv, modeSystemP
 import { readOnlyShellExtension } from "./readonly-shell.js";
 import type { PolicyCall } from "@vincemakes/kiso-core";
 import { guardSavedAllow, isProtectedWrite } from "./protected-writes.js";
+import { floorExtension, isDestructiveCall } from "./floor.js";
 import { breakerExtension } from "./breaker.js";
 import { builtInLayer } from "./builtin.js";
-import { agentModel, atFiles, body, bodyLog, codingToolOptions, kisoHome, builtInExtensions, currentFaux, dock, extensionsDir, loadedExtensions, mergedConfig, mergedTempPaths, modelChoice, projectExtensions, configModels, configuredWindow, agentBaseUrl, currentModelName, currentAgentExtensions, sessionStoreRef, sessionsDir, setAgentModel, setBody, setConfigModels, setConfiguredWindow, setCurrentAgentExtensions, setCurrentFaux, setCurrentModelName, setExtensionLists, setMergedConfig, setModelChoice, setSessionStore, setRetryShown, setNeverInherited, secretEnvNamesOf, userExtensions, VERSION, type LineInput, lastBinding, acceptDrift, setAcceptDrift } from "./state.js";
+import { agentModel, atFiles, body, bodyLog, codingToolOptions, kisoHome, builtInExtensions, currentFaux, dock, extensionsDir, loadedExtensions, mergedConfig, mergedTempPaths, modelChoice, projectExtensions, configModels, configuredWindow, agentBaseUrl, currentModelName, currentAgentExtensions, sessionStoreRef, sessionsDir, setAgentModel, setBody, setConfigModels, setConfiguredWindow, setCurrentAgentExtensions, setCurrentFaux, setCurrentModelName, setExtensionLists, setMergedConfig, setModelChoice, setSessionStore, setRetryShown, setNeverInherited, secretEnvNamesOf, userExtensions, VERSION, type LineInput, lastBinding, acceptDrift, setAcceptDrift, setFloorOn, floorOn } from "./state.js";
 import { maxRetriesFromEnv } from "./retries.js";
 import { askUi, resolveProjectTrust } from "./trust-ui.js";
 import { isFirstRun, scaffoldFirstRun } from "./first-run.js";
@@ -793,11 +794,17 @@ async function makeAgent(sessionId: string | undefined, input?: LineInput, model
 	// so `decidedBy` names it; a deny there beats every tier, bypass included.
 	// 0.40.0: the read-only shell allow sits after the tiers — an allow from
 	// it outranks a tier's ask and names itself in decidedBy.
-	// 0.40.0: a saved allow never carries a write into .git/ or .kiso/.
+	// 0.40.0: a saved allow never carries a write into .git/ or .kiso/, nor
+	// a destructive shell command.
 	const workspaceRoot = (): string => codingToolOptions().workspaceRoot;
-	const neverInherited = (call: PolicyCall): boolean => isProtectedWrite(call, workspaceRoot());
+	const neverInherited = (call: PolicyCall): boolean => isProtectedWrite(call, workspaceRoot()) || isDestructiveCall(call);
 	setNeverInherited(neverInherited);
+	// 0.40.0: the catastrophe floor, at the chain's HEAD — a deny there
+	// names itself in decidedBy and outranks every tier, bypass included.
+	// Read per agent, so /reload picks up an edited user config.
+	setFloorOn(loadUserConfig()?.floor !== "off");
 	const extensions = [
+		floorExtension(() => floorOn, workspaceRoot),
 		breakerExtension(),
 		...modeExtensions(workspaceRoot),
 		readOnlyShellExtension(codingToolOptions),

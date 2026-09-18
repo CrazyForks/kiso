@@ -32,7 +32,7 @@ import type { AgentSession, Run } from "@vincemakes/kiso-runtime";
 import type { UserInputVia } from "@vincemakes/kiso-core";
 import { dispatch, type DispatchCtx, abortBangCommand } from "./dispatch.js";
 import { paintWindowTitle } from "./window-title.js";
-import { agentBaseUrl, agentModel, body, bodyLog, configuredWindow, dock, retryOnRow, retryShown, setRetryShown, type LineInput } from "./state.js";
+import { agentBaseUrl, agentModel, body, bodyLog, configuredWindow, dock, retryOnRow, retryShown, setRetryShown, floorOn, type LineInput } from "./state.js";
 import { attachImages } from "./attachments.js";
 import { lookupModelMetadata } from "@vincemakes/kiso-runtime/internal";
 import { addDontAskAgainRule, askPanel, fixHintFor, pendingAsk, resolveUncertains } from "./trust-ui.js";
@@ -1489,6 +1489,7 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 				// blind and invariant ① cuts whatever sits last — which is how
 				// a measured rate went missing at 100 columns.
 				rowWidth(),
+				!floorOn,
 			),
 		);
 	};

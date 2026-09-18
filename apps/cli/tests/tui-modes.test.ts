@@ -314,7 +314,10 @@ describe("Modes (real PTY, 24×80) — plan mode, /mode switching, the audit tra
 			JSON.stringify([
 				{
 					events: [
-						{ type: "tool_call_end", callId: "s1", name: "shell", input: { command: "git reset --hard" } },
+						// 0.40.0: `git reset --hard` on the workspace is the FLOOR's now
+						// (it would be decidedBy floor); `git stash` is the extension's
+						// alone, which is what this monotonicity case is about.
+						{ type: "tool_call_end", callId: "s1", name: "shell", input: { command: "git stash" } },
 						{ type: "stop", reason: "tool_use" },
 					],
 				},

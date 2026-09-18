@@ -55,6 +55,10 @@ a broken config file fails loudly with the file named.
 }
 ```
 
+- `"floor": "catastrophe" | "off"` — the catastrophe floor (on by default):
+  in every mode, bypass included, a destructive command whose target cannot be
+  recovered is refused (see the README). USER config only — a project config
+  that names `floor` fails loudly, because a repository must never lower it.
 - `kiso --model deepseek chat` — the flag beats everything; `provider/model`
   direct writes work too (`--model openai-compat/gpt-4o`,
   `--model anthropic/claude-sonnet-5`).

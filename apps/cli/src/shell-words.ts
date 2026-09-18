@@ -321,3 +321,227 @@ export function resolveShellPath(workspaceRoot: string, cwd: string, word: strin
 	const rel = relative(realCase(workspaceRoot), canonical);
 	return { canonical, inside: rel === "" || (!rel.startsWith("..") && !isAbsolute(rel)) };
 }
+
+/**
+ * The FLOOR's reading of a command line (0.40.0 item 4) — the opposite
+ * contract to `parseShell`. The read-only allow must refuse whatever it
+ * cannot read exactly; the floor must never refuse to read, because a
+ * line it gave up on is a line it let through. So this reader accepts
+ * everything, approximately, and marks where each word stops being known:
+ *
+ *  - every simple command the line would run is returned in order,
+ *    including the ones inside `$( )`, backticks and `( )` groups;
+ *  - a word records the index where its first unknown character sits (a
+ *    variable, a substitution, an unquoted glob), whether it began with
+ *    an unquoted `~`, and whether it is ONLY a variable (`$DIR/`,
+ *    `"${X}"/*`: nothing literal but slashes, dots and globs);
+ *  - redirection targets and leading assignments are not arguments, and
+ *    are dropped.
+ */
+export interface LooseWord {
+	readonly text: string;
+	/** Index of the first unknown character, or -1 when all is literal. */
+	readonly unknownAt: number;
+	/** Whether that first unknown is a glob (`*`), not a variable or a
+	 *  substitution: a glob ranges over a directory's entries, a variable
+	 *  can be anything at all. */
+	readonly unknownIsGlob: boolean;
+	readonly tilde: boolean;
+	readonly variableOnly: boolean;
+}
+
+/** One command, and how it joins the one before it: after `cd x &&` it
+ *  runs in x, after `cd x ||` in the old directory, after `;` in either. */
+export interface LooseCommand {
+	readonly argv: readonly LooseWord[];
+	readonly joinedBy: "&&" | "||" | ";" | "|";
+}
+
+export function parseShellLoose(src: string): LooseCommand[] {
+	const commands: LooseCommand[] = [];
+	let argv: LooseWord[] = [];
+	let joinedBy: LooseCommand["joinedBy"] = ";";
+	let text = "";
+	let lit = "";
+	let inWord = false;
+	let unknownAt = -1;
+	let unknownIsGlob = false;
+	let tilde = false;
+	let startsWithExpansion = false;
+	let dropNext = false; // the next word is a redirection target
+	let seenCommandWord = false;
+
+	const markUnknown = (glob: boolean): void => {
+		if (unknownAt < 0) {
+			unknownAt = text.length;
+			unknownIsGlob = glob;
+		}
+	};
+	const endWord = (): void => {
+		if (!inWord) return;
+		const w: LooseWord = { text, unknownAt, unknownIsGlob, tilde, variableOnly: startsWithExpansion && /^[/*.]*$/.test(lit) };
+		if (dropNext) dropNext = false;
+		else if (!seenCommandWord && unknownAt < 0 && /^[A-Za-z_][A-Za-z0-9_]*=/.test(text)) {
+			// a leading assignment: environment for the command, not the command
+		} else {
+			argv.push(w);
+			seenCommandWord = true;
+		}
+		text = "";
+		lit = "";
+		inWord = false;
+		unknownAt = -1;
+		unknownIsGlob = false;
+		tilde = false;
+		startsWithExpansion = false;
+	};
+	const endCommand = (next: LooseCommand["joinedBy"]): void => {
+		endWord();
+		if (argv.length > 0) commands.push({ argv, joinedBy });
+		argv = [];
+		seenCommandWord = false;
+		dropNext = false;
+		// a separator after an empty command (`&& &&`) keeps the stronger one
+		joinedBy = next;
+	};
+	/** Consume an expansion starting at i (`$…` or a backtick); append its
+	 *  raw text, parse any command inside it, and return the next index. */
+	const expansion = (i: number): number => {
+		// "only a variable" means nothing came before it — quotes add nothing
+		if (text === "") startsWithExpansion = true;
+		inWord = true;
+		markUnknown(false);
+		let j = i;
+		let inner: string | null = null;
+		if (src[i] === "`") {
+			const end = src.indexOf("`", i + 1);
+			j = end < 0 ? src.length : end + 1;
+			inner = src.slice(i + 1, end < 0 ? src.length : end);
+		} else if (src[i + 1] === "(") {
+			let depth = 0;
+			j = i + 1;
+			for (; j < src.length; j += 1) {
+				if (src[j] === "(") depth += 1;
+				else if (src[j] === ")") {
+					depth -= 1;
+					if (depth === 0) break;
+				}
+			}
+			inner = src.slice(i + 2, j);
+			j = Math.min(j + 1, src.length);
+		} else if (src[i + 1] === "{") {
+			const end = src.indexOf("}", i + 2);
+			j = end < 0 ? src.length : end + 1;
+		} else {
+			j = i + 1;
+			if (j < src.length && /[@*#?$!0-9-]/.test(src[j]!)) j += 1;
+			else while (j < src.length && /[A-Za-z0-9_]/.test(src[j]!)) j += 1;
+		}
+		text += src.slice(i, j);
+		if (inner !== null) commands.push(...parseShellLoose(inner));
+		return j;
+	};
+
+	let i = 0;
+	while (i < src.length) {
+		const c = src[i]!;
+		if (c === "'") {
+			const end = src.indexOf("'", i + 1);
+			const body = src.slice(i + 1, end < 0 ? src.length : end);
+			text += body;
+			lit += body;
+			inWord = true;
+			i = end < 0 ? src.length : end + 1;
+			continue;
+		}
+		if (c === '"') {
+			inWord = true;
+			let j = i + 1;
+			while (j < src.length && src[j] !== '"') {
+				if (src[j] === "\\" && j + 1 < src.length) {
+					text += src[j + 1];
+					lit += src[j + 1];
+					j += 2;
+					continue;
+				}
+				if (src[j] === "$" || src[j] === "`") {
+					j = expansion(j);
+					continue;
+				}
+				text += src[j];
+				lit += src[j];
+				j += 1;
+			}
+			i = j + 1;
+			continue;
+		}
+		if (c === "\\") {
+			if (i + 1 < src.length && src[i + 1] !== "\n") {
+				text += src[i + 1];
+				lit += src[i + 1];
+				inWord = true;
+			}
+			i += 2;
+			continue;
+		}
+		if (c === "$" || c === "`") {
+			i = expansion(i);
+			continue;
+		}
+		if (c === "*" || c === "?" || c === "[") {
+			markUnknown(true);
+			text += c;
+			lit += c;
+			inWord = true;
+			i += 1;
+			continue;
+		}
+		if (c === "~" && !inWord) tilde = true;
+		if (c === "#" && !inWord) {
+			while (i < src.length && src[i] !== "\n") i += 1;
+			continue;
+		}
+		if (c === " " || c === "\t") {
+			endWord();
+			i += 1;
+			continue;
+		}
+		if (c === ";" || c === "\n" || c === "&" || c === "|" || c === "(" || c === ")") {
+			if (c === "&" && src[i + 1] === ">") {
+				endWord();
+				dropNext = true;
+				i += src[i + 2] === ">" ? 3 : 2;
+				continue;
+			}
+			const two = src.slice(i, i + 2);
+			if (two === "&&" || two === "||") {
+				endCommand(two);
+				i += 2;
+				continue;
+			}
+			endCommand(c === "|" ? "|" : ";");
+			i += 1;
+			continue;
+		}
+		if (c === ">" || c === "<") {
+			if (inWord && /^\d+$/.test(text) && unknownAt < 0) {
+				text = "";
+				lit = "";
+				inWord = false;
+			} else endWord();
+			let j = i + 1;
+			while (j < src.length && (src[j] === ">" || src[j] === "<" || src[j] === "&" || src[j] === "|")) j += 1;
+			// `>&1` and `2>&-` name a descriptor, not a file; either way the
+			// word that follows is the operator's, never an argument.
+			dropNext = true;
+			i = j;
+			continue;
+		}
+		text += c;
+		lit += c;
+		inWord = true;
+		i += 1;
+	}
+	endCommand(";");
+	return commands;
+}

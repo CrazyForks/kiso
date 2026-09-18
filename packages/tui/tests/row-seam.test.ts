@@ -152,3 +152,17 @@ describe("the drop order — decided once, for every row", () => {
 		expect(composeRow("HEAD", [null, { kind: "fact", text: "X" }, undefined, { kind: "fact", text: "" }])).toBe("HEAD · X");
 	});
 });
+
+describe("0.40.0 — the floor on the idle row", () => {
+	it("says nothing while the floor is on: the row is the row it always was", () => {
+		expect(idleStatus("bypass", "m", 0.2, undefined, 80, false)).toBe(idleStatus("bypass", "m", 0.2, undefined, 80));
+		expect(idleStatus("bypass", "m", 0.2)).not.toContain("floor");
+	});
+
+	it("`floor off` is a FACT beside the tier: at a narrow width the hint goes and it stays", () => {
+		expect(idleStatus("bypass", "m", 0.2, undefined, undefined, true)).toBe("▸ bypass · floor off · /mode to switch · m · ctx left ~80%");
+		const narrow = idleStatus("bypass", "m", 0.2, undefined, 30, true);
+		expect(narrow).toContain("floor off");
+		expect(narrow).not.toContain("/mode to switch");
+	});
+});

@@ -413,6 +413,13 @@ export function setCurrentModelName(value: string): void {
 }
 
 /** E1: the extensions loaded by makeAgent — their names feed the banner. */
+/** 0.40.0: whether the catastrophe floor is on (floor.ts) — the user
+ *  config's `floor`, read where the chain is assembled. */
+export let floorOn = true;
+export function setFloorOn(value: boolean): void {
+	floorOn = value;
+}
+
 /** 0.40.0: the calls a saved allow never carries (protected-writes.ts) —
  *  set where the chain is assembled, read where a first grant joins it. */
 export let neverInherited: (call: import("@vincemakes/kiso-core").PolicyCall) => boolean = () => false;

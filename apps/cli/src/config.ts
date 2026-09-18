@@ -92,6 +92,10 @@ export interface KisoConfig {
 	 *  project file is a LOUD error rather than a silent win. `KISO_THEME`
 	 *  still outranks it — the environment is the more local answer. */
 	readonly theme?: "dark" | "light";
+	/** 0.40.0: the catastrophe floor (floor.ts). Default on. USER-LEVEL
+	 *  ONLY, and louder than theme about it: a repository that could lower
+	 *  the floor would be the one thing the floor exists to stop. */
+	readonly floor?: "catastrophe" | "off";
 	/** DT-1a: named acceptance checks a delegated task may reference —
 	 *  user-authored (or trust-gated project) commands, run by the PARENT
 	 *  in the child's worktree. A model never supplies a command; it names
@@ -130,6 +134,7 @@ export function parseConfig(text: string, source: string): KisoConfig {
 		autoCompact?: AutoCompactConfig;
 		projectTrust?: "ask" | "never";
 		theme?: "dark" | "light";
+		floor?: "catastrophe" | "off";
 		checks?: Record<string, string>;
 	} = {};
 	const obj = raw as Record<string, unknown>;
@@ -145,6 +150,11 @@ export function parseConfig(text: string, source: string): KisoConfig {
 		if (obj.theme !== "dark" && obj.theme !== "light") fail("theme", 'expected "dark" or "light"');
 		if (source.startsWith("<cwd>")) fail("theme", "belongs in the USER config — a terminal is a property of the person at it, not of the project");
 		out.theme = obj.theme as "dark" | "light";
+	}
+	if (obj.floor !== undefined) {
+		if (obj.floor !== "catastrophe" && obj.floor !== "off") fail("floor", 'expected "catastrophe" or "off"');
+		if (source.startsWith("<cwd>")) fail("floor", "belongs in the USER config — a project must never be able to lower the floor");
+		out.floor = obj.floor as "catastrophe" | "off";
 	}
 	if (obj.checks !== undefined) {
 		if (obj.checks === null || typeof obj.checks !== "object" || Array.isArray(obj.checks)) fail("checks", "expected an object of name → command");

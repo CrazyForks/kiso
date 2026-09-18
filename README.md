@@ -190,7 +190,20 @@ rules you already granted.
 written to `~/.kiso/extensions/dont-ask-again.mjs`, which is human-editable and
 human-deletable: drop a tool from its set, or delete the file, and the next call
 asks. The file is allow-only by design — it can never deny or ask — so the mode
-and safe-defaults moats keep their teeth.
+and safe-defaults moats keep their teeth. It never carries a destructive command
+or a write into `.git/` or `.kiso/`: those reach you every time.
+
+**The catastrophe floor.** In every mode, bypass included, kiso refuses a
+destructive command (`rm`, `git clean -f`, `git reset --hard`,
+`git checkout -- <paths>`, `find … -delete`) whose target cannot be recovered:
+`/` or a system root, your home directory, the workspace root or anything above
+it, `~/.ssh`, `~/.config`, `~/.kiso`, `~/.gnupg`, `~/.aws` or anything inside
+them, a wildcard over any of those, or a target that is only a variable
+(`rm -rf $DIR/`). Everything else runs as the mode says — `rm -rf /tmp/probe`
+runs in bypass. A refusal is recorded as `decidedBy: floor`, and the model is
+told why. The floor reads the command line; it is not a sandbox. `"floor": "off"`
+in `~/.kiso/config.json` turns it off — a project config cannot — and the status
+row then says `floor off`.
 
 Startup: `--mode <name>` or `KISO_MODE=<name>`; the status bar names the tier,
 so the constraint is visible rather than encoded in a hue.
