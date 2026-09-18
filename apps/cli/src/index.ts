@@ -31,7 +31,7 @@ import { createInterface } from "node:readline";
 import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
-import { Body, Editor, PROMPT, bannerLines, currentGround, resolveGround, setGround, escapeTerminal, extensionsBannerText, idColumn, idleStatus, interactivePrompt, palette, renderSessionLine, sessionListFooter, sessionListRow, type ResumeMeta, type SessionCardView } from "@vincemakes/kiso-tui";
+import { Body, Editor, PROMPT, bannerLines, currentGround, resolveGround, setGround, escapeTerminal, extensionsBannerText, idColumn, idleStatus, interactivePrompt, palette, renderSessionLine, sessionListFooter, sessionListHeader, sessionListRow, type ResumeMeta, type SessionCardView } from "@vincemakes/kiso-tui";
 import {
 	createAgent,
 	disposeExtensions,
@@ -41,6 +41,7 @@ import {
 	type AgentDefinition,
 	type ContextPolicy,
 } from "@vincemakes/kiso-runtime";
+import { readProfile } from "@vincemakes/kiso-runtime/internal";
 import { createFauxProvider } from "@vincemakes/kiso-evals";
 import { createCodingTools } from "@vincemakes/kiso-tools-node";
 import { MODES, getMode, modeExtensions, modeFromEnv, modeSystemPrompt, setMode } from "./mode.js";
@@ -330,8 +331,8 @@ function editorInput(editor: Editor): LineInput {
 		// TUI2-R2 ②: the session picker — the editor owns the keys (the
 		// selection walk, the filter, enter/esc), the compositor draws the
 		// band, and the id comes back here.
-		pick(cards, onPick) {
-			editor.beginPick(cards, onPick);
+		pick(cards, onPick, here) {
+			editor.beginPick(cards, onPick, here);
 		},
 		// W22: the pending-turn queue — the ↑ pop walk (the keys); the
 		// chips are the compositor's bindQueue (the dock side).
@@ -795,6 +796,11 @@ async function makeAgent(sessionId: string | undefined, input?: LineInput, model
 	const definition: AgentDefinition = {
 		model,
 		store,
+		// 0.40.0: a NEW session records where it started; the picker scopes by
+		// it. The profile name is recorded only when the model came from a
+		// config profile — a direct provider/model or an env key names none.
+		workspace: workspaceRoot(),
+		...(resolved !== null && merged.models?.[resolved.name] === resolved.profile ? { profileName: resolved.name } : {}),
 		// Area 5: the coding tools are bound to the workspace — every path
 		// they touch is canonicalized inside cwd, escapes are refused.
 		tools: [...createCodingTools(codingToolOptions())], // DC-49 — the options live in state.ts, shared with the `!` command's runner
@@ -856,6 +862,16 @@ async function makeAgent(sessionId: string | undefined, input?: LineInput, model
 	return createAgent(definition);
 }
 
+/** 0.40.0 — the workspace a session records: the realpath of where kiso
+ *  runs, so `/a/link` and `/a/target` are one workspace in the picker. */
+export function workspaceRoot(): string {
+	try {
+		return realpathSync(process.cwd());
+	} catch {
+		return process.cwd();
+	}
+}
+
 /** TUI2-R2 ② — the picker's affordance row: the keys, said where the
  *  keys are useful. */
 const PICKER_HINT = "↑↓ pick · ⏎ resumes · type filters · esc";
@@ -868,7 +884,12 @@ const PICKER_HINT = "↑↓ pick · ⏎ resumes · type filters · esc";
 async function sessionCards(agent: Awaited<ReturnType<typeof makeAgent>>): Promise<SessionCardView[]> {
 	const store = sessionStoreRef;
 	if (store === null) return []; // unreachable: makeAgent builds the store first
-	return collectSessionCards(agent, (id) => store.load(id));
+	// 0.40.0: the recorded workspace and profile name ride each card, read
+	// from the profile sidecar — a listing reads, it never writes
+	return collectSessionCards(agent, (id) => store.load(id), (id) => {
+		const r = readProfile(sessionsDir(), id);
+		return r.kind === "ok" ? { workspace: r.profile.workspace, profileName: r.profile.profileName } : { workspace: null, profileName: null };
+	});
 }
 
 /**
@@ -897,7 +918,8 @@ async function pickSession(agent: Awaited<ReturnType<typeof makeAgent>>, input: 
 	}
 	dock.setStatus("", PICKER_HINT);
 	const picked = await new Promise<string | null>((resolve) => {
-		input.pick!(() => cards, resolve);
+		// 0.40.0: scoped to the running workspace; tab flips to all
+		input.pick!(() => cards, resolve, workspaceRoot());
 	});
 	dock.setStatus("", null);
 	return picked;
@@ -947,8 +969,17 @@ async function pickSession(agent: Awaited<ReturnType<typeof makeAgent>>, input: 
 function bindRestoredSession(session: {
 	readonly model: string;
 	readonly baseUrl: string | undefined;
+	readonly driftAcknowledgement?: { readonly reasoningReset: { readonly thinking: string; readonly effort: string } } | null;
 	setMicrocompactThreshold(n: number): void;
 }): void {
+	// 0.40.0: an acknowledged drift says what it did, once — including the
+	// owner-ruled reasoning reset, which was silent until now.
+	const ack = session.driftAcknowledgement ?? null;
+	if (ack !== null) {
+		const was = ack.reasoningReset;
+		const prior = [was.effort !== "default" ? `effort ${was.effort}` : "", was.thinking !== "default" ? `thinking ${was.thinking}` : ""].filter((s) => s !== "").join(", ");
+		bodyLog(`drift acknowledged — now on ${session.model}; reasoning reset to defaults${prior === "" ? "" : ` (was ${prior})`}`);
+	}
 	setAgentModel(session.model, session.baseUrl);
 	session.setMicrocompactThreshold(
 		microcompactThresholdFor({
@@ -1345,6 +1376,19 @@ async function main(): Promise<void> {
 			args.splice(i, 2);
 		}
 	}
+	// 0.40.0: `kiso sessions --all | --current` — the one command that takes
+	// them. Parsed only there, so neither ever becomes a session id. Absent
+	// = each form's default (TTY: current; pipe: all, today's bytes).
+	let listScope: "all" | "current" | undefined;
+	if (args[0] === "sessions") {
+		for (const flag of ["--all", "--current"] as const) {
+			const i = args.indexOf(flag);
+			if (i === -1) continue;
+			args.splice(i, 1);
+			if (listScope !== undefined && listScope !== flag.slice(2)) throw new CliUsageError("kiso sessions: --all and --current contradict each other");
+			listScope = flag.slice(2) as "all" | "current";
+		}
+	}
 	const [command, arg] = args;
 	// round 8: faux mode is the keyless demo script — an exhausted script must
 	// exit non-zero, never masquerade as a successful provider run. The
@@ -1545,15 +1589,29 @@ async function main(): Promise<void> {
 				// The PIPE keeps today's bytes exactly: `kiso sessions` is
 				// something scripts read, and a badge column is a TTY-render
 				// concern, not a change to a machine interface.
+				// 0.40.0 (lead's ruling): the TTY defaults to THIS workspace and
+				// says so in a header line with both counts; the PIPE defaults to
+				// every session with today's bytes — scripts must not change
+				// under them. An explicit --all or --current applies to both.
+				const here = workspaceRoot();
 				if (process.stdout.isTTY) {
-					const cards = await sessionCards(agent);
+					const every = await sessionCards(agent);
+					const all = (listScope ?? "current") === "all";
+					const inHere = every.filter((c) => c.workspace === here);
+					const cards = all ? every : inHere;
 					const W = process.stdout.columns ?? 80;
 					const col = idColumn(cards);
 					const now = Date.now();
-					for (const card of cards) console.log(sessionListRow(card, W, now, col));
+					console.log(sessionListHeader(inHere.length, every.length, all, W));
+					for (const card of cards) console.log(sessionListRow(card, W, now, col, all ? here : null));
 					console.log(sessionListFooter(cards.length, W));
 				} else {
+					const workspaceOf = (id: string): string | null => {
+						const r = readProfile(sessionsDir(), id);
+						return r.kind === "ok" ? r.profile.workspace : null;
+					};
 					for (const meta of agent.sessions()) {
+						if (listScope === "current" && workspaceOf(meta.id) !== here) continue;
 						console.log(renderSessionLine(meta));
 					}
 				}
@@ -1655,7 +1713,7 @@ async function main(): Promise<void> {
 						"  kiso chat [sessionId]    same as above\n" +
 						"  kiso resume              pick a session to continue (TTY picker)\n" +
 						"  kiso resume <id> [prompt]   continue a session (one-shot)\n" +
-						"  kiso sessions           list durable sessions\n" +
+						"  kiso sessions [--all|--current]   list durable sessions (a terminal shows this workspace's by default)\n" +
 						"  kiso login <provider>    anthropic|openai|deepseek|zai: store an API key (hidden prompt, or stdin when piped);\n" +
 						"                           chatgpt: sign in with a ChatGPT subscription (browser; unofficial third-party flow)\n" +
 						"  kiso logout <provider>   remove the stored credential\n" +

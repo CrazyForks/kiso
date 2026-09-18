@@ -114,10 +114,16 @@ export {
 	sessionCounterRow,
 	sessionFilter,
 	sessionListFooter,
+	sessionListHeader,
 	sessionListRow,
 	sessionNote,
 	sessionPickerRows,
 	sessionRow,
+	// 0.40.0: the workspace scope — pure, so `kiso sessions` and the picker
+	// scope by one rule
+	scopeSessions,
+	scopeTitle,
+	type PickScopeState,
 	type SessionCardView,
 	type SessionPickState,
 } from "./session-picker.js";
