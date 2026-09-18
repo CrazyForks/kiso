@@ -17,7 +17,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -464,6 +464,67 @@ describe("Modes (real PTY, 24×80) — plan mode, /mode switching, the audit tra
 		expect(asked, "only the .git write was put to the human").toEqual(["w2"]);
 		const decided = decidedEvents(env, "modes-pw");
 		expect(decided.find((e) => e.callId === "w1")).toMatchObject({ decision: "approved", decidedBy: "mode:accept-edits" });
+	}, 90_000);
+
+	it("0.40.0 dontAsk (review B5): an interrupted execution is left undecided with one line — no panel — and a turn behind it is held", () => {
+		const { env } = isolatedEnv();
+		const dir = mkdtempSync(join(tmpdir(), "kiso-modes-"));
+		const workdir = join(dir, "work");
+		mkdirSync(workdir, { recursive: true });
+		// the aborted-mid-tool shape: a closed run whose shell execution
+		// started and never reported
+		const sessions = join(env.KISO_HOME!, "sessions");
+		mkdirSync(sessions, { recursive: true });
+		const lines = [
+			{ type: "user_input", content: "clean up" },
+			{ type: "tool_call_end", callId: "u1", name: "shell", input: { command: "touch x" } },
+			{ type: "tool_execution_started", callId: "u1", invocationSeq: 1, name: "shell", input: { command: "touch x" }, executionId: "ex-u1" },
+			{ type: "terminal", outcome: { kind: "aborted", by: "user" } },
+		].map((event, seq) => JSON.stringify({ runId: "runA", ts: seq, event: { ...event, seq } }));
+		writeFileSync(join(sessions, "modes-unc.jsonl"), `${lines.join("\n")}\n`, "utf8");
+		const script = join(dir, "faux.json");
+		writeFileSync(script, JSON.stringify([{ events: [{ type: "text_delta", text: "never reached" }, { type: "stop", reason: "end_turn" }] }]), "utf8");
+		const out = ptyRun(
+			{ ...env, KISO_FAUX_SCRIPT: script },
+			[
+				["left unresolved", ""],
+				["▌ ", "go\r"],
+				["turn held", "exit\r"],
+			],
+			workdir,
+			{ modeFlag: "dontAsk", session: "modes-unc" },
+		);
+		const clean = stripANSI(out);
+		expect(clean).toContain("[dontAsk] 1 uncertain execution left unresolved — resolve them in an asking mode");
+		expect(clean, "no recovery panel opened").not.toContain("rerun");
+		expect(clean).toContain("turn held");
+		// nothing was fabricated: no resolution was recorded
+		const events = new SessionStore(sessions).load("modes-unc").map((r) => r.event.type);
+		expect(events).not.toContain("tool_execution_resolved");
+	}, 90_000);
+
+	it("0.40.0 dontAsk (review B5): an untrusted project .kiso on a TTY is not loaded and not asked about, and nothing is recorded", () => {
+		const { env } = isolatedEnv();
+		const dir = mkdtempSync(join(tmpdir(), "kiso-modes-"));
+		const workdir = join(dir, "work");
+		mkdirSync(join(workdir, ".kiso"), { recursive: true });
+		writeFileSync(join(workdir, ".kiso", "config.json"), `${JSON.stringify({ contextWindow: 100000 })}\n`, "utf8");
+		const script = join(dir, "faux.json");
+		writeFileSync(script, JSON.stringify([{ events: [{ type: "text_delta", text: "ok" }, { type: "stop", reason: "end_turn" }] }]), "utf8");
+		const out = ptyRun(
+			{ ...env, KISO_FAUX_SCRIPT: script },
+			[
+				["▌ ", "exit\r"],
+			],
+			workdir,
+			{ modeFlag: "dontAsk", session: "modes-trust" },
+		);
+		const clean = stripANSI(out);
+		expect(clean).toContain("[dontAsk] [project .kiso] found 1 artifact(s)");
+		expect(clean, "no trust panel opened").not.toContain("trust this project's .kiso?");
+		// no sticky refusal: a later asking session can still decide
+		const store = join(env.KISO_HOME!, "trust.jsonl");
+		expect(existsSync(store) ? readFileSync(store, "utf8") : "").not.toContain(realpathSync(workdir));
 	}, 90_000);
 
 	it("KISO_MODE=plan in a PIPE: same enforcement, byte-plain, no human pause", () => {

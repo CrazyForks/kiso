@@ -316,8 +316,11 @@ export async function resolveProjectTrust(input: LineInput): Promise<ProjectArti
 	if (record?.decision === "refused") return null; // refused is sticky — no re-ask
 	// First discovery — list every artifact (file name + digest short
 	// prefix) and ask the human ONCE.
-	if (!process.stdin.isTTY) {
-		console.error(projectUntrustedNote(artifacts.files.length, artifacts.root));
+	// The lead's review of #63, B5: dontAsk takes this same path — nothing
+	// asks, so the project is not loaded, the note says so, and no refusal
+	// is recorded (a later asking session can still decide).
+	if (!process.stdin.isTTY || getMode() === "dontAsk") {
+		console.error(`${getMode() === "dontAsk" ? "[dontAsk] " : ""}${projectUntrustedNote(artifacts.files.length, artifacts.root)}`);
 		return null;
 	}
 	// v2c: the shared input (the editor on a TTY) reads the answer.
@@ -471,6 +474,15 @@ export async function resolveUncertains(
 	input: LineInput,
 	isCancelled: () => boolean,
 ): Promise<void> {
+	// The lead's review of #63, B5: under dontAsk nothing asks, so the
+	// uncertain executions are left exactly as a cancel leaves them —
+	// uncertain and durable, no rerun or abandon fabricated — and the one
+	// line says what to do. An unattended session must not sit on a panel.
+	if (getMode() === "dontAsk") {
+		const n = session.uncertainExecutions().length;
+		if (n > 0) bodyLog(`[dontAsk] ${n} uncertain execution${n === 1 ? "" : "s"} left unresolved — resolve them in an asking mode`);
+		return;
+	}
 	for (const uncertain of session.uncertainExecutions()) {
 		// KC3.5 §4: an interrupted ask_user is not a side effect that may
 		// have applied — it is a question nobody answered. The COPY says
