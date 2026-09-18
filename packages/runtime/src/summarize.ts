@@ -14,8 +14,8 @@
  * lands on disk; the original events stay there forever.
  */
 
-import { estimateTokens, DO_NOT_COMPACT } from "@vincemakes/kiso-core";
-import type { AbortSignalLike, Adapter } from "@vincemakes/kiso-core";
+import { estimateTokens, DO_NOT_COMPACT, DEFAULT_MAX_RETRIES, RETRY_AFTER_MAX_MS, retryDelayMs } from "@vincemakes/kiso-core";
+import type { AbortSignalLike, Adapter, RetryInfo } from "@vincemakes/kiso-core";
 import type { Event } from "@vincemakes/kiso-core";
 import type { Message } from "@vincemakes/kiso-core";
 import type { RawUsage } from "./usage/canonical.js";
@@ -291,6 +291,12 @@ export interface SummarizeConversationOptions {
 	 *  values from `resolveReasoning`, never a raw field. Absent sends
 	 *  nothing, and the provider's default applies. */
 	readonly reasoning?: { readonly thinking?: "adaptive" | "enabled" | "disabled"; readonly effort?: string };
+	/** ADR-0005 Amendment 2: the kernel's retry budget, applied to this
+	 *  off-loop call. Absent, the kernel's default. */
+	readonly maxRetries?: number;
+	/** ADR-0005 Amendment 2: announced before each wait, as the kernel
+	 *  announces its own. Observation only — a throw is swallowed. */
+	readonly onRetry?: (info: RetryInfo) => Promise<void> | void;
 }
 
 /** The summary call's result — the text PLUS the provider-reported usage
@@ -314,18 +320,31 @@ function retryableStructured(err: unknown): boolean {
 	return typeof e.code === "string" && typeof e.message === "string" && e.retryable === true;
 }
 
-/** How long to wait before the one retry. The provider's own ask when it
- *  made one and it is short enough to be worth honouring; otherwise a
- *  token pause — the failure this exists for is a dropped stream, not a
- *  rate limit, and an immediate second attempt is the right response to
- *  a socket that died. */
-function retryWaitMs(err: unknown): number {
+/** The provider's own Retry-After, when the adapter normalized one. */
+function askedWaitMs(err: unknown): number | undefined {
 	const asked = (err as { retryAfterMs?: unknown }).retryAfterMs;
-	return typeof asked === "number" && Number.isFinite(asked) && asked >= 0 && asked <= 60_000 ? asked : 250;
+	return typeof asked === "number" && Number.isFinite(asked) && asked >= 0 ? asked : undefined;
+}
+
+/** The kernel's abortable wait, restated for the one call that is not the
+ *  kernel's: a cancel during the backoff wakes it at once. */
+function wait(ms: number, signal?: AbortSignalLike): Promise<void> {
+	return new Promise((resolve) => {
+		if (signal?.aborted === true) return resolve();
+		const timer = setTimeout(resolve, ms);
+		signal?.addEventListener?.(
+			"abort",
+			() => {
+				clearTimeout(timer);
+				resolve();
+			},
+			{ once: true },
+		);
+	});
 }
 
 /**
- * The summary call, with ONE retry.
+ * The summary call, retried under the KERNEL'S policy.
  *
  * 0.39.1: `/compact` had no retry at all. The kernel owns retries
  * (ADR-0005) and this path does not go through the kernel — it calls the
@@ -335,11 +354,18 @@ function retryWaitMs(err: unknown): number {
  * (the transport-failure-after-headers class); here is the only place
  * that can act on it.
  *
- * ONE retry, not a loop, and not the kernel's budget: a summary re-pays
- * its whole input, which on the sessions that need compacting is the
- * most expensive request the session makes. A permanent error still
- * throws on the first attempt — the retry is keyed on the classification
- * the adapter already made, never on the fact that something failed.
+ * 0.39.1 gave it ONE retry after 250 ms. ADR-0005 Amendment 2 gives it the
+ * kernel's rule instead, because a dropped summary stream is the same
+ * failure as a dropped turn and meets the same gateway: the same curve,
+ * the same budget (the same `maxRetries` knob), Retry-After as a floor and
+ * a wait beyond RETRY_AFTER_MAX_MS as an explicit stop — never a retry
+ * that comes early — and the same announcement before each wait. Each
+ * retry re-pays the summary's input, exactly as each turn retry re-pays
+ * the turn's; the budget that bounds one bounds the other.
+ *
+ * A permanent error still throws on the first attempt — the retry is
+ * keyed on the classification the adapter already made, never on the
+ * fact that something failed.
  */
 export async function summarizeConversation(options: SummarizeConversationOptions): Promise<SummarizeConversationResult> {
 	// Asked as a CALL, twice, because `aborted` is a readonly property and
@@ -351,15 +377,28 @@ export async function summarizeConversation(options: SummarizeConversationOption
 	// having if the first budget was chosen small — which is why the manual
 	// gesture now asks for the whole measured budget up front instead
 	// (see `MANUAL_SUMMARY_BUDGET`).
-	try {
-		return await summaryAttempt(options);
-	} catch (err) {
-		// The caller's cancel is the caller's: an aborted `/compact` must
-		// not spend a second call on its way out.
-		if (!retryableStructured(err) || aborted()) throw err;
-		await new Promise((r) => setTimeout(r, retryWaitMs(err)));
-		if (aborted()) throw err;
-		return await summaryAttempt(options);
+	const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
+	for (let attempts = 0; ; attempts += 1) {
+		try {
+			return await summaryAttempt(options);
+		} catch (err) {
+			// The caller's cancel is the caller's: an aborted `/compact` must
+			// not spend another call on its way out.
+			if (!retryableStructured(err) || aborted() || attempts >= maxRetries) throw err;
+			const asked = askedWaitMs(err);
+			const delay = retryDelayMs(attempts + 1, asked);
+			const e = err as { code: string; message: string };
+			if (delay > RETRY_AFTER_MAX_MS) {
+				throw { ...e, retryable: false, message: `${e.message} (the provider asked to wait ${asked}ms — beyond the ${RETRY_AFTER_MAX_MS}ms cap; not retried)` };
+			}
+			try {
+				await options.onRetry?.({ attempt: attempts + 1, maxRetries, code: e.code, delayMs: delay, midStream: false });
+			} catch {
+				// observation only
+			}
+			await wait(delay, options.signal);
+			if (aborted()) throw err;
+		}
 	}
 }
 

@@ -48,6 +48,22 @@ export interface HookHost {
 	onPause?(reason: string, ctx: HookContext): Promise<void>;
 	/** Lifecycle: the loop is about to stop. */
 	onStop?(reason: string, ctx: HookContext): Promise<void>;
+	/** Lifecycle: the loop is about to WAIT and retry the model request
+	 *  (ADR-0005 Amendment 2). Observation only — it cannot change the
+	 *  decision, it writes nothing, and a throw is swallowed. */
+	onRetry?(info: RetryInfo, ctx: HookContext): Promise<void>;
+}
+
+/** What a retry is, as the loop announces it: the attempt about to be
+ *  made, the budget it is counted against, the classified error code,
+ *  the wait before it, and whether a draft had already streamed (a
+ *  mid-stream retry voids that draft first — ADR-0005 Amendment 1). */
+export interface RetryInfo {
+	readonly attempt: number;
+	readonly maxRetries: number;
+	readonly code: string;
+	readonly delayMs: number;
+	readonly midStream: boolean;
 }
 
 /** Every hook optional; unset = pass-through. The kernel runs with this. */

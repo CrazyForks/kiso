@@ -149,10 +149,33 @@ export function composeRow(head: string, segments: readonly (RowSegment | null |
  * — stop, and do THIS instead. The row is where the gesture is taught,
  * because it is on screen exactly when the gesture is useful.
  */
-export function runningStatus(glyph: string, since: number, outTokens: number | null, ctxRatio: number, tokPerSec: number | null = null, W?: number): string {
+/** ADR-0005 Amendment 2 — a retry the kernel is waiting on, as the row
+ *  shows it. `remainingMs` is how much of the wait is left; at or below
+ *  zero the attempt is in flight and the countdown is gone. */
+export interface RetryOnRow {
+	readonly attempt: number;
+	readonly maxRetries: number;
+	readonly code: string;
+	readonly remainingMs: number;
+}
+
+/** `retrying 3/10 · network · 4s` — ONE fact: the attempt, the budget it
+ *  counts against, what failed, and how long until it is tried. Whole
+ *  seconds, rounded UP, so the row never says 0s while still waiting. */
+export function retrySegment(r: RetryOnRow): string {
+	const head = `retrying ${r.attempt}/${r.maxRetries} · ${r.code}`;
+	return r.remainingMs > 0 ? `${head} · ${Math.ceil(r.remainingMs / 1000)}s` : head;
+}
+
+export function runningStatus(glyph: string, since: number, outTokens: number | null, ctxRatio: number, tokPerSec: number | null = null, W?: number, retry?: RetryOnRow | null): string {
 	const out = outTokens !== null ? ` ↓ ${kUnit(outTokens)} tokens` : "";
 	const seconds = Math.max(1, Math.round((Date.now() - since) / 1000));
 	return composeRow(`${glyph} working ${elapsedLabel(seconds)}${out}`, [
+		// ADR-0005 Amendment 2: a pending retry is a FACT and sits first — it
+		// is the one thing on the row that explains why nothing is arriving,
+		// and a retry budget of minutes with nothing on screen reads as a
+		// hung session.
+		retry != null ? { kind: "fact", text: retrySegment(retry) } : null,
 		// TPS-1: after each call SETTLES within the turn, between the tokens
 		// segment and the stop hint. The default is null and that is the
 		// honest rule spelled as a default — the recovery flow has no
@@ -171,11 +194,14 @@ export function runningStatus(glyph: string, since: number, outTokens: number | 
  * inline template in dispatch (0.40.0) so it composes like every other
  * row and has a place for what the launch build adds to it.
  */
-export function compactingStatus(glyph: string, rounds: number, tokens: number, elapsedSeconds: number, W?: number): string {
+export function compactingStatus(glyph: string, rounds: number, tokens: number, elapsedSeconds: number, W?: number, retry?: RetryOnRow | null): string {
 	return composeRow(`${glyph} compacting`, [
 		{ kind: "fact", text: `${rounds} rounds` },
 		{ kind: "fact", text: `~${kUnit(tokens)} tokens` },
 		{ kind: "fact", text: `${Math.max(0, elapsedSeconds)}s` },
+		// ADR-0005 Amendment 2: the summary call retries under the kernel's
+		// policy, and a retry here is the same fact it is on the running row.
+		retry != null ? { kind: "fact", text: retrySegment(retry) } : null,
 	], W);
 }
 
