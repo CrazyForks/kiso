@@ -12,7 +12,7 @@ import { MODES, MODE_NOTE, OFFERED_MODES, getMode, setMode } from "./mode.js";
 import { clipboardWrite, lastAnswer } from "./clipboard.js";
 import { agentModel, body, bodyLog, codingToolOptions, kisoHome, configModels, dock, lastBinding, loadedSkillsCatalog, mergedConfig, readContextLedger, retryOnRow, sessionsDir, setAgentModel, setConfiguredWindow, setCurrentModelName, setModelChoice, setRetryShown, type LineInput , setLastBinding } from "./state.js";
 import { adapterOptionsFor } from "./auth/adapter-options.js";
-import { microcompactThresholdFor } from "./chat.js";
+import { contextWindowTokens, microcompactThresholdFor } from "./chat.js";
 import { authForProfile, directWriteProfile, profileAvailable, resolveContextWindow, unavailableReason, type ModelProfile } from "./config.js";
 import { shellTool } from "@vincemakes/kiso-tools-node";
 import { dirname, join } from "node:path";
@@ -721,6 +721,8 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 										...(profile.baseUrl !== undefined ? { baseUrl: profile.baseUrl } : {}),
 									}),
 								},
+								// A1b: the in-run tiers are drawn from the same window.
+								contextWindow: contextWindowTokens({ model: profile.model, ...(profile.baseUrl !== undefined ? { baseUrl: profile.baseUrl } : {}) }),
 								// OR-1: the endpoint is the fourth passenger — the cost
 								// path and the window lookup key on (model, endpoint).
 								...(profile.baseUrl !== undefined ? { baseUrl: profile.baseUrl } : {}),

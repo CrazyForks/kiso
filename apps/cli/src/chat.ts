@@ -869,6 +869,12 @@ export async function consumeRun(
 		// the stream watchdog and the repeated-failure breaker remain active.
 		// W22-R1: the ledger sees every event; a stop is what ends a call.
 		ledger.observe(ev);
+		// ADR-0055 Amendment 1 (A1b): a compaction inside the run says so, once.
+		if (ev.type === "summarized" || ev.type === "microcompacted") {
+			const r = displayCtxRatio(session);
+			const ctx = Number.isFinite(r) ? ` · ctx now ~${Math.round(r * 100)}% used` : "";
+			body.notice(ev.type === "summarized" ? `✦ compacted mid-run — the conversation before this point is a summary now${ctx}` : `✦ pruned old tool output mid-run${ctx}`);
+		}
 		if (ev.type !== "thinking") {
 			if (thinkingSince !== null) {
 				thoughtSeconds += (Date.now() - thinkingSince) / 1000;
