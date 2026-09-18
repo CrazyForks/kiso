@@ -4,7 +4,7 @@
  * verbatim from session.ts.
  */
 
-import { denialResult, loop, type AbortSignalLike, type Adapter, type ApprovalChain, type ChainVerdict, type ContentBlock, type Event, type EventLog, type HookHost, type PermissionDecision, type ToolCallPayload, type ToolResult } from "@vincemakes/kiso-core";
+import { denialResult, estimateTokens, loop, type AbortSignalLike, type Adapter, type ApprovalChain, type ChainVerdict, type ContentBlock, type Event, type EventLog, type HookHost, type PermissionDecision, type ToolCallPayload, type ToolResult } from "@vincemakes/kiso-core";
 import type { SessionStore } from "./store.js";
 import { ABORTED, MergedSignal, abortable, openRunId } from "./recovery.js";
 import { resolveReasoning, type WireReasoning } from "./provider/metadata.js";
@@ -135,7 +135,13 @@ export class Run implements AsyncIterable<Event> {
 			// extension providing a compaction config supplies it. E6: the
 			// contextPolicy override beats the session's own, and its minTurns
 			// no-fire guard may omit the config below the floor.
-			const microcompact = microcompactFor(this.#config, log.all);
+			const configured = microcompactFor(this.#config, log.all);
+			// 0.40.0: the trigger reads the context as the last BILL measured
+			// it (context-anchor.ts), the estimate only when no bill describes it.
+			const microcompact =
+				configured === undefined
+					? undefined
+					: { ...configured, measure: (events: readonly Event[], messages: Parameters<typeof estimateTokens>[0]) => this.#session.contextAnchor(events) ?? estimateTokens(messages) };
 			// E2: the session's own systemPrompt first, then every extension
 			// append in LOAD order — deterministic (same extensions → same
 			// prompt); no appends → byte-identical to the extension-less run.

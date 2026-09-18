@@ -164,13 +164,13 @@ export function microcompactThresholdFor(of?: { readonly model: string; readonly
 }
 
 /**
- * B area: approximate context ratio — chars/4 of the projected messages vs
- * the model window. Marked ~ everywhere it is shown; no counting API.
+ * B area: approximate context ratio vs the model window. Marked ~
+ * everywhere it is shown. 0.40.0: the context as the last bill measured it
+ * (session.contextUsed — the estimate only when no bill describes it);
+ * chars/4 alone read the owner's 730k Chinese-heavy context as ~470k.
  */
 export function estimateCtxRatio(session: AgentSession): number {
-	const projected = session.projected();
-	const chars = JSON.stringify(projected).length;
-	return chars / 4 / contextWindowTokens();
+	return session.contextUsed() / contextWindowTokens();
 }
 
 /** A1a: the ratio the STATUS LINE and the ctx displays show — the request
@@ -195,6 +195,10 @@ export function displayCtxRatio(session: AgentSession): number {
 	// NaN reaches the status row as `ctx ?`.
 	const window = knownContextWindow();
 	if (window === null) return Number.NaN;
+	// 0.40.0: the last bill is the truth when one describes the context;
+	// the parts estimate is for a session no bill describes yet.
+	const anchored = session.contextAnchor();
+	if (anchored !== undefined) return anchored / window;
 	return requestBudget(session.requestParts(), window).ratio;
 }
 

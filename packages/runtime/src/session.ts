@@ -64,6 +64,7 @@ import {
 	summaryBoundarySeq,
 } from "./summarize.js";
 import { canonicalizeUsageForModel } from "./usage/canonical.js";
+import { contextAnchor } from "./context-anchor.js";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { estimateTokens } from "@vincemakes/kiso-core";
@@ -219,6 +220,8 @@ export class AgentSession {
 	/** E6 (h): the circuit-breaker counter — consecutive auto-policy
 	 *  summary failures this session (a success resets it). */
 	#summaryFailures = 0;
+	/** 0.40.0: usage at or before this seq was billed under another model — never an anchor. */
+	#anchorFloorSeq = -1;
 
 	/** Permanently invalidate the session after a rejected disk write (round 1). */
 	poison(reason: string): void {
@@ -312,6 +315,27 @@ export class AgentSession {
 		return projectMessages(this.log.all);
 	}
 
+	/** 0.40.0: the context as the last bill measured it, plus what the log
+	 *  appended since — or undefined when no bill describes it any more
+	 *  (context-anchor.ts). `events` defaults to the session's log. */
+	contextAnchor(events: readonly Event[] = this.log.all): number | undefined {
+		return contextAnchor(
+			events,
+			(u) => {
+				const c = canonicalizeUsageForModel(this.#model, this.#baseUrl, this.#provider ?? "adapter", u);
+				return c.input + c.cacheRead + (c.cacheWrite ?? 0) + c.output;
+			},
+			this.#anchorFloorSeq,
+		);
+	}
+
+	/** 0.40.0: what the context holds — the anchored figure, or the estimate
+	 *  over the projection when no bill describes it. The thresholds and the
+	 *  ctx row read this, never the bare estimate. */
+	contextUsed(): number {
+		return this.contextAnchor() ?? estimateTokens(this.projected());
+	}
+
 	/**
 	 * merge round B (/model): replace the adapter for SUBSEQUENT runs. The
 	 * kernel reads the adapter through the loop-config closure at each
@@ -356,6 +380,11 @@ export class AgentSession {
 		 *  model's window must not silently reset the policy to nothing. */
 		readonly microcompact?: { readonly thresholdTokens: number };
 	}): void {
+		// 0.40.0: another model counts tokens differently — the last bill
+		// stops describing the context until the new model sends one.
+		if (binding.model !== this.#model || binding.provider !== this.#provider || binding.baseUrl !== this.#baseUrl) {
+			this.#anchorFloorSeq = this.log.all.at(-1)?.seq ?? -1;
+		}
 		this.#adapter = binding.adapter;
 		this.#model = binding.model;
 		this.#provider = binding.provider;
@@ -721,7 +750,7 @@ export class AgentSession {
 		// summary call every run).
 		const maxFailures = mode.maxFailures ?? MAX_SUMMARY_FAILURES;
 		if (this.#summaryFailures >= maxFailures) return;
-		if (estimateTokens(this.projected()) <= triggerTokens) return;
+		if (this.contextUsed() <= triggerTokens) return;
 		try {
 			await this.summarize({
 				keepRounds: mode.keepRounds ?? KEEP_RECENT_ROUNDS,
