@@ -47,7 +47,8 @@ import { assessTasks, type TaskAssessment } from "./task-assessment.js";
  *  verification surface. Override per call for custom evidence tools. */
 const DEFAULT_EVIDENCE_TOOLS: ReadonlySet<string> = new Set(["shell"]);
 import { denialResult, type ContinuationScope } from "@vincemakes/kiso-core";
-import { buildProfile, readProfile, writeProfile } from "./profile.js";
+import { buildProfile, readProfile, writeProfile, writeSummary } from "./profile.js";
+import { summarizeEvents } from "./session-summary.js";
 import { resolveReasoning, type ReasoningSetting } from "./provider/metadata.js";
 import {
 	DROP_PLACEHOLDER,
@@ -467,6 +468,33 @@ export class AgentSession {
 	/** XP-1: the selected reasoning axes (resolution happens per request). */
 	get reasoning(): ReasoningSetting {
 		return this.#reasoning;
+	}
+
+	/**
+	 * The 0.40.0 dogfood (item 2): the session list's row, written into the
+	 * sidecar's `summary` tenant at a run's start (`open`) and at its end.
+	 * Computed from the IN-MEMORY log — never a re-read of the file — and
+	 * best-effort: a summary that cannot be written leaves the list saying
+	 * less, and never fails the run. Observation only: nothing that decides
+	 * recovery, projection or a request reads it.
+	 */
+	recordSummary(open: boolean): void {
+		try {
+			const prior = readProfile(this.#store.root, this.id);
+			writeSummary(
+				this.#store.root,
+				this.id,
+				summarizeEvents(this.log.all, {
+					open,
+					updatedAt: Date.now(),
+					asks: open ? 0 : this.pendingApprovals().length,
+					workspaceUnknown: !(prior.kind === "ok" && prior.profile.workspace !== null),
+					source: "run",
+				}),
+			);
+		} catch {
+			// observation only — the row says less; the run is untouched
+		}
 	}
 
 	/** XP-1: record the live binding as the next durable profile revision

@@ -69,12 +69,10 @@ export class PickInput {
 
 	/** 0.40.0 — tab flips CURRENT ↔ ALL. The filter owns every printable
 	 *  key (the buffer IS the query), so the toggle cannot be one. True when
-	 *  the picker owned the key. A picker that fell back to ALL (nothing is
-	 *  from here) has nothing to flip to: the key is taken and does nothing. */
+	 *  the picker owned the key. */
 	toggleScope(): boolean {
 		const view = this.state();
 		if (view === null || view.scope === null || view.scope === undefined) return false;
-		if (view.scope.fellBack) return true;
 		this.#all = !this.#all;
 		this.#sel = 0;
 		this.host.reflow();
@@ -86,7 +84,10 @@ export class PickInput {
 	 *  the one "no match" row) + the counter. */
 	rows(): number {
 		const view = this.state();
-		return view === null ? 0 : Math.min(Math.max(view.matches.length, 1), AT_VISIBLE) + 2;
+		if (view === null) return 0;
+		// 0.40.1: + the unknown-workspace row, when CURRENT shows it
+		const unknownRow = view.scope != null && !view.scope.all && view.scope.unknown > 0 ? 1 : 0;
+		return Math.min(Math.max(view.matches.length, 1), AT_VISIBLE) + 2 + unknownRow;
 	}
 
 	/** ↑↓: the selection walks the matches and stops at both ends. True

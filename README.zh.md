@@ -88,15 +88,15 @@ kiso resume <id> [prompt]      在新进程里续跑某个会话
 kiso sessions                  列出持久会话及其状态
 ```
 
-`kiso resume` 不带 id 时打开选择器:一行一个会话,方向键走,输入即筛选,回车续跑。每行带一个**持久性徽章**——kiso 真正会恢复进入的状态,只读自会话自己的持久日志:
+`kiso resume` 不带 id 时打开选择器:一行一个会话,方向键走,输入即筛选,回车续跑。每行用**文字**写出 kiso 真正会恢复进入的状态(不用符号),只读自会话自己的持久日志:
 
-| 徽章 | 含义 | `kiso resume` 会做什么 |
+| 行尾的说明 | 含义 | `kiso resume` 会做什么 |
 |---|---|---|
-| `✓` | 运行干净结束 | 从已结算的会话续上 |
-| `✗` | 以别的方式结束(错误、中止、超turn) | 从停下的地方续上 |
-| `▌` | **没有 terminal 事件——运行中途被打断** | 从持久前缀精确恢复轨迹 |
-| `?` | uncertain 账本非空 | 先请你对被打断的副作用作出裁决 |
-| `◌` | 有没人回答的权限请求 | 把问题重新摆回你面前 |
+| `completed clean` | 运行干净结束 | 从已结算的会话续上 |
+| `failed`,或结局本身(`aborted`、`max turns`) | 以别的方式结束 | 从停下的地方续上 |
+| `interrupted mid-run — resumes exactly` | **没有 terminal 事件** | 从持久前缀精确恢复轨迹 |
+| `N uncertain — needs your verdict` | uncertain 账本非空 | 先请你对被打断的副作用作出裁决 |
+| `N asks pending` | 有没人回答的权限请求 | 把问题重新摆回你面前 |
 
 **上下文缓解默认开启。** 越过模型窗口的一半后,会追加一个 `microcompacted` 边界事件,投影据此推导压缩视图——旧的 read/list/search/shell 输出变成固定占位符,写入与编辑永远不变。`/compact` 把更早的**对话**压缩成一条持久摘要。两者都是持久化事实,所以崩溃后恢复会落在字节一致的投影上——见 [docs/context.md](docs/context.md)。
 

@@ -111,10 +111,40 @@ export function profilePath(root: string, sessionId: string): string {
 	return join(root, `${sessionId}.meta.json`);
 }
 
+/** The sidecar's tenants as they are on disk NOW — the writer of one
+ *  tenant carries the other's bytes through untouched. An unreadable file
+ *  yields {}: the writer that follows replaces it (the profile path's own
+ *  fail-closed read is readProfile, which a writer never bypasses). */
+function currentTenants(root: string, sessionId: string): Record<string, unknown> {
+	try {
+		const parsed = JSON.parse(readFileSync(profilePath(root, sessionId), "utf8")) as unknown;
+		return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+	} catch {
+		return {};
+	}
+}
+
 /** Atomic, fail-closed write: a reader sees the previous revision or the
  *  new one, never a torn file — and the RENAME itself is made durable by
- *  the parent-directory fsync. */
+ *  the parent-directory fsync. 0.40.0 dogfood: the file holds two tenants
+ *  (`profile`, `summary`); writing one preserves the other. */
 export function writeProfile(root: string, sessionId: string, profile: ExecutionProfile): void {
+	writeTenants(root, sessionId, { ...currentTenants(root, sessionId), profile });
+}
+
+/** The 0.40.0 dogfood's `summary` tenant — what the session list reads
+ *  instead of the log. Preserves the `profile` tenant byte for byte. */
+export function writeSummary(root: string, sessionId: string, summary: import("./session-summary.js").SessionSummary): void {
+	writeTenants(root, sessionId, { ...currentTenants(root, sessionId), summary });
+}
+
+/** The summary tenant, or null (no sidecar, no summary, or unreadable). */
+export function readSummary(root: string, sessionId: string): import("./session-summary.js").SessionSummary | null {
+	const t = currentTenants(root, sessionId).summary as Record<string, unknown> | undefined;
+	return t !== undefined && typeof t.updatedAt === "number" ? (t as unknown as import("./session-summary.js").SessionSummary) : null;
+}
+
+function writeTenants(root: string, sessionId: string, tenants: Record<string, unknown>): void {
 	const path = profilePath(root, sessionId);
 	const tmpDir = mkdtempSync(join(root, ".meta-"));
 	const tmp = join(tmpDir, "meta.json");
@@ -123,7 +153,7 @@ export function writeProfile(root: string, sessionId: string, profile: Execution
 		// because rename preserves it, and rename is the only path by which
 		// this file comes into existence. Existing files are not migrated —
 		// R6's choice, kept.
-		writeFileSync(tmp, `${JSON.stringify({ profile }, null, "\t")}\n`, { mode: 0o600 });
+		writeFileSync(tmp, `${JSON.stringify(tenants, null, "\t")}\n`, { mode: 0o600 });
 		const fd = openSync(tmp, "r");
 		try {
 			fsyncSync(fd);
@@ -158,6 +188,10 @@ export function readProfile(root: string, sessionId: string): ProfileReadResult 
 	}
 	try {
 		const parsed = JSON.parse(raw) as { profile?: ExecutionProfile };
+		// 0.40.0 dogfood: a sidecar that holds ONLY the summary tenant (a legacy
+		// session the list summarised) has no profile — absent, never corrupt:
+		// "corrupt" BLOCKS the session from opening, and nothing is wrong
+		if (parsed !== null && typeof parsed === "object" && !("profile" in parsed)) return { kind: "absent" };
 		const p = parsed.profile;
 		if (
 			p === undefined ||
