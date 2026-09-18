@@ -570,3 +570,153 @@ all.
   wrong and should go. The reserve guard and the overflow recovery would
   still stand on their own: they answer the single jump and the hard stop,
   which microcompact does not.
+
+
+## Amendment 1 (2026-09-18) — tiers, a phase boundary, an in-band summariser, and pruning demoted to a primitive
+
+- **Status:** approved by the lead on 2026-09-18. The owner ruled A1b into
+  0.40.0 and ruled the tail, the retirement of `autoCompact` and the
+  measurement in person on 2026-09-18; the owner's ratification of the
+  amendment's text is pending. Built in 0.40.0.
+- **What it changes:** two DECLARED REVERSALS of v1 (A1 and A4), each quoted
+  against the v1 text it replaces. §1a (built in 0.40.0), §1b, §2a and §3
+  stand.
+
+### A1. Tiers replace the single threshold — DECLARED REVERSAL
+
+v1 §Decision: "Three control paths, and deliberately not a tier system."
+v1 §1: one threshold, `min(0.5 × window, 400K)`, fired at the next
+settled round.
+
+Amended. All comparisons are against the §1a figure (the canonical billed
+total, estimate as fallback; built in 0.40.0):
+
+| tier | value | fires |
+|---|---|---|
+| soft | `min(0.5·window, 400K)` | makes compaction ELIGIBLE; it fires at the next settled round that ends a phase (A3) |
+| hard | `min(0.8·window, 700K)` | the next settled round, regardless of phase |
+| emergency | `max(window − reserve, hard)` | before the next request, whatever the round (this absorbs v1 §2's reserve guard) |
+
+**Why the reversal:** the cost model shows the timing of a summary matters
+more than its token number. Its real cost is information loss (TRACE),
+so the soft tier waits for a semantic boundary. A single threshold forces
+a choice between "at any settled round" (mid-phase) and "never
+mid-phase". The hard tier bounds the wait.
+
+`reserve` = max(the request's max output, the summary budget).
+**Emergency is clamped to at least hard** (the lead, 2026-09-18), so soft
+≤ hard ≤ emergency always holds. Without the clamp, a window under 160K
+puts emergency below hard, and a window under 32K makes it negative. The
+DeepSeek consequence, stated: kiso sends no `max_tokens`, so the registry's
+384K max output is the reserve, and on a 1M window emergency = hard = 700K.
+An output over 300K is the residual risk, and v1 §3's one overflow
+recovery catches it. The unclamped alternative (a reserve taken only from
+a sent `max_tokens`, so 968K) was rejected as too late. The summary
+budget is 32,000, one number for the manual and the policy paths (v1
+§2a). The v1 values 400K and `min(0.5·window, 400K)` are unchanged as the
+soft tier. They remain a stated position, not a measurement.
+
+### A2. The summariser is in-band — v1 §1b made concrete
+
+v1 §1b already requires prefix identity. This amendment names the
+mechanism and its risk.
+
+The summary request is the run's own request: the same system prompt, the
+same tool table, the same reasoning settings and output parameters, and
+the same derived messages, with one user message appended (the ADR-0044
+instruction, plus "text only, no tool calls"). The ADR-0044 required-
+sections contract is unchanged, and the response IS the summary.
+
+**The risk v1 did not name:** E6-F4/F5. A model summarising a raw message
+array echoed provider tool-call markup; the serialised `<conversation>`
+input was the cure. An in-band response is therefore rejected if it
+carries a tool call, provider markup, or a missing section. A rejection
+falls back ONCE to the serialised path, which is cold at the miss price
+and known to meet the contract. The measurement (A6) reports the fallback
+rate. If the in-band path cannot meet the contract routinely, this ADR
+records that the serialised path stays, and where.
+
+### A3. The phase boundary — new, and a heuristic
+
+A settled round ENDS A PHASE when, among the settled rounds since the last
+boundary:
+1. **a check ran:** a `shell` call whose first word(s) name a test, build
+   or lint runner, from a declared list the config can extend, or a
+   delegated `check`;
+2. **edits finished:** the first round with no `write_file`/`edit_file`
+   after one or more rounds with them;
+3. **reading finished:** the first edit round after one or more rounds
+   that only read (`read_file`, `list_dir`, `search_text`, `read_skill`,
+   read-only shell).
+
+This is a **heuristic about the round shapes the loop already sees**. It
+is reported, never claimed as proven: every `summarized` event records
+which rule fired, or `hard`/`emergency`/`overflow`. Whether the boundary
+it picks loses less information than any other is the long-context bench
+layer's question, not this ADR's.
+
+### A4. Microcompact demoted to a primitive — DECLARED REVERSAL
+
+v1 §"And what does not change": "Microcompact stays, as the floor, at the
+same threshold."
+
+Amended. **There is no standing 50% trigger.** Repeated mid-history
+clearing breaks the prompt cache from the first cleared result onward, on
+every clear. The `microcompacted` event, its projection and the
+do-not-compact tag stay. The trigger leaves the kernel, which keeps no
+compaction policy of its own.
+
+Pruning is used:
+- **(a) inside the summary step:** the covered range takes its stale
+  results with it; a prune of the kept tail is appended in the same step
+  only when (c) says it pays;
+- **(b) as the emergency** when a summary cannot complete (both attempts
+  failed, or the breaker is open);
+- **(c) guarded by break-even:** a prune dropping D tokens and re-sending
+  S kept tokens cold pays only if at least `N ≈ 49·S/D` more requests
+  follow. 49 is `(0.15 − 0.003) / 0.003`, DeepSeek V4.1 Flash off-peak
+  per-million prices of 2026-09-19. Another price table gives another
+  constant, and the constant is computed from the pricing table, never
+  typed in. "Requests that plausibly remain" is a stated position (the
+  run's own recent rate, else 50), not a prediction.
+
+### A5. The raw tail — UNCHANGED (the owner, 2026-09-18)
+
+v1's `min(0.1 × window, 100K)` by tokens stands, never rounds and never
+the round in flight. The owner chose it over the ~20K the brief assumed
+(asked in person on 2026-09-18, they chose v1's value, 2026-09-18). At the
+cache-hit price a 100K tail costs about $0.0003 per request, and it keeps
+more recent state (TRACE). So there is no reversal here, and the
+amendment has two declared reversals, not three.
+
+**`autoCompact` retired (the owner, 2026-09-18):** the between-turn ratio
+is redundant under default-on tiers. 0.40.0 accepts it, ignores it and
+prints one notice line; 0.41.0 removes it.
+
+### A6. Unchanged, and the measurement
+
+- v1 §3's one recovery is unchanged: the second overflow ends the run.
+- §1a is unchanged and already built (the anchor refuses a usage
+  staled by a boundary).
+- Default ON is unchanged. The CLI implements it in 0.40.0; until now the
+  policy was env-armed only.
+- **The measurement, before it ships:** the CTX-1 scaled instrument on
+  3–6 pairs. It checks:
+  - each tier fires where declared;
+  - the tail survives;
+  - overflow recovers;
+  - per summary call, `cacheRead` against `input` (the in-band claim,
+    measured, not assumed), and the fallback count.
+
+  Cost and quality are reported. At most ¥5, on the owner's word. The
+  launch bench never crosses a tier and is not asked to.
+
+### When to overturn this amendment
+
+- If the in-band fallback rate is high, A2 reverts to the serialised path
+  for the policy.
+- If the phase detector's boundaries measure worse than hard-tier-only on
+  the long-context bench, A3 goes and the soft tier fires at any settled
+  round.
+- If a price table moves the break-even constant enough that pruning
+  never pays, A4(b) is removed.

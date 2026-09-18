@@ -159,12 +159,17 @@ SAYS the state kiso will resume into, in words:
 | `N uncertain — needs your verdict` | the uncertain ledger is not empty | ask you to rule on the interrupted side effect first |
 | `N asks pending` | a permission request nobody answered | put the question back in front of you |
 
-**Context relief is on by default.** Past half the model window, one
-`microcompacted` boundary event is appended and the projection derives the
-compacted view from it — old read/list/search/shell output becomes a fixed
-placeholder, writes and edits never do. `/compact` compresses the older
-CONVERSATION into one durable summary. Both are persisted facts, so a crash and
-resume land on the byte-identical projection — [docs/context.md](docs/context.md).
+**Context relief is on by default, inside a run.** The context is measured by
+the provider's own count of the last request. Past half the model window (at
+most 400K), kiso compacts at the next round that ends a phase — the checks ran,
+the edits finished, the reading finished, or a new turn began; past 80% (at
+most 700K) it compacts at the next round regardless. The summary is requested
+on the run's own cached prefix and lands as one durable `summarized` event;
+the most recent tenth of the window (at most 100K) stays verbatim. If the
+provider still refuses the context, kiso compacts once and retries once.
+`/compact` does the same on demand. Every boundary is a persisted fact, so a
+crash and resume land on the byte-identical projection —
+[docs/context.md](docs/context.md).
 
 ## Modes
 
@@ -488,7 +493,7 @@ in either direction turns the check red.
 Comments do not count — explain freely, implement tersely. The gate is a
 snapshot discipline, not a self-adjusting ratchet: it has moved exactly twice,
 each by adjudicated amendment, and the standing escape hatch is EXTRACTION
-(ADR-0043). The core sits at **2,196 of 2,200** lines today. The product
+(ADR-0043). The core sits at **2,192 of 2,200** lines today. The product
 surfaces run a different regime since Amendment 8 — printed every check for
 visibility, never failing it, protected by the architecture gates instead.
 
