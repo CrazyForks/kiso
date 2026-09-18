@@ -30,6 +30,8 @@ beforeAll(() => {
 	mkdirSync(join(root, "src"), { recursive: true });
 	mkdirSync(join(root, "build"), { recursive: true });
 	mkdirSync(join(root, "node_modules"), { recursive: true });
+	// an EMPTY .git is not a repository — git walks past it, and so must the floor
+	mkdirSync(join(root, "src", ".git"), { recursive: true });
 	writeFileSync(join(home, ".ssh", "id_rsa"), "k");
 	writeFileSync(join(root, "src", "a.ts"), "x");
 	symlinkSync(home, join(root, "home-link"));
@@ -97,7 +99,7 @@ const REFUSED: readonly (readonly [string, string | RegExp])[] = [
 	["find ~ -delete", "the home directory"],
 	// ── the lead's review, 2026-09-18 ──
 	// B7: the target of a whole-tree git command is the repository root
-	["cd src && git reset --hard", "the workspace root"],
+	["cd src && git reset --hard", "the workspace root"], // src/.git is empty
 	["git -C src reset --hard", "the workspace root"],
 	["git -C ~/proj reset --hard", "the workspace root"],
 	["git checkout -- :/", "the workspace root"],
@@ -168,6 +170,15 @@ const REFUSED: readonly (readonly [string, string | RegExp])[] = [
 	["git clean -f build '*'", "a wildcard over the workspace root"],
 	// -delete before the selecting primary deletes everything
 	["find . -delete -name x", "find with no selecting primary over the workspace root"],
+	// the lead's second pass: P3 a partial wildcard is ordinary only inside
+	// the workspace, home or temp — not at / or above; P4 the home subtrees
+	// come before find's selecting-primary exemption
+	["rm -rf /*.log", "a wildcard over /"],
+	["rm -rf /**/build", "a wildcard over /"],
+	["find ~/.ssh -name x -delete", "~/.ssh"],
+	// P1: past the nesting the reader follows, the line is not read — denied
+	[`echo ${"$(echo ".repeat(70)}rm -rf ~${")".repeat(70)}`, "nested deeper than the floor reads"],
+	["(".repeat(20_000), "nested deeper than the floor reads"],
 	// R7: the workspace's history
 	["rm -rf .git", "the workspace's .git"],
 	["rm -rf .git/objects", "the workspace's .git"],
@@ -234,6 +245,14 @@ const RUNS: readonly string[] = [
 	"rm -rf /private/tmp/x",
 	"rm -rf /Volumes/Data/proj/node_modules",
 	"rm -rf /Users/someoneelse/proj/build",
+	// P2: deeper than a mount root runs, by resolved path (macOS /home)
+	"rm -rf /home/someone/proj/build",
+	// P3: a partial wildcard inside home
+	"rm -rf ~/*.log",
+	// P5: a dry run deletes nothing
+	"git clean -fn",
+	"git clean -nf",
+	"git clean --dry-run -fd",
 	// R8, second pass: inside a reinstallable software prefix
 	"rm -rf /usr/local/lib/node_modules/x",
 	"rm -rf /opt/homebrew/Cellar/foo",

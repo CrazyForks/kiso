@@ -391,14 +391,22 @@ export function looseCommands(nodes: readonly LooseNode[]): LooseCommand[] {
 }
 
 export function parseShellLoose(src: string): LooseNode[] {
-	return parseLooseAt(src, 0, 0, false).items;
+	return parseLooseAt(src, 0, 0, false, { truncated: false }).items;
+}
+
+/** The same, saying whether the reader stopped short: a nest past
+ *  LOOSE_MAX_DEPTH is not read, and a caller that must see every command
+ *  (the floor) treats an unread line as one it could not read. */
+export function parseShellLooseChecked(src: string): { readonly nodes: LooseNode[]; readonly truncated: boolean } {
+	const flags = { truncated: false };
+	return { nodes: parseLooseAt(src, 0, 0, false, flags).items, truncated: flags.truncated };
 }
 
 /** One level of the reader, from `start`. With `closeParen`, it is the
  *  inside of `$(`: an unmatched `)` ends it and its index is returned — the
  *  recursion finds its own end, so a nest is read ONCE, in linear time,
  *  rather than scanned for its matching paren at every level. */
-function parseLooseAt(src: string, start: number, depth: number, closeParen: boolean): { items: LooseNode[]; end: number } {
+function parseLooseAt(src: string, start: number, depth: number, closeParen: boolean, flags: { truncated: boolean }): { items: LooseNode[]; end: number } {
 	// the open `( … )` groups at this level: [items so far, the joiner before the group]
 	const stack: { items: LooseNode[]; joinedBy: LooseCommand["joinedBy"] }[] = [{ items: [], joinedBy: ";" }];
 	let argv: LooseWord[] = [];
@@ -454,6 +462,11 @@ function parseLooseAt(src: string, start: number, depth: number, closeParen: boo
 	};
 	const openGroup = (): void => {
 		endCommand(joinedBy);
+		// the `( )` groups count toward the same depth as `$( )`
+		if (depth + stack.length > LOOSE_MAX_DEPTH) {
+			flags.truncated = true;
+			return;
+		}
 		stack.push({ items: [], joinedBy });
 		joinedBy = ";";
 	};
@@ -476,16 +489,20 @@ function parseLooseAt(src: string, start: number, depth: number, closeParen: boo
 			j = close < 0 ? src.length : close + 1;
 			// the subshell runs as part of the command that holds it, so it
 			// takes that command's joiner (`cd x && echo \`…\`` runs it in x)
-			if (depth < LOOSE_MAX_DEPTH) top().push({ kind: "group", items: parseLooseAt(src.slice(i + 1, close < 0 ? src.length : close), 0, depth + 1, false).items, joinedBy });
-			else tooDeep = true;
+			if (depth < LOOSE_MAX_DEPTH) top().push({ kind: "group", items: parseLooseAt(src.slice(i + 1, close < 0 ? src.length : close), 0, depth + 1, false, flags).items, joinedBy });
+			else {
+				tooDeep = true;
+				flags.truncated = true;
+			}
 		} else if (src[i + 1] === "(") {
 			if (depth < LOOSE_MAX_DEPTH) {
-				const inner = parseLooseAt(src, i + 2, depth + 1, true);
+				const inner = parseLooseAt(src, i + 2, depth + 1, true, flags);
 				top().push({ kind: "group", items: inner.items, joinedBy });
 				j = Math.min(inner.end + 1, src.length);
 			} else {
 				// too deep to read: consume to the matching paren, unread
 				tooDeep = true;
+				flags.truncated = true;
 				let open = 0;
 				for (j = i + 1; j < src.length; j += 1) {
 					if (src[j] === "(") open += 1;

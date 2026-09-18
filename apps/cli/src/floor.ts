@@ -41,12 +41,12 @@
  * project config cannot — a repository must not be able to lower it.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { PolicyCall, PolicyVerdict } from "@vincemakes/kiso-core";
 import type { KisoExtension } from "@vincemakes/kiso-runtime";
-import { HOME_SUBTREES, looseCommands, parseShellLoose, resolveShellPath, type LooseNode, type LooseWord } from "./shell-words.js";
+import { HOME_SUBTREES, looseCommands, parseShellLooseChecked, resolveShellPath, type LooseNode, type LooseWord } from "./shell-words.js";
 
 export type FloorVerdict = { readonly refused: false } | { readonly refused: true; readonly why: string };
 
@@ -158,6 +158,9 @@ function unrecoverable(w: Where, p: string, over: boolean): string | null {
 	for (const m of w.mounts) {
 		if (p === m.real) return what(`a system root (${m.name})`);
 		if (dirname(p) === m.real) return what(`a mount or home root (${p})`);
+		// deeper runs — by RESOLVED path: macOS's /home is
+		// /System/Volumes/Data/home, which the /System rule would refuse
+		if (within(m.real, p)) return null;
 	}
 	for (const s of w.sys) {
 		if (p === s.real) return what(`a system root (${s.name})`);
@@ -222,7 +225,11 @@ function targetWhy(w: Where, cwds: readonly string[], word: LooseWord): string |
 		// a variable — and what follows is only slashes, dots and globs.
 		// `*.log`, `a*`, `**/node_modules` range over SOME entries and run.
 		const overComponent = glob ? /^[*?.[\]!]+$/.test(component) : head === "" && /^(\$\{?[A-Za-z_][A-Za-z0-9_]*\}?|\$\(.*\)|`.*`)$/.test(component);
-		if (!overComponent || !/^[/.*?[\]!]*$/.test(after)) continue;
+		// ...and that exemption holds only where ranging over SOME entries is
+		// ordinary work: inside the workspace, inside home (the subtrees were
+		// refused above), in the temp family. `/*.log`, `/**/build` are not.
+		const ordinary = within(w.rootReal, dir) || within(w.homeReal, dir) || w.temps.some((t) => within(t, dir));
+		if (ordinary && (!overComponent || !/^[/.*?[\]!]*$/.test(after))) continue;
 		const why = unrecoverable(w, dir, true);
 		if (why !== null) return why;
 	}
@@ -330,6 +337,8 @@ interface Destructive {
 	readonly cds?: readonly LooseWord[];
 	/** how the refusal names the command */
 	readonly label?: string;
+	/** R6: a find that selects — only a home subtree refuses it */
+	readonly subtreesOnly?: boolean;
 }
 
 /** The destructive command's targets, or null when it is not destructive. */
@@ -361,9 +370,10 @@ function destructiveTargets(argv: readonly LooseWord[]): Destructive | null {
 		}
 		// R6 (the lead's ruling): with a selecting primary it ranges over SOME
 		// entries and runs; with none, over everything under its paths
-		// ...and only BEFORE -delete: `find . -delete -name x` deletes all
+		// ...and only BEFORE -delete: `find . -delete -name x` deletes all.
+		// The home subtrees come first even so (`find ~/.ssh -name x -delete`)
 		const del = args.findIndex((a) => a.text === "-delete");
-		if (args.slice(i, del).some((a) => SELECTING.has(a.text))) return { targets: [] };
+		if (args.slice(i, del).some((a) => SELECTING.has(a.text))) return { targets: paths.length > 0 ? paths : [literal(".")], subtreesOnly: true };
 		return { targets: paths.length > 0 ? paths : [literal(".")], label: "find with no selecting primary" };
 	}
 	if (name !== "git") return null;
@@ -407,6 +417,8 @@ function destructiveTargets(argv: readonly LooseWord[]): Destructive | null {
 	if (sub === "reset") return flags.has("--hard") ? as(["repo"]) : null;
 	if (sub === "clean") {
 		if (!rest.some((a) => a.text === "--force" || /^-[a-zA-Z]*f[a-zA-Z]*$/.test(a.text))) return null;
+		// a dry run deletes nothing, wherever its -n sits
+		if (rest.some((a) => a.text === "--dry-run" || /^-[a-zA-Z]*n[a-zA-Z]*$/.test(a.text))) return null;
 		const paths = operands(rest.filter((_, k) => !(k > 0 && (rest[k - 1]!.text === "-e" || rest[k - 1]!.text === "--exclude"))));
 		return as(paths.length > 0 ? asPaths(paths) : [literal(".")]);
 	}
@@ -429,6 +441,18 @@ function destructiveTargets(argv: readonly LooseWord[]): Destructive | null {
 	return null;
 }
 
+/** As git's own discovery judges it: a `.git` FILE (a worktree's link),
+ *  or a `.git` directory with a HEAD. An empty `.git` is not a repository,
+ *  and git walks on past it — so does the floor. */
+function isGitDir(p: string): boolean {
+	try {
+		const st = statSync(p);
+		return st.isFile() || (st.isDirectory() && existsSync(join(p, "HEAD")));
+	} catch {
+		return false;
+	}
+}
+
 /** B7: the root of the repository a command in `cwd` works on — up to the
  *  nearest `.git` (a directory, or a worktree's file). With none found:
  *  inside the workspace, the workspace root; outside it, the directory
@@ -436,7 +460,7 @@ function destructiveTargets(argv: readonly LooseWord[]): Destructive | null {
 function repoRoot(w: Where, cwd: string): string {
 	const start = canon(w, cwd, ".");
 	for (let d = start; ; d = dirname(d)) {
-		if (existsSync(join(d, ".git"))) return d;
+		if (isGitDir(join(d, ".git"))) return d;
 		if (dirname(d) === d) break;
 	}
 	return within(w.rootReal, start) ? w.rootReal : start;
@@ -492,13 +516,15 @@ export function floorCheck(commandLine: string, workspaceRoot: string, home: str
 						// eval runs HERE, and its cd does — from this node's
 						// directory, with the outer chain's pending cd kept if the
 						// line itself does not cd
+						const read = parseShellLooseChecked(line);
+						if (read.truncated) return { refused: true, why: NESTED_TOO_DEEP };
 						if (inner.subshell) {
-							const v = walk(parseShellLoose(line), child(state), depth + 1);
+							const v = walk(read.nodes, child(state), depth + 1);
 							if (v.refused) return v;
 						} else {
 							const pending = state.lastCd;
 							state.lastCd = null;
-							const v = walk(parseShellLoose(line), state, depth + 1);
+							const v = walk(read.nodes, state, depth + 1);
 							if (v.refused) return v;
 							if (state.lastCd === null) state.lastCd = pending;
 						}
@@ -529,6 +555,7 @@ export function floorCheck(commandLine: string, workspaceRoot: string, home: str
 				if (t === "repo") {
 					for (const c of here) if ((why = unrecoverable(w, repoRoot(w, c), false)) !== null) break;
 				} else why = targetWhy(w, here, t);
+				if (why !== null && d.subtreesOnly === true && !why.includes("~/.")) why = null;
 				if (why !== null) {
 					const command = argv.map((a) => a.text).join(" ");
 					return { refused: true, why: d.label !== undefined ? `${command} — ${d.label} over ${why}` : `${command} — its target is ${why}` };
@@ -537,15 +564,22 @@ export function floorCheck(commandLine: string, workspaceRoot: string, home: str
 		}
 		return { refused: false };
 	};
-	return walk(parseShellLoose(commandLine), { cwds: [workspaceRoot], lastCd: null, prev: null }, 0);
+	const top = parseShellLooseChecked(commandLine);
+	if (top.truncated) return { refused: true, why: NESTED_TOO_DEEP };
+	return walk(top.nodes, { cwds: [workspaceRoot], lastCd: null, prev: null }, 0);
 }
+
+/** B6, second pass: a line the reader stopped short on is a line it could
+ *  not read — past the nesting it follows, bash still runs every level. */
+const NESTED_TOO_DEEP = "the line is nested deeper than the floor reads";
 
 /** Is there a destructive command anywhere in the line, whatever its
  *  target? A saved allow is never inherited by one (plan §4). */
 export function isDestructive(commandLine: string): boolean {
 	const seen = new Set<string>();
-	const visit = (line: string, depth: number): boolean =>
-		looseCommands(parseShellLoose(line)).some(({ argv: raw }) => {
+	const visit = (line: string, depth: number): boolean => {
+		const read = parseShellLooseChecked(line);
+		return read.truncated || looseCommands(read.nodes).some(({ argv: raw }) => {
 			const argv = unwrap(raw);
 			const inner = innerLines(argv, homedir());
 			if (inner !== null) {
@@ -560,6 +594,7 @@ export function isDestructive(commandLine: string): boolean {
 			}
 			return destructiveTargets(argv) !== null;
 		});
+	};
 	return visit(commandLine, 0);
 }
 
