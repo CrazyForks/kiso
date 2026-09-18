@@ -50,7 +50,66 @@ export const SUMMARY_RESULT_MAX_CHARS = 2000;
 export const SUMMARY_MAX_OUTPUT = 4000;
 export const KEEP_TOKENS_DEFAULT = 20000;
 export const IN_FLIGHT_HEADROOM = 8000;
+/** ONE NUMBER, TWO CONSUMERS. `SUMMARY_MAX_OUTPUT` is both the summary
+ *  call's output budget AND a term of this reserve — the reserve buys
+ *  back room for exactly that much summary. Change one and you have
+ *  changed the other; see `summaryOutputBudget` for why the scaled budget
+ *  below does NOT reach the auto policy that reads this. */
 export const POLICY_RESERVE = SUMMARY_MAX_OUTPUT + KEEP_TOKENS_DEFAULT + IN_FLIGHT_HEADROOM;
+
+/**
+ * 0.39.2 — the ceiling of a MANUAL `/compact`'s output budget.
+ *
+ * A seven-section checkpoint is a fraction of what it covers; past this
+ * size it has stopped being a summary and started being a second copy,
+ * and the budget exists to bound what a runaway one can cost. At the
+ * scale below it is reached at ~384k covered tokens, which only a 1M
+ * window reaches.
+ */
+export const SUMMARY_OUTPUT_CEILING = 32_000;
+
+/**
+ * 0.39.2 — the output budget for a MANUAL `/compact`, scaled to what it
+ * covers: one twelfth of the covered estimate, floored at today's 4,000
+ * and capped at the ceiling.
+ *
+ * The fixed 4,000 failed on a live gateway session (6 rounds, ~95k
+ * covered): `the summary turn ended with max_tokens`. Two causes produce
+ * that stop and the budget answers BOTH — reasoning tokens eating the
+ * allowance before the checkpoint finishes, and a structured summary of
+ * a large range simply being longer than 4,000. The one-twelfth is
+ * PROVISIONAL: it gives the 95k case ~7,900 and leaves every covered
+ * range under 48k exactly where it was. Which cause dominates is a
+ * measurement that has not been taken yet, and the max_tokens retry in
+ * `summarizeConversation` is the net under a wrong guess.
+ *
+ * MANUAL ONLY, and that is the patch boundary rather than an oversight.
+ * The auto policy's `POLICY_RESERVE` assumes `SUMMARY_MAX_OUTPUT`; giving
+ * the policy a larger budget without moving its reserve would let a fire
+ * leave less room than the reserve promised, and moving the reserve
+ * moves every session's compaction trigger — the compaction tier of
+ * BM-1 §3, where the paired bench blocks. That belongs to A1b, which
+ * owns the auto budget and its reserve together. Today the policy's call
+ * is byte-identical to before.
+ */
+export function summaryOutputBudget(coveredTokens: number): number {
+	const scaled = Math.ceil(Math.max(0, coveredTokens) / 12);
+	return Math.min(SUMMARY_OUTPUT_CEILING, Math.max(SUMMARY_MAX_OUTPUT, scaled));
+}
+
+/** Thrown by an attempt that stopped on `max_tokens`: the budget is the
+ *  failure, and it is the one failure a larger budget can cure. Still an
+ *  `Error` — a caller that does not retry sees the same validation
+ *  rejection it always has. */
+class SummaryBudgetExhausted extends Error {
+	constructor(readonly budget: number | undefined) {
+		super(
+			budget === undefined
+				? "the summary turn ended with max_tokens — not a complete turn"
+				: `the summary turn ended with max_tokens — it needed more than its ${budget}-token output budget, not a complete turn`,
+		);
+	}
+}
 
 /** The reference context-window scale (the flash-family window); the
  *  env overrides. The default arming point is 120,000 − 32,000 =
@@ -231,6 +290,14 @@ export interface SummarizeConversationOptions {
 	readonly signal?: AbortSignalLike;
 	/** E6 (g): the summary call's explicit output budget (adapter maxTokens). */
 	readonly maxOutputTokens?: number;
+	/** 0.39.2: how far a `max_tokens` stop may grow the budget on its ONE
+	 *  retry. Absent, or not above `maxOutputTokens`, means no budget retry
+	 *  — the auto policy's call, whose reserve assumes a fixed budget. */
+	readonly maxOutputCeiling?: number;
+	/** 0.39.2: the RESOLVED reasoning for the summary call — native wire
+	 *  values from `resolveReasoning`, never a raw field. Absent sends
+	 *  nothing, and the provider's default applies. */
+	readonly reasoning?: { readonly thinking?: "adaptive" | "enabled" | "disabled"; readonly effort?: string };
 }
 
 /** The summary call's result — the text PLUS the provider-reported usage
@@ -286,15 +353,35 @@ export async function summarizeConversation(options: SummarizeConversationOption
 	// the narrowing from the first read would otherwise be carried across
 	// the await — where the whole point is that it can have changed.
 	const aborted = (): boolean => options.signal?.aborted === true;
-	try {
-		return await summaryAttempt(options);
-	} catch (err) {
-		// The caller's cancel is the caller's: an aborted `/compact` must
-		// not spend a second call on its way out.
-		if (!retryableStructured(err) || aborted()) throw err;
-		await new Promise((r) => setTimeout(r, retryWaitMs(err)));
-		if (aborted()) throw err;
-		return await summaryAttempt(options);
+	// Two retries of two DIFFERENT failures, each at most once, so at most
+	// three calls: a dropped stream is retried as it was, and a `max_tokens`
+	// stop is retried with a larger budget. They are kept apart because
+	// they are cured by different things — repeating a budget failure
+	// unchanged buys the same truncation twice.
+	let budget = options.maxOutputTokens;
+	const ceiling = options.maxOutputCeiling;
+	let transportRetried = false;
+	let budgetRetried = false;
+	for (;;) {
+		try {
+			return await summaryAttempt({ ...options, ...(budget !== undefined ? { maxOutputTokens: budget } : {}) });
+		} catch (err) {
+			// The caller's cancel is the caller's: an aborted `/compact` must
+			// not spend another call on its way out.
+			if (aborted()) throw err;
+			if (err instanceof SummaryBudgetExhausted && !budgetRetried && budget !== undefined && ceiling !== undefined && ceiling > budget) {
+				budgetRetried = true;
+				budget = Math.min(budget * 2, ceiling);
+				continue;
+			}
+			if (retryableStructured(err) && !transportRetried) {
+				transportRetried = true;
+				await new Promise((r) => setTimeout(r, retryWaitMs(err)));
+				if (aborted()) throw err;
+				continue;
+			}
+			throw err;
+		}
 	}
 }
 
@@ -323,6 +410,7 @@ async function summaryAttempt(options: SummarizeConversationOptions): Promise<Su
 		systemPrompt: SUMMARY_PROMPT,
 		...(options.signal !== undefined ? { signal: options.signal } : {}),
 		...(options.maxOutputTokens !== undefined ? { maxTokens: options.maxOutputTokens } : {}),
+		...(options.reasoning !== undefined ? { reasoning: options.reasoning } : {}),
 	})) {
 		if (stops > 0 && ev.type !== "usage" && ev.type !== "stop" && afterStop === undefined) afterStop = ev.type;
 		if (ev.type === "text_delta") text += ev.text;
@@ -351,6 +439,8 @@ async function summaryAttempt(options: SummarizeConversationOptions): Promise<Su
 	if (stops === 0) throw new Error("the summary turn never stopped — not a complete turn");
 	if (stops > 1) throw new Error(`the summary turn stopped ${stops} times — not a complete turn`);
 	if (toolCalls > 0) throw new Error("the summary turn called a tool — a summary is text, never a tool call");
+	// The one stop a larger budget can cure, told apart from the rest.
+	if (stopReason === "max_tokens") throw new SummaryBudgetExhausted(options.maxOutputTokens);
 	if (stopReason !== "end_turn") throw new Error(`the summary turn ended with ${String(stopReason)} — not a complete turn`);
 	if (afterStop !== undefined) throw new Error(`the summary turn produced ${afterStop} after its stop — not a complete turn`);
 	const trimmed = text.trim();

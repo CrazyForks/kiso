@@ -787,6 +787,12 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 				const focus = trimmed.slice(8).trim();
 				const result = await ctx.session.summarize({
 					signal: abort.signal,
+					// 0.39.2: the gesture gets a budget scaled to what it covers,
+					// one retry at double on a `max_tokens` stop, and thinking
+					// off where the registry can vouch for turning it off. A
+					// fixed 4,000 was failing live sessions with "the summary
+					// turn ended with max_tokens".
+					scaledBudget: true,
 					...(focus !== "" ? { focus } : {}),
 					onStart: (info) => {
 						compactInfo = info;
