@@ -76,4 +76,38 @@ describe("item 6 — a typed phase requests a frame on every key", () => {
 		});
 		expect(per.every((n) => n >= 1), `render calls per key ${JSON.stringify(per)}`).toBe(true);
 	});
+
+	it("(b) the render hook is told which frames are key-originated: true inside feed, false outside", () => {
+		const seen: boolean[] = [];
+		const editor = new Editor((fromKey) => {
+			seen.push(fromKey);
+		});
+		editor.feed(enc("\u5e2e\u6211"));
+		const fromFeed = seen.splice(0);
+		editor.clearLine();
+		expect(fromFeed.length > 0 && fromFeed.every((k) => k)).toBe(true);
+		expect(seen.length > 0 && seen.every((k) => !k)).toBe(true);
+	});
+
+	it("(b) a key that hands control to the run is not typing: a submit renders non-key, and a verdict ends on a non-key render", () => {
+		const seen: boolean[] = [];
+		const editor = new Editor((fromKey) => {
+			seen.push(fromKey);
+		});
+		editor.onLine(() => {});
+		editor.feed(enc("go"));
+		seen.length = 0;
+		editor.feed(enc("\r"));
+		expect(seen.length > 0 && seen.every((k) => !k), `submit renders ${JSON.stringify(seen)}`).toBe(true);
+		editor.beginPanel(askView(ASK_SPEC), () => {});
+		seen.length = 0;
+		editor.feed(enc("1")); // single-select: answers and commits the verdict
+		// the panel's own render on the key comes first; the verdict's
+		// non-key render after it is what demotes the frame to the window
+		expect(seen.at(-1), `verdict renders ${JSON.stringify(seen)}`).toBe(false);
+		seen.length = 0;
+		editor.feed(enc("a")); // the next chunk is typing again
+		expect(seen.length > 0 && seen.every((k) => k), `typing after ${JSON.stringify(seen)}`).toBe(true);
+	});
 });
+
