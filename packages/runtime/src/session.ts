@@ -74,7 +74,7 @@ import { estimateTokens } from "@vincemakes/kiso-core";
 import { StaleWriterError, type SessionStore } from "./store.js";
 import { composeHooks, microcompactFor } from "./compose.js";
 import { checkpointBoundarySeq } from "./checkpoint.js";
-import { breakEvenFactor, guardedPruneSeq, KEEP_COMPACTABLE_RESULTS, microcompactBoundarySeq, phaseEnd, runsACheck, tiersFor } from "./compaction-policy.js";
+import { breakEvenFactor, guardedPruneSeq, KEEP_COMPACTABLE_RESULTS, microcompactBoundarySeq, phaseEnd, runsACheck, tierReason, tiersFor } from "./compaction-policy.js";
 import { Run } from "./run.js";
 // TUI2-R3v2 ③ — the side query rides the SAME tracer the runs ride; that
 // sameness is the whole point (one ledger, one shape, no second path).
@@ -388,8 +388,7 @@ export class AgentSession {
 			const maxOutput = this.#config.maxTokens ?? lookupModelMetadata(this.#model, this.#baseUrl)?.capabilities.maxOutputTokens ?? 0;
 			const t = tiersFor(window, Math.max(maxOutput, MANUAL_SUMMARY_BUDGET));
 			const isCheck = tiersPolicy.isCheck ?? ((command: string) => runsACheck(command));
-			const reason =
-				why === "overflow" ? "overflow" : used > t.emergency ? "emergency" : used > t.hard ? "hard" : used > t.soft ? phaseEnd(events, lastSummaryPoint(events), isCheck) : null;
+			const reason = tierReason(used, t, why, () => phaseEnd(events, lastSummaryPoint(events), isCheck));
 			if (reason === null) return [];
 			const urgent = reason === "overflow" || reason === "emergency";
 			if (!urgent && this.#summaryFailures >= (tiersPolicy.maxFailures ?? MAX_SUMMARY_FAILURES)) return [];

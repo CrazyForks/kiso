@@ -36,6 +36,20 @@ export function tiersFor(windowTokens: number, reserve: number): Tiers {
 }
 
 /**
+ * A1 — which tier a measured context is past, the most urgent first; the
+ * soft tier asks the phase detector. Null: no tier is crossed. Emergency
+ * only where it stands STRICTLY above hard (the lead, A1B-M1): at the
+ * clamp the two coincide, and that fire is hard — not prune-eligible.
+ */
+export function tierReason(used: number, t: Tiers, why: "request" | "overflow", phase: () => string | null): string | null {
+	if (why === "overflow") return "overflow";
+	if (used > t.emergency && t.emergency > t.hard) return "emergency";
+	if (used > t.hard) return "hard";
+	if (used > t.soft) return phase();
+	return null;
+}
+
+/**
  * A3 rule 1's runners — the lead's table, matched on a command's first
  * words once leading `VAR=value` assignments and the plain wrappers are
  * stripped. A shell call not on it is not a test run. The CLI puts the

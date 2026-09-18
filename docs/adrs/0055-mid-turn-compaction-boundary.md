@@ -611,9 +611,11 @@ DeepSeek consequence, stated: kiso sends no `max_tokens`, so the registry's
 384K max output is the reserve, and on a 1M window emergency = hard = 700K.
 An output over 300K is the residual risk, and v1 §3's one overflow
 recovery catches it. The unclamped alternative (a reserve taken only from
-a sent `max_tokens`, so 968K) was rejected as too late. The summary
-budget is 32,000, one number for the manual and the policy paths (v1
-§2a). The v1 values 400K and `min(0.5·window, 400K)` are unchanged as the
+a sent `max_tokens`, so 968K) was rejected as too late. Where the clamp
+makes the two equal, a fire at that boundary is **hard**, not emergency:
+only an emergency strictly above hard is prune-eligible (the lead's ruling
+on finding A1B-M1, 2026-09-18). The summary budget is 32,000, one number
+for the manual and the policy paths (v1 §2a). The v1 values 400K and `min(0.5·window, 400K)` are unchanged as the
 soft tier. They remain a stated position, not a measurement.
 
 ### A2. The summariser is in-band — v1 §1b made concrete
@@ -710,6 +712,15 @@ prints one notice line; 0.41.0 removes it.
 
   Cost and quality are reported. At most ¥5, on the owner's word. The
   launch bench never crosses a tier and is not asked to.
+
+### Open items
+
+- **A1B-M2 (the measurement, 2026-09-18): stated, not fixed.** On a window
+  where soft sits below about one checkpoint plus the tail, the tiers fire
+  again within a few requests of each summary. The 12K scaled run made 7–11
+  fires per leg, with checkpoints of ~3.3K on a 12K window. At real windows
+  one checkpoint is 0.3–2% of the window, and the tiers fire once or twice
+  per long task. The measurement is recorded in #80.
 
 ### When to overturn this amendment
 
