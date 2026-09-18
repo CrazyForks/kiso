@@ -33,7 +33,7 @@ import { homedir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import type { PolicyCall, PolicyVerdict } from "@vincemakes/kiso-core";
 import type { KisoExtension } from "@vincemakes/kiso-runtime";
-import { parseShellLoose, resolveShellPath, type LooseWord } from "./shell-words.js";
+import { looseCommands, parseShellLoose, resolveShellPath, type LooseWord } from "./shell-words.js";
 
 export type FloorVerdict = { readonly refused: false } | { readonly refused: true; readonly why: string };
 
@@ -47,6 +47,49 @@ const HOME_SUBTREES = [".ssh", ".config", ".kiso", ".gnupg", ".aws"];
 interface Where {
 	readonly root: string;
 	readonly home: string;
+	/** Canonical forms, computed ONCE per check: a line of many targets
+	 *  used to realpath every system root for every one of them. */
+	readonly rootReal: string;
+	readonly homeReal: string;
+	readonly sys: readonly { readonly name: string; readonly real: string }[];
+	readonly subtrees: readonly { readonly name: string; readonly real: string }[];
+}
+
+/** Memoized per (workspace, home): the roots do not move within a session,
+ *  and resolving thirty-five of them cost every shell call ~4 ms. */
+const WHERE = new Map<string, Where>();
+
+function where(root: string, home: string): Where {
+	const key = `${root}\0${home}`;
+	const hit = WHERE.get(key);
+	if (hit !== undefined) return hit;
+	const w = computeWhere(root, home);
+	WHERE.set(key, w);
+	return w;
+}
+
+function computeWhere(root: string, home: string): Where {
+	const real = (p: string): string => resolveShellPath(root, "/", p).canonical;
+	return {
+		root,
+		home,
+		rootReal: real(root),
+		homeReal: real(home),
+		sys: SYSTEM_ROOTS.map((name) => ({ name, real: real(name) })),
+		subtrees: HOME_SUBTREES.map((name) => ({ name, real: real(join(home, name)) })),
+	};
+}
+
+/** B6: the candidate directories a command may run in are UNIQUE and at
+ *  most this many. `;`-joined cds doubled the set: 30 of them hung the
+ *  event loop, 400 exhausted the heap. Past the bound the set collapses to
+ *  the newest candidate, home and the workspace root — the three a
+ *  catastrophe is judged against. */
+const MAX_CWDS = 8;
+
+function capCwds(w: Where, list: readonly string[]): string[] {
+	const unique = [...new Set(list)];
+	return unique.length <= MAX_CWDS ? unique : [...new Set([unique[0]!, w.home, w.root])];
 }
 
 const canon = (w: Where, cwd: string, p: string): string => resolveShellPath(w.root, cwd, p).canonical;
@@ -60,17 +103,12 @@ const within = (parent: string, p: string): boolean => {
  *  emptying a directory is removing everything it held. */
 function unrecoverable(w: Where, p: string, over: boolean): string | null {
 	const what = (s: string): string => (over ? `a wildcard over ${s}` : s);
-	const rootReal = canon(w, "/", w.root);
-	const homeReal = canon(w, "/", w.home);
 	if (p === "/") return what("/");
-	if (p === homeReal) return what("the home directory");
-	for (const sys of SYSTEM_ROOTS) if (p === canon(w, "/", sys)) return what(`a system root (${sys})`);
-	if (p === rootReal) return what("the workspace root");
-	if (within(p, rootReal)) return what(`a directory above the workspace (${p})`);
-	for (const sub of HOME_SUBTREES) {
-		const s = canon(w, "/", join(w.home, sub));
-		if (within(s, p)) return what(`~/${sub}`);
-	}
+	if (p === w.homeReal) return what("the home directory");
+	for (const sys of w.sys) if (p === sys.real) return what(`a system root (${sys.name})`);
+	if (p === w.rootReal) return what("the workspace root");
+	if (within(p, w.rootReal)) return what(`a directory above the workspace (${p})`);
+	for (const sub of w.subtrees) if (within(sub.real, p)) return what(`~/${sub.name}`);
 	return null;
 }
 
@@ -200,7 +238,7 @@ function destructiveTargets(argv: readonly LooseWord[]): { targets: LooseWord[];
  * shell runs it.
  */
 export function floorCheck(commandLine: string, workspaceRoot: string, home: string = homedir()): FloorVerdict {
-	const w: Where = { root: workspaceRoot, home };
+	const w = where(workspaceRoot, home);
 	// Where the next command may run. After `cd x`: `&&` means only if the
 	// cd worked — x; `||` means only if it failed — where it was; anything
 	// else, either. The newest candidate first, so a refusal names it.
@@ -208,9 +246,9 @@ export function floorCheck(commandLine: string, workspaceRoot: string, home: str
 	let lastCd: { readonly to: string[]; readonly from: string[] } | null = null;
 	const seen = new Set<string>();
 	const check = (line: string, depth: number): FloorVerdict => {
-		for (const { argv: raw, joinedBy } of parseShellLoose(line)) {
+		for (const { argv: raw, joinedBy } of looseCommands(parseShellLoose(line))) {
 			if (lastCd !== null) {
-				cwds = joinedBy === "&&" ? lastCd.to : joinedBy === "||" ? lastCd.from : [...new Set([...lastCd.to, ...lastCd.from])];
+				cwds = capCwds(w, joinedBy === "&&" ? lastCd.to : joinedBy === "||" ? lastCd.from : [...lastCd.to, ...lastCd.from]);
 				if (joinedBy !== "&&") lastCd = null;
 			}
 			const argv = unwrap(raw);
@@ -229,11 +267,11 @@ export function floorCheck(commandLine: string, workspaceRoot: string, home: str
 				const from = lastCd?.from ?? cwds;
 				// `cd` with nothing — or with a variable that may be empty, or
 				// anything unknown — may land at home, or anywhere below it
-				if (to === undefined || to.unknownAt >= 0 || to.variableOnly) lastCd = { to: [w.home, ...cwds], from };
+				if (to === undefined || to.unknownAt >= 0 || to.variableOnly) lastCd = { to: capCwds(w, [w.home, ...cwds]), from };
 				else if (to.text === "-") lastCd = { to: cwds, from };
 				else {
 					const dest = to.tilde && (to.text === "~" || to.text.startsWith("~/")) ? home + to.text.slice(1) : to.text;
-					lastCd = { to: [...new Set(cwds.map((c) => resolve(c, dest)))], from };
+					lastCd = { to: capCwds(w, cwds.map((c) => resolve(c, dest))), from };
 				}
 				continue;
 			}
@@ -258,7 +296,7 @@ export function floorCheck(commandLine: string, workspaceRoot: string, home: str
  *  target? A saved allow is never inherited by one (plan §4). */
 export function isDestructive(commandLine: string): boolean {
 	const visit = (line: string, depth: number): boolean =>
-		parseShellLoose(line).some(({ argv: raw }) => {
+		looseCommands(parseShellLoose(line)).some(({ argv: raw }) => {
 			const argv = unwrap(raw);
 			const inner = innerLine(argv);
 			if (inner !== null) return depth < 4 && visit(inner, depth + 1);
@@ -270,7 +308,7 @@ export function isDestructive(commandLine: string): boolean {
 const ABSTAIN: PolicyVerdict = { action: "abstain" };
 
 /** The chain member, at the chain's head: DENY or ABSTAIN. */
-export function floorExtension(on: () => boolean, workspaceRoot: () => string): KisoExtension {
+export function floorExtension(on: () => boolean, workspaceRoot: () => string, check: typeof floorCheck = floorCheck): KisoExtension {
 	return {
 		name: "floor",
 		approvals: [
@@ -279,7 +317,16 @@ export function floorExtension(on: () => boolean, workspaceRoot: () => string): 
 					if (call.name !== "shell" || !on()) return ABSTAIN;
 					const command = call.input.command;
 					if (typeof command !== "string") return ABSTAIN;
-					const v = floorCheck(command, workspaceRoot());
+					// B6: a read that THROWS is not "a line it cannot follow" — it
+					// is a line that knocked the reader out, and letting the
+					// runtime degrade the throw to an ask handed it to bypass's
+					// allow. The floor denies what it could not read.
+					let v: FloorVerdict;
+					try {
+						v = check(command, workspaceRoot());
+					} catch (err) {
+						return { action: "deny", reason: `the floor could not read this line (${err instanceof Error ? err.name : "error"}) — kiso does not run it.` };
+					}
 					return v.refused ? { action: "deny", reason: `the floor refused this: ${v.why}. kiso never runs it, in any mode.` } : ABSTAIN;
 				},
 			},
@@ -292,5 +339,11 @@ export function floorExtension(on: () => boolean, workspaceRoot: () => string): 
  *  (protected-writes.ts) is given, keyed on destructiveness, not on the
  *  target: a saved allow never runs even `rm -rf build` unasked. */
 export function isDestructiveCall(call: PolicyCall): boolean {
-	return call.name === "shell" && typeof call.input.command === "string" && isDestructive(call.input.command);
+	if (call.name !== "shell" || typeof call.input.command !== "string") return false;
+	// B6: unreadable is treated as destructive — the saved allow abstains
+	try {
+		return isDestructive(call.input.command);
+	} catch {
+		return true;
+	}
 }

@@ -201,3 +201,41 @@ describe("the switch — the USER's alone", () => {
 		expect(() => parseConfig(JSON.stringify({ floor: "off" }), "<cwd>/.kiso/config.json")).toThrow(/belongs in the USER config/);
 	});
 });
+
+describe("B6 — the reader cannot be knocked out, and a knocked-out read denies (the lead's review)", () => {
+	const member = (check?: Parameters<typeof floorExtension>[2]) =>
+		floorExtension(() => true, () => root, check).approvals![0]!;
+
+	it("a 9 KB `$(` nest is DENIED, in under 10 ms — it used to throw, degrade to ask, and lose to bypass's allow", async () => {
+		const command = `rm -rf ${"$(".repeat(4_500)}`;
+		expect(command.length).toBeGreaterThan(9_000);
+		// warmed once with an ordinary line: the timing is the NEST's cost, not
+		// the one-time resolution of the roots (memoized per workspace)
+		await member().decide({ name: "shell", input: { command: "ls" } }, {} as never);
+		const t0 = performance.now();
+		const v = (await member().decide({ name: "shell", input: { command } }, {} as never)) as { action: string };
+		const ms = performance.now() - t0;
+		expect(v.action).toBe("deny");
+		expect(ms, `${ms.toFixed(1)} ms`).toBeLessThan(10);
+	});
+
+	it("400 `;`-joined cds are judged in under a second — the candidate set is bounded", () => {
+		const cds = Array.from({ length: 200 }, () => "cd src; cd build").join("; ");
+		const t0 = performance.now();
+		const runs = check(`${cds}; rm -rf node_modules`);
+		const refused = check(`${cds}; rm -rf *`);
+		const ms = performance.now() - t0;
+		expect(ms, `${ms.toFixed(0)} ms`).toBeLessThan(1_000);
+		expect(runs.refused).toBe(false);
+		// collapsed to {newest, home, workspace root}: a wildcard is still judged against both
+		expect(refused.refused).toBe(true);
+	});
+
+	it("a read that throws is a DENY, never an ask for bypass to outvote", async () => {
+		const v = (await member(() => {
+			throw new RangeError("Maximum call stack size exceeded");
+		}).decide({ name: "shell", input: { command: "anything" } }, {} as never)) as { action: string; reason?: string };
+		expect(v.action).toBe("deny");
+		expect(v.reason).toContain("could not read this line");
+	});
+});

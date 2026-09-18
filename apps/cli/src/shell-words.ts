@@ -353,12 +353,54 @@ export interface LooseWord {
 /** One command, and how it joins the one before it: after `cd x &&` it
  *  runs in x, after `cd x ||` in the old directory, after `;` in either. */
 export interface LooseCommand {
+	readonly kind: "cmd";
 	readonly argv: readonly LooseWord[];
 	readonly joinedBy: "&&" | "||" | ";" | "|";
 }
 
-export function parseShellLoose(src: string): LooseCommand[] {
-	const commands: LooseCommand[] = [];
+/** A subshell: a `( … )` group, or the command line inside `$( … )` or
+ *  backticks (which runs BEFORE the command that holds it). A `cd` inside
+ *  one does not move the shell around it. */
+export interface LooseGroup {
+	readonly kind: "group";
+	readonly items: readonly LooseNode[];
+	readonly joinedBy: "&&" | "||" | ";" | "|";
+}
+
+export type LooseNode = LooseCommand | LooseGroup;
+
+/** B6 (the lead's review): how deep the reader follows nested subshells.
+ *  A 9 KB `$(` nest overflowed the stack; the runtime turned the throw into
+ *  an ask, bypass's allow won, and /bin/sh ran the line. Past this depth
+ *  the word is taken as only a variable — which, as a target, is refused —
+ *  and nothing deeper is read. */
+export const LOOSE_MAX_DEPTH = 64;
+
+/** Every command the line would run, in order, flattened — for a caller
+ *  that asks the same question of each one. */
+export function looseCommands(nodes: readonly LooseNode[]): LooseCommand[] {
+	const out: LooseCommand[] = [];
+	const walk = (ns: readonly LooseNode[]): void => {
+		for (const n of ns) {
+			if (n.kind === "cmd") out.push(n);
+			else walk(n.items);
+		}
+	};
+	walk(nodes);
+	return out;
+}
+
+export function parseShellLoose(src: string): LooseNode[] {
+	return parseLooseAt(src, 0, 0, false).items;
+}
+
+/** One level of the reader, from `start`. With `closeParen`, it is the
+ *  inside of `$(`: an unmatched `)` ends it and its index is returned — the
+ *  recursion finds its own end, so a nest is read ONCE, in linear time,
+ *  rather than scanned for its matching paren at every level. */
+function parseLooseAt(src: string, start: number, depth: number, closeParen: boolean): { items: LooseNode[]; end: number } {
+	// the open `( … )` groups at this level: [items so far, the joiner before the group]
+	const stack: { items: LooseNode[]; joinedBy: LooseCommand["joinedBy"] }[] = [{ items: [], joinedBy: ";" }];
 	let argv: LooseWord[] = [];
 	let joinedBy: LooseCommand["joinedBy"] = ";";
 	let text = "";
@@ -368,8 +410,10 @@ export function parseShellLoose(src: string): LooseCommand[] {
 	let unknownIsGlob = false;
 	let tilde = false;
 	let startsWithExpansion = false;
+	let tooDeep = false; // a nest past LOOSE_MAX_DEPTH: nothing in it is known
 	let dropNext = false; // the next word is a redirection target
 	let seenCommandWord = false;
+	const top = (): LooseNode[] => stack[stack.length - 1]!.items;
 
 	const markUnknown = (glob: boolean): void => {
 		if (unknownAt < 0) {
@@ -379,7 +423,7 @@ export function parseShellLoose(src: string): LooseCommand[] {
 	};
 	const endWord = (): void => {
 		if (!inWord) return;
-		const w: LooseWord = { text, unknownAt, unknownIsGlob, tilde, variableOnly: startsWithExpansion && /^[/*.]*$/.test(lit) };
+		const w: LooseWord = { text, unknownAt, unknownIsGlob, tilde, variableOnly: tooDeep || (startsWithExpansion && /^[/*.]*$/.test(lit)) };
 		if (dropNext) dropNext = false;
 		else if (!seenCommandWord && unknownAt < 0 && /^[A-Za-z_][A-Za-z0-9_]*=/.test(text)) {
 			// a leading assignment: environment for the command, not the command
@@ -394,64 +438,82 @@ export function parseShellLoose(src: string): LooseCommand[] {
 		unknownIsGlob = false;
 		tilde = false;
 		startsWithExpansion = false;
+		tooDeep = false;
 	};
 	const endCommand = (next: LooseCommand["joinedBy"]): void => {
 		endWord();
-		if (argv.length > 0) commands.push({ argv, joinedBy });
+		if (argv.length > 0) top().push({ kind: "cmd", argv, joinedBy });
 		argv = [];
 		seenCommandWord = false;
 		dropNext = false;
 		// a separator after an empty command (`&& &&`) keeps the stronger one
 		joinedBy = next;
 	};
-	/** Consume an expansion starting at i (`$…` or a backtick); append its
-	 *  raw text, parse any command inside it, and return the next index. */
+	const openGroup = (): void => {
+		endCommand(joinedBy);
+		stack.push({ items: [], joinedBy });
+		joinedBy = ";";
+	};
+	const closeGroup = (): void => {
+		endCommand(";");
+		const g = stack.pop()!;
+		top().push({ kind: "group", items: g.items, joinedBy: g.joinedBy });
+	};
+	/** An expansion at i (`$…` or a backtick): its raw text joins the word,
+	 *  any command inside it is read as a subshell, and the index after it
+	 *  is returned. */
 	const expansion = (i: number): number => {
 		// "only a variable" means nothing came before it — quotes add nothing
 		if (text === "") startsWithExpansion = true;
 		inWord = true;
 		markUnknown(false);
-		let j = i;
-		let inner: string | null = null;
+		let j: number;
 		if (src[i] === "`") {
-			const end = src.indexOf("`", i + 1);
-			j = end < 0 ? src.length : end + 1;
-			inner = src.slice(i + 1, end < 0 ? src.length : end);
+			const close = src.indexOf("`", i + 1);
+			j = close < 0 ? src.length : close + 1;
+			if (depth < LOOSE_MAX_DEPTH) top().push({ kind: "group", items: parseLooseAt(src.slice(i + 1, close < 0 ? src.length : close), 0, depth + 1, false).items, joinedBy: ";" });
+			else tooDeep = true;
 		} else if (src[i + 1] === "(") {
-			let depth = 0;
-			j = i + 1;
-			for (; j < src.length; j += 1) {
-				if (src[j] === "(") depth += 1;
-				else if (src[j] === ")") {
-					depth -= 1;
-					if (depth === 0) break;
+			if (depth < LOOSE_MAX_DEPTH) {
+				const inner = parseLooseAt(src, i + 2, depth + 1, true);
+				top().push({ kind: "group", items: inner.items, joinedBy: ";" });
+				j = Math.min(inner.end + 1, src.length);
+			} else {
+				// too deep to read: consume to the matching paren, unread
+				tooDeep = true;
+				let open = 0;
+				for (j = i + 1; j < src.length; j += 1) {
+					if (src[j] === "(") open += 1;
+					else if (src[j] === ")" && --open === 0) break;
 				}
+				j = Math.min(j + 1, src.length);
 			}
-			inner = src.slice(i + 2, j);
-			j = Math.min(j + 1, src.length);
 		} else if (src[i + 1] === "{") {
-			const end = src.indexOf("}", i + 2);
-			j = end < 0 ? src.length : end + 1;
+			const close = src.indexOf("}", i + 2);
+			j = close < 0 ? src.length : close + 1;
 		} else {
 			j = i + 1;
 			if (j < src.length && /[@*#?$!0-9-]/.test(src[j]!)) j += 1;
 			else while (j < src.length && /[A-Za-z0-9_]/.test(src[j]!)) j += 1;
 		}
-		text += src.slice(i, j);
-		if (inner !== null) commands.push(...parseShellLoose(inner));
+		// The raw text is kept for the messages only — nothing is judged on
+		// what an expansion says, only on where it starts — so a long one is
+		// kept short: a nest used to carry its whole remainder at every level.
+		const raw = src.slice(i, j);
+		text += raw.length > 256 ? `${raw.slice(0, 256)}…` : raw;
 		return j;
 	};
 
-	let i = 0;
+	let i = start;
 	while (i < src.length) {
 		const c = src[i]!;
 		if (c === "'") {
-			const end = src.indexOf("'", i + 1);
-			const body = src.slice(i + 1, end < 0 ? src.length : end);
+			const close = src.indexOf("'", i + 1);
+			const body = src.slice(i + 1, close < 0 ? src.length : close);
 			text += body;
 			lit += body;
 			inWord = true;
-			i = end < 0 ? src.length : end + 1;
+			i = close < 0 ? src.length : close + 1;
 			continue;
 		}
 		if (c === '"') {
@@ -506,7 +568,26 @@ export function parseShellLoose(src: string): LooseCommand[] {
 			i += 1;
 			continue;
 		}
-		if (c === ";" || c === "\n" || c === "&" || c === "|" || c === "(" || c === ")") {
+		if (c === "(") {
+			openGroup();
+			i += 1;
+			continue;
+		}
+		if (c === ")") {
+			if (stack.length > 1) {
+				closeGroup();
+				i += 1;
+				continue;
+			}
+			if (closeParen) {
+				endCommand(";");
+				return { items: top(), end: i };
+			}
+			endCommand(";"); // a stray `)` separates
+			i += 1;
+			continue;
+		}
+		if (c === ";" || c === "\n" || c === "&" || c === "|") {
 			if (c === "&" && src[i + 1] === ">") {
 				endWord();
 				dropNext = true;
@@ -543,5 +624,6 @@ export function parseShellLoose(src: string): LooseCommand[] {
 		i += 1;
 	}
 	endCommand(";");
-	return commands;
+	while (stack.length > 1) closeGroup(); // an unclosed `(` closes at the end
+	return { items: top(), end: src.length };
 }
