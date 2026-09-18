@@ -21,6 +21,7 @@ import { defineTool } from "../src/tools/tool.js";
 import { ToolRegistry } from "../src/tools/registry.js";
 import { EventLog, loop, projectMessages } from "../src/index.js";
 import { DO_NOT_COMPACT } from "../src/kernel/project.js";
+import { standingPrune } from "./standing-prune.js";
 
 function seedLog(): EventLog {
 	const log = new EventLog();
@@ -112,7 +113,7 @@ describe("C: the loop appends the boundary when over the threshold", () => {
 			model: "faux",
 			registry,
 			log,
-			microcompact: { thresholdTokens: 100 },
+			compact: standingPrune(100),
 		})) {
 			events.push(ev);
 		}
@@ -144,7 +145,7 @@ describe("C: the loop appends the boundary when over the threshold", () => {
 			model: "faux",
 			registry: new ToolRegistry(),
 			log,
-			microcompact: { thresholdTokens: 100 },
+			compact: standingPrune(100),
 		})) {
 			events.push(ev);
 		}
@@ -190,7 +191,7 @@ describe("C: the loop appends the boundary when over the threshold", () => {
 			model: "faux",
 			registry,
 			log,
-			microcompact: { thresholdTokens: 100 },
+			compact: standingPrune(100),
 		})) {
 			// drain
 		}
@@ -222,7 +223,7 @@ describe("C: the loop appends the boundary when over the threshold", () => {
 			model: "faux",
 			registry: new ToolRegistry(),
 			log,
-			microcompact: { thresholdTokens: 100, keepResults: 2 },
+			compact: standingPrune(100, 2),
 		})) {
 			events.push(ev);
 		}
@@ -264,7 +265,7 @@ describe("C: the loop appends the boundary when over the threshold", () => {
 			model: "faux",
 			registry: new ToolRegistry(),
 			log,
-			microcompact: { thresholdTokens: 100, keepResults: 1 },
+			compact: standingPrune(100, 1),
 		})) {
 			// drain
 		}
@@ -296,7 +297,7 @@ describe("C: the loop appends the boundary when over the threshold", () => {
 			model: "faux",
 			registry: new ToolRegistry(),
 			log,
-			microcompact: { thresholdTokens: 100, keepResults: 2 },
+			compact: standingPrune(100, 2),
 		})) {
 			// drain
 		}

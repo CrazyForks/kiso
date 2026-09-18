@@ -27,6 +27,12 @@ export function parseRetryAfter(value: string | null | undefined, now = Date.now
 	return ms >= 0 ? ms : undefined;
 }
 
+/** ADR-0055 §3: how the providers word a refused context — openai-compat's
+ *  "maximum context length" / `context_length_exceeded`, Anthropic's
+ *  "prompt is too long". That 400 is an overflow, not a malformed request:
+ *  the kernel compacts once and retries once. */
+const CONTEXT_TOO_LONG = /maximum context length|context_length_exceeded|prompt is too long|context window/i;
+
 export function mapApiError(status: number | undefined, message: string, retryAfterMs?: number): StructuredError {
 	const withStatus = (e: Omit<StructuredError, "status">): StructuredError => ({
 		...e,
@@ -45,7 +51,7 @@ export function mapApiError(status: number | undefined, message: string, retryAf
 		case 529:
 			return withStatus({ code: "overloaded", retryable: true, message });
 		case 400:
-			return withStatus({ code: "invalid_request", retryable: false, message });
+			return withStatus({ code: CONTEXT_TOO_LONG.test(message) ? "context_overflow" : "invalid_request", retryable: false, message });
 		default:
 			if (status !== undefined && status >= 500 && status < 600) {
 				// D4: every 500-599 is api_5xx and retryable.
