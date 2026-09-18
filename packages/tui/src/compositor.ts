@@ -644,7 +644,9 @@ export class Body {
 		}
 	}
 
-	toolResult(callId: string, result: { content: string; isError: boolean; reason?: string | null }): void {
+	/** `untimed`: 4c's replay settles a card from the durable log, whose
+	 *  events carry no clock — the card then says nothing about time. */
+	toolResult(callId: string, result: { content: string; isError: boolean; reason?: string | null; untimed?: boolean }): void {
 		const call = this.#pendingCalls.get(callId);
 		if (call !== undefined) {
 			call.result = result;
@@ -669,7 +671,7 @@ export class Body {
 			cell.isError = result.isError;
 			cell.resultText = result.content;
 			cell.reason = result.reason ?? null;
-			cell.doneAt = Date.now();
+			cell.doneAt = result.untimed === true ? null : Date.now();
 			cell.done = true;
 		}
 		this.#mark();
@@ -814,6 +816,29 @@ export class Body {
 		this.#closeOpenThinking();
 		this.#closeOpenText();
 		this.#cells.push({ kind: "terminal", label: label.trim(), line: statusLineText, done: true });
+		this.#mark();
+	}
+
+	/**
+	 * 4c — fold what `replay` puts on the body into ONE row. The replayed
+	 * cells are the same cells a live run makes (the caller drives the
+	 * ordinary mutations), moved out of the transcript into the fold cell:
+	 * the row commits as one line and never expands on screen — so a resize
+	 * reprint redraws one row however long the history — and the ctrl+r
+	 * viewer reads them. Mutations only schedule frames, so nothing the
+	 * replay adds can have committed before it is moved. Active bodies
+	 * only: a pipe has no viewer to read a fold with (the caller prints the
+	 * plain tail there).
+	 */
+	fold(label: string, replay: () => void, summary: string | null = null): void {
+		if (!this.#isActive()) return;
+		const start = this.#cells.length;
+		replay();
+		this.#closeOpenThinking();
+		this.#closeOpenText();
+		const children = this.#cells.splice(start);
+		for (const cell of children) if (!cell.done) cell.done = true; // a replay settles; nothing in a fold is live
+		this.#cells.push({ kind: "fold", label, children, summary, done: true });
 		this.#mark();
 	}
 
@@ -1067,8 +1092,15 @@ export class Body {
 		for (const idx of [...this.#collapsed].reverse()) {
 			const cell = this.#cells[idx];
 			if (cell === undefined) continue;
-			// R13 — the viewer's FOLD entry retired with the fold: every
-			// entry is now a card, and a card's entry is its own full body.
+			// 4c — the resumed history's fold: the head is its one row, the
+			// body is the replayed turns rendered at the viewer's width —
+			// the checkpoint's summary first when it is one.
+			if (cell.kind === "fold") {
+				out.push({ head: cellComponent(cell).render(inner, ctx)[0] ?? "", body: this.#foldBody(cell, inner, ctx) });
+				continue;
+			}
+			// R13 — every other entry is a card, and a card's entry is its
+			// own full body.
 			if (cell.kind !== "tool") continue;
 			// the tool card's FULL body — the same rows its own ctrl+o
 			// opens. The expanded flag is saved and restored inside this
@@ -1087,6 +1119,24 @@ export class Body {
 			const first = rows.findIndex((r) => saysSomething(r));
 			const headAt = first < 0 ? 0 : first;
 			out.push({ head: rows[headAt] ?? "", body: rows.slice(headAt + 1) });
+		}
+		return out;
+	}
+
+	/** 4c — a fold's children as the transcript would have shown them: each
+	 *  cell's own render, spaced by the body's own formula (no blank between
+	 *  two blocks of one message). */
+	#foldBody(cell: Extract<BodyCell, { kind: "fold" }>, W: number, ctx: FrameCtx): string[] {
+		const out: string[] = [];
+		let prev: readonly string[] | null = null;
+		let prevKind: BodyCell["kind"] | null = null;
+		const cells: BodyCell[] = cell.summary === null ? cell.children : [{ kind: "raw", lines: cell.summary.split("\n"), done: true, wrap: "words" }, ...cell.children];
+		for (const child of cells) {
+			const rows = cellComponent(child).render(W, ctx);
+			if (rows.length === 0) continue;
+			out.push(...(prevKind === "md" && child.kind === "md" ? rows : bodySpacing(prev, rows)));
+			prev = rows;
+			prevKind = child.kind;
 		}
 		return out;
 	}
@@ -2216,6 +2266,8 @@ export class Body {
 		// index the viewer reads (ctrl+r). unshift: cells commit
 		// oldest-first, so the newest cut is at the front.
 		if (cell.kind === "tool" && lines.some((l) => l.includes("ctrl+o"))) this.#collapsed.unshift(i);
+		// 4c: a fold is read in the viewer and nowhere else.
+		if (cell.kind === "fold") this.#collapsed.unshift(i);
 		this.#lineCache[i] = lines;
 		const placed = this.#space(i, i > 0 ? this.#lineCache[i - 1]! : null, lines);
 		this.#committed += 1;
