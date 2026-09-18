@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { MODES, getMode, modeExtensions, modeFromEnv, modeSystemPrompt, setMode, type Mode } from "../src/mode.js";
+import { MODES, MODE_NOTE, OFFERED_MODES, getMode, modeExtensions, modeFromEnv, modeSystemPrompt, setMode, type Mode } from "../src/mode.js";
 
 /** The current tier's policy — the first extension of the chain. */
 function currentPolicy(tier: Mode) {
@@ -26,7 +26,7 @@ function verdict(tier: Mode, tool: string) {
 const READ = ["read_file", "list_dir", "search_text", "read_skill"];
 const WRITE_EDIT = ["write_file", "edit_file"];
 
-describe("Modes: the five-tier verdict matrix", () => {
+describe("Modes: the verdict matrix", () => {
 	it("manual asks for EVERY tool", async () => {
 		for (const tool of [...READ, ...WRITE_EDIT, "shell", "some_tool"]) {
 			expect(await verdict("manual", tool)).toEqual({ action: "ask" });
@@ -48,6 +48,25 @@ describe("Modes: the five-tier verdict matrix", () => {
 		for (const tool of WRITE_EDIT) expect(await verdict("accept-edits", tool)).toEqual({ action: "allow" });
 		expect(await verdict("accept-edits", "shell")).toEqual({ action: "ask" });
 		expect(await verdict("accept-edits", "some_tool")).toEqual({ action: "abstain" });
+	});
+
+	it("dontAsk's tier decides exactly as default's — the difference is at the ask endpoint, not in the chain", async () => {
+		for (const tool of [...READ, ...WRITE_EDIT, "shell", "some_tool"]) {
+			expect(await verdict("dontAsk", tool), tool).toEqual(await verdict("default", tool));
+		}
+	});
+
+	it("manual stays ACCEPTED and is no longer OFFERED; dontAsk is both", () => {
+		expect(MODES).toContain("manual");
+		expect(OFFERED_MODES).not.toContain("manual");
+		expect(MODES).toContain("dontAsk");
+		expect(OFFERED_MODES).toContain("dontAsk");
+		for (const m of OFFERED_MODES) expect(MODES).toContain(m);
+	});
+
+	it("every offered note fits the picker at 80 columns: 80 − 19 (the label column) − 1 (never written) = 60", () => {
+		// measured on the real PTY: a 61-character note lost its last letter
+		for (const m of OFFERED_MODES) expect(MODE_NOTE[m].length, m).toBeLessThanOrEqual(60);
 	});
 
 	it("plan is read-only: reads allowed, EVERYTHING else denied with the guiding reason", async () => {

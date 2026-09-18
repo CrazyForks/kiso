@@ -44,10 +44,14 @@ import {
 import { readProfile } from "@vincemakes/kiso-runtime/internal";
 import { createFauxProvider } from "@vincemakes/kiso-evals";
 import { createCodingTools } from "@vincemakes/kiso-tools-node";
-import { MODES, getMode, modeExtensions, modeFromEnv, modeSystemPrompt, setMode } from "./mode.js";
+import { MODES, OFFERED_MODES, getMode, modeExtensions, modeFromEnv, modeSystemPrompt, setMode } from "./mode.js";
+import { readOnlyShellExtension } from "./readonly-shell.js";
+import type { PolicyCall } from "@vincemakes/kiso-core";
+import { guardSavedAllow, isProtectedWrite } from "./protected-writes.js";
+import { floorExtension, isDestructiveCall } from "./floor.js";
 import { breakerExtension } from "./breaker.js";
 import { builtInLayer } from "./builtin.js";
-import { agentModel, atFiles, body, bodyLog, codingToolOptions, kisoHome, builtInExtensions, currentFaux, dock, extensionsDir, loadedExtensions, mergedConfig, mergedTempPaths, modelChoice, projectExtensions, configModels, configuredWindow, agentBaseUrl, currentModelName, currentAgentExtensions, sessionStoreRef, sessionsDir, setAgentModel, setBody, setConfigModels, setConfiguredWindow, setCurrentAgentExtensions, setCurrentFaux, setCurrentModelName, setExtensionLists, setMergedConfig, setModelChoice, setSessionStore, setRetryShown, secretEnvNamesOf, userExtensions, VERSION, type LineInput , lastBinding , acceptDrift, setAcceptDrift } from "./state.js";
+import { agentModel, atFiles, body, bodyLog, codingToolOptions, kisoHome, builtInExtensions, currentFaux, dock, extensionsDir, loadedExtensions, mergedConfig, mergedTempPaths, modelChoice, projectExtensions, configModels, configuredWindow, agentBaseUrl, currentModelName, currentAgentExtensions, sessionStoreRef, sessionsDir, setAgentModel, setBody, setConfigModels, setConfiguredWindow, setCurrentAgentExtensions, setCurrentFaux, setCurrentModelName, setExtensionLists, setMergedConfig, setModelChoice, setSessionStore, setRetryShown, setNeverInherited, secretEnvNamesOf, userExtensions, VERSION, type LineInput, lastBinding, acceptDrift, setAcceptDrift, setFloorOn, floorOn } from "./state.js";
 import { maxRetriesFromEnv } from "./retries.js";
 import { askUi, resolveProjectTrust } from "./trust-ui.js";
 import { isFirstRun, scaffoldFirstRun } from "./first-run.js";
@@ -788,7 +792,24 @@ async function makeAgent(sessionId: string | undefined, input?: LineInput, model
 	// re-reads the config's extensions array per run).
 	// LT-2: the loop breaker at the chain HEAD — it speaks first when it speaks,
 	// so `decidedBy` names it; a deny there beats every tier, bypass included.
-	const extensions = [breakerExtension(), ...modeExtensions(), ...loadedExtensions];
+	// 0.40.0: the read-only shell allow sits after the tiers — an allow from
+	// it outranks a tier's ask and names itself in decidedBy.
+	// 0.40.0: a saved allow never carries a write into .git/ or .kiso/, nor
+	// a destructive shell command.
+	const workspaceRoot = (): string => codingToolOptions().workspaceRoot;
+	const neverInherited = (call: PolicyCall): boolean => isProtectedWrite(call, workspaceRoot()) || isDestructiveCall(call);
+	setNeverInherited(neverInherited);
+	// 0.40.0: the catastrophe floor, at the chain's HEAD — a deny there
+	// names itself in decidedBy and outranks every tier, bypass included.
+	// Read per agent, so /reload picks up an edited user config.
+	setFloorOn(loadUserConfig()?.floor !== "off");
+	const extensions = [
+		floorExtension(() => floorOn, workspaceRoot),
+		breakerExtension(),
+		...modeExtensions(workspaceRoot),
+		readOnlyShellExtension(codingToolOptions),
+		...loadedExtensions.map((e) => guardSavedAllow(e, neverInherited)),
+	];
 	setCurrentAgentExtensions(extensions);
 
 	// E6: the run-start context policy (captured once — exactOptionalPropertyTypes).
@@ -1362,7 +1383,7 @@ async function main(): Promise<void> {
 	if (modeFlag !== -1) {
 		const m = MODES.find((x) => x === args[modeFlag + 1]);
 		if (m === undefined) {
-			console.error(`unknown mode: ${args[modeFlag + 1]} (tiers: ${MODES.join(", ")})`);
+			console.error(`unknown mode: ${args[modeFlag + 1]} (tiers: ${OFFERED_MODES.join(", ")})`);
 			process.exit(2);
 		}
 		setMode(m);
@@ -1733,7 +1754,7 @@ async function main(): Promise<void> {
 						"  kiso help               this help\n\n" +
 						"flags (any position):\n" +
 						"  --model <profile|provider/model>   pick the model (also /model in-session)\n" +
-						"  --mode <tier>            approval tier: manual|default|accept-edits|plan|bypass\n" +
+						"  --mode <tier>            approval tier: default|accept-edits|plan|dontAsk|bypass\n" +
 						"  --version                print the version\n\n" +
 						"configuration:\n" +
 						"  no key                   keyless faux demo (a scripted four-round session)\n" +

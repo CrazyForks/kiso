@@ -48,13 +48,17 @@ a broken config file fails loudly with the file named.
       "streamIdleMs": 300000                 // the stream watchdog: 5 min of silence before a retry (default 120 s; 0 off)
     }
   },
-  "mode": "default",                         // manual/default/accept-edits/plan/bypass
+  "mode": "default",                         // default/accept-edits/plan/dontAsk/bypass
   "contextWindow": 160000,                   // tokens
   "autoCompact": { "thresholdRatio": 0.8 },  // opt-in, env KISO_AUTO_COMPACT wins
   "projectTrust": "ask"                      // "ask" | "never" — no "always"
 }
 ```
 
+- `"floor": "catastrophe" | "off"` — the catastrophe floor (on by default):
+  in every mode, bypass included, a destructive command whose target cannot be
+  recovered is refused (see the README). USER config only — a project config
+  that names `floor` fails loudly, because a repository must never lower it.
 - `kiso --model deepseek chat` — the flag beats everything; `provider/model`
   direct writes work too (`--model openai-compat/gpt-4o`,
   `--model anthropic/claude-sonnet-5`).

@@ -17,7 +17,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -227,7 +227,7 @@ describe("Modes (real PTY, 24×80) — plan mode, /mode switching, the audit tra
 				// the needle is a NOTE, not the header: the header carries SGR
 				// between its words, and a pty driver scans the raw stream
 				// for a contiguous run (DC-25/DC-29, filed twice already).
-				["asks for every tool", "5\r"],
+				["asks nothing: an ask is denied", "5\r"],
 				// and QUIT. Without it the driver waits out its whole
 				// timeout: `execFileSync` blocks the vitest worker for that
 				// long, and enough of those starve the reporter's RPC
@@ -243,11 +243,17 @@ describe("Modes (real PTY, 24×80) — plan mode, /mode switching, the audit tra
 		expect(plain, "bare /mode did not open a picker").toContain("mode — current: default");
 		// every tier is offered, each saying what it DOES — the notes are
 		// transcribed from decide(), so a drifting description is a bug
-		for (const tier of ["manual", "default", "accept-edits", "plan", "bypass"]) expect(plain, `${tier} is not on the panel`).toContain(tier);
+		for (const tier of ["default", "accept-edits", "plan", "dontAsk", "bypass"]) expect(plain, `${tier} is not on the panel`).toContain(tier);
+		// 0.40.0: manual is still accepted, and no longer offered.
+		expect(plain, "manual is still offered").not.toContain(" manual ");
 		// Astra F4: the note now qualifies itself. Assert the WHOLE of it, so a
 		// truncation at this width is a failure rather than a silent loss of
-		// the qualification the finding asked for.
-		expect(plain).toContain("asks for every tool — a saved allow still allows");
+		// the qualification the finding asked for — the two asking tiers the
+		// picker offers, and the tier that never asks.
+		expect(plain).toContain("read-only runs; the rest asks — a saved allow still allows");
+		expect(plain).toContain("read-only, edits run; rest asks — a saved allow still allows");
+		expect(plain).toContain("asks nothing: an ask is denied — a saved allow still allows");
+		expect(plain).toContain("reads run; all else is denied — read-only, and a deny wins");
 		expect(plain).toContain("read-only"); // plan's note
 		// the row a human is looking at names the arrows, not only the
 		// digits — DC-30's lesson: a hint that omits the gesture is why
@@ -270,7 +276,7 @@ describe("Modes (real PTY, 24×80) — plan mode, /mode switching, the audit tra
 		const piped = runCli(["chat", "modepipe"], { ...env, KISO_FAUX_SCRIPT: script }, { input: "/mode\nexit\n", timeout: 60_000 });
 		expect(piped.status).toBe(0);
 		expect(piped.stdout).toContain("mode default");
-		expect(piped.stdout).toContain("tiers: manual default accept-edits plan bypass");
+		expect(piped.stdout).toContain("tiers: default accept-edits plan dontAsk bypass");
 		expect(piped.stdout, "a panel leaked onto a pipe").not.toContain("mode — current");
 		expect(piped.stdout, "pipes are byte-plain").not.toContain("\u001b[");
 	}, 120_000);
@@ -308,7 +314,10 @@ describe("Modes (real PTY, 24×80) — plan mode, /mode switching, the audit tra
 			JSON.stringify([
 				{
 					events: [
-						{ type: "tool_call_end", callId: "s1", name: "shell", input: { command: "git reset --hard" } },
+						// 0.40.0: `git reset --hard` on the workspace is the FLOOR's now
+						// (it would be decidedBy floor); `git stash` is the extension's
+						// alone, which is what this monotonicity case is about.
+						{ type: "tool_call_end", callId: "s1", name: "shell", input: { command: "git stash" } },
 						{ type: "stop", reason: "tool_use" },
 					],
 				},
@@ -340,6 +349,185 @@ describe("Modes (real PTY, 24×80) — plan mode, /mode switching, the audit tra
 			decidedBy: "safe-test",
 			reason: "destructive command — refused by safe-test",
 		});
+	}, 90_000);
+
+	it("0.40.0: a provably read-only shell call runs unasked (decidedBy: read-only-shell); any other shell call still asks", () => {
+		const { env } = isolatedEnv();
+		const dir = mkdtempSync(join(tmpdir(), "kiso-modes-"));
+		const workdir = join(dir, "work");
+		mkdirSync(workdir, { recursive: true });
+		writeFileSync(join(workdir, "notes.txt"), "alpha\nbeta\n", "utf8");
+		const script = join(dir, "faux.json");
+		writeFileSync(
+			script,
+			JSON.stringify([
+				{ events: [{ type: "tool_call_end", callId: "s1", name: "shell", input: { command: "cat notes.txt | wc -l" } }, { type: "stop", reason: "tool_use" }] },
+				{ events: [{ type: "tool_call_end", callId: "s2", name: "shell", input: { command: "touch made.txt" } }, { type: "stop", reason: "tool_use" }] },
+				{ events: [{ type: "text_delta", text: "ro done" }, { type: "stop", reason: "end_turn" }] },
+			]),
+			"utf8",
+		);
+		// ONE approval is fed. If the read had asked, it would take the
+		// `y`, and the write's panel would wait out the timeout unanswered.
+		ptyRun(
+			{ ...env, KISO_FAUX_SCRIPT: script },
+			[
+				["▌ ", "go\r"],
+				["don't ask again", "y\r"],
+				["ro done", "exit\r"],
+			],
+			workdir,
+			{ modeFlag: "default", session: "modes-ro" },
+		);
+		const events = new SessionStore(join(env.KISO_HOME!, "sessions")).load("modes-ro").map((r) => r.event);
+		const asked = events.filter((e) => e.type === "permission_requested").map((e) => (e as { callId: string }).callId);
+		expect(asked, "only the write was put to the human").toEqual(["s2"]);
+		const decided = decidedEvents(env, "modes-ro");
+		expect(decided.find((e) => e.callId === "s1")).toMatchObject({ decision: "approved", decidedBy: "read-only-shell" });
+		expect(decided.find((e) => e.callId === "s2")?.decidedBy, "the human, not a policy").toBeUndefined();
+		// and the read really ran
+		const result = events.find((e) => e.type === "tool_result" && (e as { callId: string }).callId === "s1") as { content: string } | undefined;
+		expect(result?.content).toContain("2");
+	}, 90_000);
+
+	it("0.40.0 dontAsk: what would ask is denied with one line and the run goes on; the read-only allow and a saved allow still allow", () => {
+		const { env, dirs } = isolatedEnv();
+		const dir = mkdtempSync(join(tmpdir(), "kiso-modes-"));
+		const workdir = join(dir, "work");
+		mkdirSync(workdir, { recursive: true });
+		writeFileSync(join(workdir, "notes.txt"), "alpha\n", "utf8");
+		// a saved allow, shaped like the generated don't-ask-again rule
+		writeFileSync(
+			join(dirs.extensions, "saved-allow.mjs"),
+			`export default { name: "saved-allow", approvals: [{ decide(call) { return call.name === "write_file" ? { action: "allow" } : { action: "abstain" }; } }] };\n`,
+			"utf8",
+		);
+		const script = join(dir, "faux.json");
+		writeFileSync(
+			script,
+			JSON.stringify([
+				{ events: [{ type: "tool_call_end", callId: "s1", name: "shell", input: { command: "cat notes.txt" } }, { type: "stop", reason: "tool_use" }] },
+				{ events: [{ type: "tool_call_end", callId: "s2", name: "shell", input: { command: "touch made.txt" } }, { type: "stop", reason: "tool_use" }] },
+				{ events: [{ type: "tool_call_end", callId: "w1", name: "write_file", input: { path: "out.txt", content: "x", expectedRevision: "absent" } }, { type: "stop", reason: "tool_use" }] },
+				{ events: [{ type: "text_delta", text: "dontask done" }, { type: "stop", reason: "end_turn" }] },
+			]),
+			"utf8",
+		);
+		// NO approval is fed: a panel that opened would wait out the timeout.
+		const out = ptyRun(
+			{ ...env, KISO_FAUX_SCRIPT: script },
+			[
+				["▌ ", "go\r"],
+				["dontask done", "exit\r"],
+			],
+			workdir,
+			{ modeFlag: "dontAsk", session: "modes-dontask" },
+		);
+		const clean = stripANSI(out);
+		expect(clean, "the one-line notice").toContain("[dontAsk] shell would ask — denied");
+		expect(clean, "the run went on to its end").toContain("dontask done");
+		const decided = decidedEvents(env, "modes-dontask");
+		expect(decided.find((e) => e.callId === "s1")).toMatchObject({ decision: "approved", decidedBy: "read-only-shell" });
+		expect(decided.find((e) => e.callId === "s2")).toMatchObject({ decision: "denied" });
+		expect(decided.find((e) => e.callId === "s2")?.reason).toContain("dontAsk");
+		expect(decided.find((e) => e.callId === "w1")).toMatchObject({ decision: "approved", decidedBy: "saved-allow" });
+		expect(existsSync(join(workdir, "made.txt")), "the denied command never ran").toBe(false);
+		expect(existsSync(join(workdir, "out.txt")), "the saved allow still allowed").toBe(true);
+	}, 90_000);
+
+	it("0.40.0: accept-edits still ASKS for a write into .git/ — configuration that runs", () => {
+		const { env } = isolatedEnv();
+		const dir = mkdtempSync(join(tmpdir(), "kiso-modes-"));
+		const workdir = join(dir, "work");
+		mkdirSync(join(workdir, ".git"), { recursive: true });
+		const script = join(dir, "faux.json");
+		writeFileSync(
+			script,
+			JSON.stringify([
+				{ events: [{ type: "tool_call_end", callId: "w1", name: "write_file", input: { path: "notes.md", content: "x", expectedRevision: "absent" } }, { type: "stop", reason: "tool_use" }] },
+				{ events: [{ type: "tool_call_end", callId: "w2", name: "write_file", input: { path: ".git/config", content: "[core]\n", expectedRevision: "absent" } }, { type: "stop", reason: "tool_use" }] },
+				{ events: [{ type: "text_delta", text: "pw done" }, { type: "stop", reason: "end_turn" }] },
+			]),
+			"utf8",
+		);
+		// ONE approval is fed: had the ordinary write asked, it would take it
+		// and the .git write would wait out the timeout.
+		ptyRun(
+			{ ...env, KISO_FAUX_SCRIPT: script },
+			[
+				["▌ ", "go\r"],
+				["don't ask again", "y\r"],
+				["pw done", "exit\r"],
+			],
+			workdir,
+			{ modeFlag: "accept-edits", session: "modes-pw" },
+		);
+		const events = new SessionStore(join(env.KISO_HOME!, "sessions")).load("modes-pw").map((r) => r.event);
+		const asked = events.filter((e) => e.type === "permission_requested").map((e) => (e as { callId: string }).callId);
+		expect(asked, "only the .git write was put to the human").toEqual(["w2"]);
+		const decided = decidedEvents(env, "modes-pw");
+		expect(decided.find((e) => e.callId === "w1")).toMatchObject({ decision: "approved", decidedBy: "mode:accept-edits" });
+	}, 90_000);
+
+	it("0.40.0 dontAsk (review B5): an interrupted execution is left undecided with one line — no panel — and a turn behind it is held", () => {
+		const { env } = isolatedEnv();
+		const dir = mkdtempSync(join(tmpdir(), "kiso-modes-"));
+		const workdir = join(dir, "work");
+		mkdirSync(workdir, { recursive: true });
+		// the aborted-mid-tool shape: a closed run whose shell execution
+		// started and never reported
+		const sessions = join(env.KISO_HOME!, "sessions");
+		mkdirSync(sessions, { recursive: true });
+		const lines = [
+			{ type: "user_input", content: "clean up" },
+			{ type: "tool_call_end", callId: "u1", name: "shell", input: { command: "touch x" } },
+			{ type: "tool_execution_started", callId: "u1", invocationSeq: 1, name: "shell", input: { command: "touch x" }, executionId: "ex-u1" },
+			{ type: "terminal", outcome: { kind: "aborted", by: "user" } },
+		].map((event, seq) => JSON.stringify({ runId: "runA", ts: seq, event: { ...event, seq } }));
+		writeFileSync(join(sessions, "modes-unc.jsonl"), `${lines.join("\n")}\n`, "utf8");
+		const script = join(dir, "faux.json");
+		writeFileSync(script, JSON.stringify([{ events: [{ type: "text_delta", text: "never reached" }, { type: "stop", reason: "end_turn" }] }]), "utf8");
+		const out = ptyRun(
+			{ ...env, KISO_FAUX_SCRIPT: script },
+			[
+				["left unresolved", ""],
+				["▌ ", "go\r"],
+				["turn held", "exit\r"],
+			],
+			workdir,
+			{ modeFlag: "dontAsk", session: "modes-unc" },
+		);
+		const clean = stripANSI(out);
+		expect(clean).toContain("[dontAsk] 1 uncertain execution left unresolved — resolve them in an asking mode");
+		expect(clean, "no recovery panel opened").not.toContain("rerun");
+		expect(clean).toContain("turn held");
+		// nothing was fabricated: no resolution was recorded
+		const events = new SessionStore(sessions).load("modes-unc").map((r) => r.event.type);
+		expect(events).not.toContain("tool_execution_resolved");
+	}, 90_000);
+
+	it("0.40.0 dontAsk (review B5): an untrusted project .kiso on a TTY is not loaded and not asked about, and nothing is recorded", () => {
+		const { env } = isolatedEnv();
+		const dir = mkdtempSync(join(tmpdir(), "kiso-modes-"));
+		const workdir = join(dir, "work");
+		mkdirSync(join(workdir, ".kiso"), { recursive: true });
+		writeFileSync(join(workdir, ".kiso", "config.json"), `${JSON.stringify({ contextWindow: 100000 })}\n`, "utf8");
+		const script = join(dir, "faux.json");
+		writeFileSync(script, JSON.stringify([{ events: [{ type: "text_delta", text: "ok" }, { type: "stop", reason: "end_turn" }] }]), "utf8");
+		const out = ptyRun(
+			{ ...env, KISO_FAUX_SCRIPT: script },
+			[
+				["▌ ", "exit\r"],
+			],
+			workdir,
+			{ modeFlag: "dontAsk", session: "modes-trust" },
+		);
+		const clean = stripANSI(out);
+		expect(clean).toContain("[dontAsk] [project .kiso] found 1 artifact(s)");
+		expect(clean, "no trust panel opened").not.toContain("trust this project's .kiso?");
+		// no sticky refusal: a later asking session can still decide
+		const store = join(env.KISO_HOME!, "trust.jsonl");
+		expect(existsSync(store) ? readFileSync(store, "utf8") : "").not.toContain(realpathSync(workdir));
 	}, 90_000);
 
 	it("KISO_MODE=plan in a PIPE: same enforcement, byte-plain, no human pause", () => {

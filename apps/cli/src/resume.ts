@@ -6,7 +6,7 @@
 import { idleStatus, runningStatus, type RunUsage } from "@vincemakes/kiso-tui";
 import type { AgentSession } from "@vincemakes/kiso-runtime";
 import { getMode } from "./mode.js";
-import { agentModel, dock, retryOnRow, type LineInput } from "./state.js";
+import { agentModel, dock, retryOnRow, floorOn, type LineInput } from "./state.js";
 import { pendingAsk, resolveUncertains } from "./trust-ui.js";
 import { failOnFauxExhaustion } from "./faux-glue.js";
 import { consumeRun, estimateCtxRatio, startStatusSpinner } from "./chat.js";
@@ -39,7 +39,7 @@ export async function resume(session: AgentSession, prompt: string | undefined, 
 		// same budget. It has no meter, so nothing here can be dropped that
 		// was not already at risk of being cut.
 		if (dock.active)
-			dock.setStatus(idleStatus(getMode(), agentModel, estimateCtxRatio(session), undefined, process.stdout.columns > 0 ? process.stdout.columns : 80));
+			dock.setStatus(idleStatus(getMode(), agentModel, estimateCtxRatio(session), undefined, process.stdout.columns > 0 ? process.stdout.columns : 80, !floorOn));
 	};
 	const withRun = async (run: ReturnType<AgentSession["resume"]>): Promise<void> => {
 		currentRun = run;

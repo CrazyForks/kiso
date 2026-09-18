@@ -333,8 +333,12 @@ function elideMiddle(text: string, max: number): string {
  * No `W` means no dropping, which is what the callers that do not know
  * their width should get: today's row, unchanged.
  */
-export function idleStatus(tier: string, model: string, ctxRatio: number, meter?: StatusMeter, W?: number): string {
+export function idleStatus(tier: string, model: string, ctxRatio: number, meter?: StatusMeter, W?: number, floorOff = false): string {
 	return composeRow(`▸ ${tier}`, [
+		// 0.40.0: the catastrophe floor is on by default and says nothing;
+		// OFF is the state worth seeing, and a fact beside the tier it
+		// changes the meaning of.
+		floorOff ? { kind: "fact", text: "floor off" } : null,
 		{ kind: "hint", text: "/mode to switch" },
 		{ kind: "label", text: model },
 		meter?.cacheHitPct != null ? { kind: "fact", text: `CH ${Math.round(meter.cacheHitPct)}%` } : null,
