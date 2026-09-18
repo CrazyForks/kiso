@@ -58,11 +58,10 @@ import {
 	MAX_SUMMARY_FAILURES,
 	policyTriggerFromWindow,
 	serializeCovered,
+	MANUAL_SUMMARY_BUDGET,
 	SUMMARY_MAX_OUTPUT,
-	SUMMARY_OUTPUT_CEILING,
 	summarizeConversation,
 	summaryBoundarySeq,
-	summaryOutputBudget,
 } from "./summarize.js";
 import { canonicalizeUsageForModel } from "./usage/canonical.js";
 import { appendFileSync, mkdirSync } from "node:fs";
@@ -558,12 +557,12 @@ export class AgentSession {
 		// R3a: `focus` — an optional steer for the summary call ("keep the
 		// auth details"). Rides the serialized input as ONE instruction
 		// line; absent = byte-identical to the pre-round call.
-		// 0.39.2: `scaledBudget` — the MANUAL `/compact` gesture's summary
-		// call: an output budget scaled to the covered range with one
-		// `max_tokens` retry, and thinking off where the registry says the
-		// model can turn it off. Absent — the auto policy — the call is
-		// byte-identical to before; see `summaryOutputBudget` for why.
-		options: { keepRounds?: number; keepTokens?: number; signal?: AbortSignalLike; onStart?: (info: CompactInfo) => void; drop?: boolean; focus?: string; scaledBudget?: boolean } = {},
+		// 0.39.2: `manualBudget` — the MANUAL `/compact` gesture's summary
+		// call: the measured output budget, and thinking off where the
+		// registry says the model can turn it off. Absent — the auto
+		// policy — the call is byte-identical to before; see
+		// `MANUAL_SUMMARY_BUDGET` for the measurement and for why.
+		options: { keepRounds?: number; keepTokens?: number; signal?: AbortSignalLike; onStart?: (info: CompactInfo) => void; drop?: boolean; focus?: string; manualBudget?: boolean } = {},
 	): Promise<SummarizeResult | null> {
 		this.ensureHealthy();
 		const keepRounds = options.keepRounds ?? KEEP_RECENT_ROUNDS;
@@ -622,9 +621,9 @@ export class AgentSession {
 				// E6 (g): the summary call ALWAYS carries an explicit output
 				// budget (a wire-level truncation is caught by the (b)
 				// required-section validation, never silently passed).
-				// 0.39.2: scaled for the manual gesture, fixed for the policy.
-				...(options.scaledBudget === true
-					? { maxOutputTokens: summaryOutputBudget(coveredTokens), maxOutputCeiling: SUMMARY_OUTPUT_CEILING, ...summaryReasoning(binding.model, binding.baseUrl) }
+				// 0.39.2: measured for the manual gesture, fixed for the policy.
+				...(options.manualBudget === true
+					? { maxOutputTokens: MANUAL_SUMMARY_BUDGET, ...summaryReasoning(binding.model, binding.baseUrl) }
 					: { maxOutputTokens: SUMMARY_MAX_OUTPUT }),
 				...(options.signal !== undefined ? { signal: options.signal } : {}),
 			});

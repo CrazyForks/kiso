@@ -53,54 +53,51 @@ export const IN_FLIGHT_HEADROOM = 8000;
 /** ONE NUMBER, TWO CONSUMERS. `SUMMARY_MAX_OUTPUT` is both the summary
  *  call's output budget AND a term of this reserve — the reserve buys
  *  back room for exactly that much summary. Change one and you have
- *  changed the other; see `summaryOutputBudget` for why the scaled budget
- *  below does NOT reach the auto policy that reads this. */
+ *  changed the other; see `MANUAL_SUMMARY_BUDGET` for why the manual
+ *  gesture's larger budget does NOT reach the auto policy that reads this. */
 export const POLICY_RESERVE = SUMMARY_MAX_OUTPUT + KEEP_TOKENS_DEFAULT + IN_FLIGHT_HEADROOM;
 
 /**
- * 0.39.2 — the ceiling of a MANUAL `/compact`'s output budget.
+ * 0.39.2 — the output budget of a MANUAL `/compact`, and it is MEASURED.
  *
- * A seven-section checkpoint is a fraction of what it covers; past this
- * size it has stopped being a summary and started being a second copy,
- * and the budget exists to bound what a runaway one can cost. At the
- * scale below it is reached at ~384k covered tokens, which only a 1M
- * window reaches.
+ * The fixed 4,000 failed live sessions: `the summary turn ended with
+ * max_tokens`. On the failing profile (an unregistered DeepSeek model
+ * behind a gateway), a covered range the size of the reported one —
+ * ~100k tokens of real source — was run three ways:
+ *
+ *   budget  4,000  → max_tokens   reasoning 3,093   checkpoint    828   3 of 7 sections
+ *   budget  8,391  → max_tokens   reasoning 1,613   checkpoint  6,544   4 of 7
+ *   budget 32,000  → end_turn     reasoning 3,557   checkpoint 15,261   7 of 7
+ *
+ * A complete checkpoint took 18,837 output tokens. At 4,000 the reasoning
+ * LOOKED like the cause (77% of the budget) only because the budget was
+ * too small for the checkpoint to get going; with room, reasoning is a
+ * fifth and the checkpoint itself is the size. A rule scaled from the
+ * covered estimate (a twelfth: 8,391, doubling to 16,782 on retry) was
+ * built first and failed BOTH attempts on this data — it was a guess, and
+ * the measurement is what falsified it.
+ *
+ * So the budget is not scaled; it is a generous flat CAP, because a cap
+ * is not a charge — the model is billed for what it writes, and a higher
+ * limit costs nothing unless the output would have run away anyway. The
+ * one thing a lower first budget buys is a failed call before the one
+ * that works. 32,000 holds the measured 18,837 with room, and bounds what
+ * a genuinely runaway summary can cost: a checkpoint larger than this has
+ * stopped being a summary.
+ *
+ * MANUAL ONLY, and that is the patch boundary. The auto policy's
+ * `POLICY_RESERVE` assumes `SUMMARY_MAX_OUTPUT`; giving the policy a larger
+ * budget without moving its reserve would let a fire leave less room than
+ * the reserve promised, and moving the reserve moves every session's
+ * compaction trigger — BM-1 §3's compaction tier, where the paired bench
+ * blocks. That belongs to A1b, and the measurement above is its input.
  */
-export const SUMMARY_OUTPUT_CEILING = 32_000;
+export const MANUAL_SUMMARY_BUDGET = 32_000;
 
-/**
- * 0.39.2 — the output budget for a MANUAL `/compact`, scaled to what it
- * covers: one twelfth of the covered estimate, floored at today's 4,000
- * and capped at the ceiling.
- *
- * The fixed 4,000 failed on a live gateway session (6 rounds, ~95k
- * covered): `the summary turn ended with max_tokens`. Two causes produce
- * that stop and the budget answers BOTH — reasoning tokens eating the
- * allowance before the checkpoint finishes, and a structured summary of
- * a large range simply being longer than 4,000. The one-twelfth is
- * PROVISIONAL: it gives the 95k case ~7,900 and leaves every covered
- * range under 48k exactly where it was. Which cause dominates is a
- * measurement that has not been taken yet, and the max_tokens retry in
- * `summarizeConversation` is the net under a wrong guess.
- *
- * MANUAL ONLY, and that is the patch boundary rather than an oversight.
- * The auto policy's `POLICY_RESERVE` assumes `SUMMARY_MAX_OUTPUT`; giving
- * the policy a larger budget without moving its reserve would let a fire
- * leave less room than the reserve promised, and moving the reserve
- * moves every session's compaction trigger — the compaction tier of
- * BM-1 §3, where the paired bench blocks. That belongs to A1b, which
- * owns the auto budget and its reserve together. Today the policy's call
- * is byte-identical to before.
- */
-export function summaryOutputBudget(coveredTokens: number): number {
-	const scaled = Math.ceil(Math.max(0, coveredTokens) / 12);
-	return Math.min(SUMMARY_OUTPUT_CEILING, Math.max(SUMMARY_MAX_OUTPUT, scaled));
-}
-
-/** Thrown by an attempt that stopped on `max_tokens`: the budget is the
- *  failure, and it is the one failure a larger budget can cure. Still an
- *  `Error` — a caller that does not retry sees the same validation
- *  rejection it always has. */
+/** Thrown by an attempt that stopped on `max_tokens`, and it NAMES the
+ *  budget: "not a complete turn" alone told the person nothing about what
+ *  ran out. Still an `Error`, and still carries the `max_tokens … not a
+ *  complete turn` wording the CX-1 F3 gate matches. */
 class SummaryBudgetExhausted extends Error {
 	constructor(readonly budget: number | undefined) {
 		super(
@@ -290,10 +287,6 @@ export interface SummarizeConversationOptions {
 	readonly signal?: AbortSignalLike;
 	/** E6 (g): the summary call's explicit output budget (adapter maxTokens). */
 	readonly maxOutputTokens?: number;
-	/** 0.39.2: how far a `max_tokens` stop may grow the budget on its ONE
-	 *  retry. Absent, or not above `maxOutputTokens`, means no budget retry
-	 *  — the auto policy's call, whose reserve assumes a fixed budget. */
-	readonly maxOutputCeiling?: number;
 	/** 0.39.2: the RESOLVED reasoning for the summary call — native wire
 	 *  values from `resolveReasoning`, never a raw field. Absent sends
 	 *  nothing, and the provider's default applies. */
@@ -353,35 +346,20 @@ export async function summarizeConversation(options: SummarizeConversationOption
 	// the narrowing from the first read would otherwise be carried across
 	// the await — where the whole point is that it can have changed.
 	const aborted = (): boolean => options.signal?.aborted === true;
-	// Two retries of two DIFFERENT failures, each at most once, so at most
-	// three calls: a dropped stream is retried as it was, and a `max_tokens`
-	// stop is retried with a larger budget. They are kept apart because
-	// they are cured by different things — repeating a budget failure
-	// unchanged buys the same truncation twice.
-	let budget = options.maxOutputTokens;
-	const ceiling = options.maxOutputCeiling;
-	let transportRetried = false;
-	let budgetRetried = false;
-	for (;;) {
-		try {
-			return await summaryAttempt({ ...options, ...(budget !== undefined ? { maxOutputTokens: budget } : {}) });
-		} catch (err) {
-			// The caller's cancel is the caller's: an aborted `/compact` must
-			// not spend another call on its way out.
-			if (aborted()) throw err;
-			if (err instanceof SummaryBudgetExhausted && !budgetRetried && budget !== undefined && ceiling !== undefined && ceiling > budget) {
-				budgetRetried = true;
-				budget = Math.min(budget * 2, ceiling);
-				continue;
-			}
-			if (retryableStructured(err) && !transportRetried) {
-				transportRetried = true;
-				await new Promise((r) => setTimeout(r, retryWaitMs(err)));
-				if (aborted()) throw err;
-				continue;
-			}
-			throw err;
-		}
+	// A `max_tokens` stop is NOT retried here. A retry at the same budget
+	// buys the same truncation, and a retry at a larger one is only worth
+	// having if the first budget was chosen small — which is why the manual
+	// gesture now asks for the whole measured budget up front instead
+	// (see `MANUAL_SUMMARY_BUDGET`).
+	try {
+		return await summaryAttempt(options);
+	} catch (err) {
+		// The caller's cancel is the caller's: an aborted `/compact` must
+		// not spend a second call on its way out.
+		if (!retryableStructured(err) || aborted()) throw err;
+		await new Promise((r) => setTimeout(r, retryWaitMs(err)));
+		if (aborted()) throw err;
+		return await summaryAttempt(options);
 	}
 }
 
