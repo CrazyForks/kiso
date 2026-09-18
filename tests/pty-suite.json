@@ -112,6 +112,7 @@
   "apps/cli/tests/tui2-r3v2-safer-pty.test.ts",
   "apps/cli/tests/tui2-r3v2-selection-pty.test.ts",
   "apps/cli/tests/tv1b-driver.test.ts",
+  "apps/cli/tests/typing-latency-pty.test.ts",
   "apps/cli/tests/ud1-undo-pty.test.ts",
   "apps/cli/tests/update-first-frame-pty.test.ts",
   "apps/cli/tests/update-line-onscreen-pty.test.ts",

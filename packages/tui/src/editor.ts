@@ -360,6 +360,14 @@ export class Editor {
 	 *  KEY, the CLI owns what it means. */
 	#copyCbs: (() => void)[] = [];
 	#onRender: () => void;
+	/** Item 6: true while a chunk of keys is being fed — the render hook
+	 *  is told a frame is key-originated, and the compositor paints it on
+	 *  the next tick instead of waiting out the trailing frame window. */
+	#feeding = false;
+	/** Item 6: set when a key in this chunk handed control to the run —
+	 *  a submitted line or a panel verdict. What follows is run state, not
+	 *  typing, so its frames keep the run's trailing window. */
+	#handedOff = false;
 	/** TUI2-R1 (D): the keys sheet — a static one-screen overlay opened by
 	 *  `?` on an empty composer and closed by the next key, whatever it
 	 *  is. Deliberately a BOOLEAN and not a panel: the panel machinery
@@ -442,8 +450,8 @@ export class Editor {
 	#closedResolve!: () => void;
 	readonly closed: Promise<void>;
 
-	constructor(onRender: () => void) {
-		this.#onRender = onRender;
+	constructor(onRender: (fromKey: boolean) => void) {
+		this.#onRender = () => onRender(this.#feeding && !this.#handedOff);
 		this.#onData = (raw) => this.feed(raw);
 		this.closed = new Promise((resolve) => {
 			this.#closedResolve = resolve;
@@ -853,7 +861,15 @@ export class Editor {
 	}
 
 	#refreshMenu(): void {
-		if (this.#panelInput.up()) return; // W21: the menu never opens while the panel owns the keys
+		if (this.#panelInput.up()) {
+			// W21: the menu never opens while the panel owns the keys — but
+			// the key that got here still changed the line, and insert and
+			// delete render only through this method (item 6: returning
+			// before the render left a panel's typed text to ride the next
+			// spinner tick, 0–150 ms late, or no tick at all).
+			this.#onRender();
+			return;
+		}
 		const f = this.#menuFiltered();
 		this.#menuOpen = f.length > 0;
 		if (this.#menuSel >= f.length) this.#menuSel = 0;
@@ -1012,7 +1028,15 @@ export class Editor {
 	 *  stashed and restored at close, the panel takes the keys and the
 	 *  input row's lead, the composer's own bands close. */
 	beginPanel(view: PanelView, onCommit: (v: PanelVerdict) => void, opts?: { safer?: () => Promise<SaferAnswer> }): void {
-		this.#panelInput.begin(view, onCommit, opts);
+		const handOff = (v: PanelVerdict): void => {
+			// item 6: a verdict hands the frame to the run. The panel already
+			// asked for a key frame on this key; the non-key render after the
+			// verdict demotes it to the run's window.
+			this.#handedOff = true;
+			onCommit(v);
+			this.#onRender();
+		};
+		this.#panelInput.begin(view, handOff, opts);
 	}
 
 	/** W21: cancel the panel — the SIGINT path's pair to beginPanel. */
@@ -1136,6 +1160,19 @@ export class Editor {
 
 	/** Feed raw stdin bytes — the parser. Public for unit tests. */
 	feed(raw: Uint8Array): void {
+		const outer = this.#feeding;
+		const outerHandedOff = this.#handedOff;
+		this.#feeding = true;
+		if (!outer) this.#handedOff = false;
+		try {
+			this.#feedKeys(raw);
+		} finally {
+			this.#feeding = outer;
+			if (!outer) this.#handedOff = outerHandedOff;
+		}
+	}
+
+	#feedKeys(raw: Uint8Array): void {
 		const text = this.#pending + this.#decoder.decode(raw, { stream: true });
 		this.#pending = "";
 		// TUI2-R1 (D): the sheet is up — ANY key closes it, and the key
@@ -2440,6 +2477,7 @@ export class Editor {
 		// recalls a readable line that still expands when it is sent
 		// again (the map outlives the buffer, by design).
 		const sent = this.#expandPastes(line);
+		this.#handedOff = true;
 		const cb = this.#questionCb;
 		this.#questionCb = null;
 		if (cb !== null) {
@@ -2450,7 +2488,7 @@ export class Editor {
 			this.#pendingLines.push(sent); // nobody wired yet — hold it
 		}
 		if (cb === null && line !== "") this.#remember(line);
-		this.#onRender();
+		this.#onRender(); // item 6: #handedOff is set, so this render is non-key — the submit's frame keeps the run's window
 	}
 
 	/** A2: step the history browse; a delta past the newest exits back to

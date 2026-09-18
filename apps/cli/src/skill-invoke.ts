@@ -138,4 +138,3 @@ export function skillMenuItems(catalog: SkillsCatalog | null, builtins: readonly
 		.filter((e) => e.userInvocable && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(e.name) && !taken.has(`/${e.name}`))
 		.map((e) => ({ name: `/${e.name}`, desc: `${cut(e.description, 56)} · skill` }));
 }
-

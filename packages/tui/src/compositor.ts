@@ -318,6 +318,10 @@ export class Body {
 	#lastInputRows = 1;
 	#lastAnchorRow = 0;
 	#frameTimer: NodeJS.Timeout | null = null;
+	#inputFrame: NodeJS.Immediate | null = null;
+	/** Body mutations and non-key redraws so far — the input frame's
+	 *  "did anything but typing change the screen?" */
+	#runMarks = 0;
 	#spinnerTimer: NodeJS.Timeout | null = null;
 	#spinnerI = 0;
 	#lastThinking: string | null = null;
@@ -1651,10 +1655,26 @@ export class Body {
 	}
 
 	/** The old dock's redraw — the editor's onRender target: mark + the
-	 *  scheduler (16ms coalescing — the old sync draw coalesces the same). */
-	redraw(): void {
+	 *  scheduler (16ms coalescing — the old sync draw coalesces the same).
+	 *
+	 *  Item 6: a KEY-originated redraw paints on the next tick and takes
+	 *  the pending trailing frame with it. Keyboard input is the one
+	 *  latency-sensitive source: the trailing window made every key wait
+	 *  16 ms, and 40 ms on Terminal.app — where an IME commit erases the
+	 *  terminal's marked text at once and the committed characters came
+	 *  back a frame window later, a visible blink. Stream, tool and
+	 *  spinner marks keep the trailing window exactly (the conservative
+	 *  mode's throughput protection is for them). setImmediate, not a
+	 *  synchronous paint: every mutation one chunk of keys makes still
+	 *  lands in one frame. */
+	redraw(fromKey = false): void {
 		if (!this.#isActive()) return;
 		this.#dirty = true;
+		if (fromKey) {
+			this.#scheduleInputFrame();
+			return;
+		}
+		this.#runMarks += 1; // a non-key redraw is not typing: it keeps the window
 		this.#scheduleFrame();
 	}
 
@@ -1662,8 +1682,35 @@ export class Body {
 
 	#mark(): void {
 		if (!this.#isActive()) return;
+		this.#runMarks += 1;
 		this.#dirty = true;
 		this.#scheduleFrame();
+	}
+
+	#scheduleInputFrame(): void {
+		if (this.#inputFrame !== null) return;
+		const marksAtKey = this.#runMarks;
+		this.#inputFrame = setImmediate(() => {
+			this.#inputFrame = null;
+			// A key whose consequence is run state (an approval verdict, a
+			// submit) mutates the body before this tick. That frame carries
+			// the run, so it keeps the run's trailing window, exactly as
+			// before: painting it now showed an approved write's transient
+			// live card for one frame before its result settled.
+			if (this.#runMarks !== marksAtKey) {
+				if (this.#dirty) this.#scheduleFrame();
+				return;
+			}
+			if (this.#frameTimer !== null) {
+				clearTimeout(this.#frameTimer);
+				this.#frameTimer = null;
+			}
+			if (this.#dirty) {
+				this.#dirty = false;
+				this.render();
+			}
+		});
+		this.#inputFrame.unref();
 	}
 
 	#scheduleFrame(): void {
@@ -1716,6 +1763,10 @@ export class Body {
 
 	/** Teardown — flush a pending frame, stop the timers. */
 	close(): void {
+		if (this.#inputFrame !== null) {
+			clearImmediate(this.#inputFrame);
+			this.#inputFrame = null;
+		}
 		if (this.#frameTimer !== null) {
 			clearTimeout(this.#frameTimer);
 			this.#frameTimer = null;
@@ -2983,8 +3034,8 @@ export class Dock {
 	editCol(): number {
 		return compositorRef?.editCol() ?? 1;
 	}
-	redraw(): void {
-		compositorRef?.redraw();
+	redraw(fromKey = false): void {
+		compositorRef?.redraw(fromKey);
 	}
 }
 
