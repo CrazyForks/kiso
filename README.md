@@ -141,11 +141,12 @@ machine. Files that already existed are left as their owner set them.
 kiso [sessionId]               interactive session (default; `kiso chat` is the same)
 kiso resume                    pick a session to continue (the picker)
 kiso resume <id> [prompt]      continue a session in a new process
-kiso sessions                  list durable sessions, with their state
+kiso sessions [--all|--current]  list durable sessions, with their state
 ```
 
 `kiso resume` with no id opens a picker: one row per session, arrows to walk,
-type to filter, enter to continue. Each row wears a **durability badge** — the
+type to filter, enter to continue. It opens on the sessions that started in
+this directory; tab shows every session, each tagged with where it started. Each row wears a **durability badge** — the
 state kiso will resume into, read from the session's own durable log:
 
 | badge | means | what `kiso resume` will do |

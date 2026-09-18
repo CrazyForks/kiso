@@ -55,6 +55,11 @@ export interface ExecutionProfile {
 	/** the config profile NAME — the credential reference is at most the
 	 *  env-var name the config carries; never the secret. */
 	readonly profileName: string | null;
+	/** 0.40.0: the realpath of the root the session STARTED in — history,
+	 *  not configuration. Set at revision 1 and carried by every later
+	 *  revision; null when the start is unknown (a legacy session's first
+	 *  revision, or a sidecar written before the field existed). */
+	readonly workspace: string | null;
 	readonly reasoning: ReasoningSetting;
 	readonly systemPromptDigest: string;
 	/** sorted by name; the digest below is DERIVED from this inventory. */
@@ -79,7 +84,10 @@ export function buildProfile(input: {
 	readonly revision: number;
 	readonly modelId: string;
 	readonly provider: ProfileModelRef | null;
-	readonly profileName?: string;
+	readonly profileName?: string | null;
+	/** An INPUT, never derived here: revision 1 passes the starting root,
+	 *  every later writer passes the prior revision's value. */
+	readonly workspace?: string | null;
 	readonly reasoning?: ReasoningSetting;
 	readonly systemPrompt?: string;
 	readonly registry: ToolRegistry;
@@ -91,6 +99,7 @@ export function buildProfile(input: {
 		modelId: input.modelId,
 		provider: input.provider,
 		profileName: input.profileName ?? null,
+		workspace: input.workspace ?? null,
 		reasoning: input.reasoning ?? { thinking: "default", effort: "default" },
 		systemPromptDigest: sha(input.systemPrompt ?? ""),
 		tools,
@@ -161,7 +170,13 @@ export function readProfile(root: string, sessionId: string): ProfileReadResult 
 		) {
 			return { kind: "corrupt", error: "the profile tenant is missing or malformed" };
 		}
-		return { kind: "ok", profile: p };
+		// 0.40.0: a sidecar written before `workspace` existed (and one whose
+		// `profileName` no writer ever filled) reads as null — unknown, never
+		// a guess. The reader stays open: no new key is required.
+		return {
+			kind: "ok",
+			profile: { ...p, profileName: typeof p.profileName === "string" ? p.profileName : null, workspace: typeof p.workspace === "string" ? p.workspace : null },
+		};
 	} catch (err) {
 		return { kind: "corrupt", error: String((err as Error).message ?? err) };
 	}

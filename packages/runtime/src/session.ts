@@ -193,6 +193,12 @@ export class AgentSession {
 	// XP-1: a legacy session records revision 1 at the next explicit
 	// selection or first request — never eagerly at open.
 	#profilePending: boolean;
+	/** 0.40.0: the config profile name of the live binding (configuration:
+	 *  each revision records the name in force when it is written). */
+	#profileName: string | null;
+	/** 0.40.0: what this open's drift acknowledgement replaced — the CLI
+	 *  says so once. Null when the session opened without material drift. */
+	readonly driftAcknowledgement: import("./agent.js").DriftAcknowledgement | null;
 	readonly #pendingResolvers = new Map<string, (decision: PermissionDecision) => void>();
 	readonly #answered = new Set<string>();
 	/** round 4 (adversarial): verdicts the human GAVE, recorded when passed to a live
@@ -248,6 +254,8 @@ export class AgentSession {
 		// CTX-1: starts as the startup policy, then follows the binding.
 		this.#microcompact = config.microcompact;
 		this.#profilePending = config.profilePending === true;
+		this.#profileName = config.profileName ?? null;
+		this.driftAcknowledgement = config.driftAcknowledgement ?? null;
 	}
 
 	/** The config a NEW run/resume/summary sees: the frozen startup config
@@ -340,6 +348,9 @@ export class AgentSession {
 		/** XP-1: the reasoning axes travel with the binding too; absent =
 		 *  fresh defaults (a new binding never inherits stale effort). */
 		readonly reasoning?: ReasoningSetting;
+		/** 0.40.0: the config profile that named this binding; absent = none
+		 *  (a direct provider/model, or an SDK caller) — recorded as null. */
+		readonly profileName?: string | null;
 		/** CTX-1: the compaction threshold follows the live model's window.
 		 *  Absent KEEPS the current one — a caller that does not know the new
 		 *  model's window must not silently reset the policy to nothing. */
@@ -351,6 +362,7 @@ export class AgentSession {
 		this.#baseUrl = binding.baseUrl;
 		this.#continuationScope = binding.scope;
 		this.#reasoning = binding.reasoning ?? { thinking: "default", effort: "default" };
+		this.#profileName = binding.profileName ?? null;
 		if (binding.microcompact !== undefined) this.#microcompact = binding.microcompact;
 		// XP-1: an explicit selection is DURABLE — the setting survives
 		// /resume because a revision records it now, not at some later flush.
@@ -430,6 +442,11 @@ export class AgentSession {
 				revision,
 				modelId: this.#model,
 				provider: this.#continuationScope ?? null,
+				profileName: this.#profileName,
+				// 0.40.0: history is CARRIED from the prior revision, never
+				// re-derived from this process. With no prior (a legacy
+				// session's first revision) the start is unknown: null.
+				workspace: prior.kind === "ok" ? prior.profile.workspace : null,
 				reasoning: this.#reasoning,
 				...(this.#config.systemPrompt !== undefined ? { systemPrompt: this.#config.systemPrompt } : {}),
 				registry: this.#config.registry,
@@ -1043,6 +1060,10 @@ export interface SessionConfig {
 	readonly reasoning?: import("./provider/metadata.js").ReasoningSetting;
 	/** XP-1 internal: a legacy session's deferred revision-1 write. */
 	readonly profilePending?: true;
+	/** 0.40.0: the config profile name in force — recorded per revision. */
+	readonly profileName?: string;
+	/** 0.40.0: set when this open acknowledged material drift. */
+	readonly driftAcknowledgement?: import("./agent.js").DriftAcknowledgement;
 	readonly systemPrompt?: string;
 	readonly tools?: readonly Tool<any>[];
 	readonly registry: import("@vincemakes/kiso-core").ToolRegistry;

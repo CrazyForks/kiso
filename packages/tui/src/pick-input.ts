@@ -19,12 +19,16 @@
  */
 import { AT_VISIBLE } from "./at-picker.js";
 import type { BandHost } from "./panel-input.js";
-import { sessionFilter, type SessionCardView, type SessionPickState } from "./session-picker.js";
+import { scopeSessions, sessionFilter, type SessionCardView, type SessionPickState } from "./session-picker.js";
 
 export class PickInput {
 	#cards: (() => readonly SessionCardView[]) | null = null;
 	#commit: ((id: string | null) => void) | null = null;
 	#sel = 0;
+	/** 0.40.0: the running workspace (undefined = an unscoped picker), and
+	 *  whether the person flipped to ALL. */
+	#here: string | undefined = undefined;
+	#all = false;
 
 	constructor(private readonly host: Pick<BandHost, "line" | "clear" | "reflow" | "render" | "syncMouse">) {}
 
@@ -36,10 +40,12 @@ export class PickInput {
 	 *  (the buffer becomes the filter query) and `onPick` receives the
 	 *  chosen id — or null when the human leaves without picking, which
 	 *  is a first-class outcome and not an error. */
-	begin(cards: () => readonly SessionCardView[], onPick: (id: string | null) => void): void {
+	begin(cards: () => readonly SessionCardView[], onPick: (id: string | null) => void, here?: string): void {
 		this.#cards = cards;
 		this.#commit = onPick;
 		this.#sel = 0;
+		this.#here = here;
+		this.#all = false;
 		this.host.syncMouse();
 		this.host.clear();
 		this.host.reflow();
@@ -53,9 +59,27 @@ export class PickInput {
 	 *  reason: narrowing can only ever shrink the list. */
 	state(): SessionPickState | null {
 		if (this.#cards === null) return null;
-		const cards = this.#cards();
+		// 0.40.0: the filter runs INSIDE the scope — typing narrows what the
+		// title says is showing, never reaches past it
+		const scoped = this.#here === undefined ? null : scopeSessions(this.#cards(), this.#here, this.#all);
+		const cards = scoped === null ? this.#cards() : scoped.cards;
 		const matches = sessionFilter(cards, this.host.line());
-		return { cards, matches, selected: Math.max(0, Math.min(this.#sel, matches.length - 1)) };
+		return { cards, matches, selected: Math.max(0, Math.min(this.#sel, matches.length - 1)), scope: scoped?.scope ?? null };
+	}
+
+	/** 0.40.0 — tab flips CURRENT ↔ ALL. The filter owns every printable
+	 *  key (the buffer IS the query), so the toggle cannot be one. True when
+	 *  the picker owned the key. A picker that fell back to ALL (nothing is
+	 *  from here) has nothing to flip to: the key is taken and does nothing. */
+	toggleScope(): boolean {
+		const view = this.state();
+		if (view === null || view.scope === null || view.scope === undefined) return false;
+		if (view.scope.fellBack) return true;
+		this.#all = !this.#all;
+		this.#sel = 0;
+		this.host.reflow();
+		this.host.render();
+		return true;
 	}
 
 	/** The band's height estimate: the header + the windowed rows (or
@@ -82,6 +106,8 @@ export class PickInput {
 		this.#cards = null;
 		this.#commit = null;
 		this.#sel = 0;
+		this.#here = undefined;
+		this.#all = false;
 		this.host.syncMouse();
 		this.host.clear();
 		this.host.reflow();

@@ -33,6 +33,13 @@ export interface PermissionPolicy {
 export interface AgentDefinition {
 	readonly model: string;
 	readonly systemPrompt?: string;
+	/** 0.40.0: the root a NEW session starts in, recorded once in its
+	 *  profile (revision 1) — the resume picker scopes by it. Never read
+	 *  for an existing session: where it started is history. */
+	readonly workspace?: string;
+	/** 0.40.0: the config profile that named this binding, recorded per
+	 *  revision for display. Never part of drift. */
+	readonly profileName?: string;
 	/** `Tool<any>` like the registry: typed tools register without casts. */
 	readonly tools: readonly Tool<any>[];
 	readonly store: SessionStore;
@@ -143,11 +150,14 @@ export class AgentRuntime {
 			revision: 0,
 			modelId: this.#definition.model,
 			provider: startupScope ?? null,
+			profileName: this.#definition.profileName ?? null,
+			workspace: this.#definition.workspace ?? null,
 			...(this.#definition.systemPrompt !== undefined ? { systemPrompt: this.#definition.systemPrompt } : {}),
 			registry: this.#registry,
 		});
 		let restored: { model: string; reasoning: import("./provider/metadata.js").ReasoningSetting; scope: typeof startupScope } | null = null;
 		let profilePending = false;
+		let driftAcknowledgement: DriftAcknowledgement | null = null;
 		if (meta.kind === "ok") {
 			const drift = assessProfileDrift(meta.profile, {
 				provider: startupScope ?? null,
@@ -161,12 +171,20 @@ export class AgentRuntime {
 				);
 			}
 			if (drift.kind === "material") {
-				// acknowledged: the current configuration wins, DURABLY.
+				// acknowledged: the current configuration wins, DURABLY. The
+				// reasoning resets to defaults (owner-ruled: the recorded effort
+				// was a choice for the model that no longer answers) — and the
+				// session says so, through `driftAcknowledgement`.
+				driftAcknowledgement = { reasons: drift.reasons, reasoningReset: meta.profile.reasoning };
 				writeProfile(store.root, options.id, {
 					...buildProfile({
 						revision: meta.profile.revision + 1,
 						modelId: this.#definition.model,
 						provider: startupScope ?? null,
+						profileName: this.#definition.profileName ?? null,
+						// history: where the session started is not where the
+						// acknowledging process happens to be
+						workspace: meta.profile.workspace,
 						...(this.#definition.systemPrompt !== undefined ? { systemPrompt: this.#definition.systemPrompt } : {}),
 						registry: this.#registry,
 					}),
@@ -197,6 +215,8 @@ export class AgentRuntime {
 				: {}),
 			...(restored !== null ? { reasoning: restored.reasoning } : {}),
 			...(profilePending ? { profilePending: true } : {}),
+			...(this.#definition.profileName !== undefined ? { profileName: this.#definition.profileName } : {}),
+			...(driftAcknowledgement !== null ? { driftAcknowledgement } : {}),
 			...(this.#definition.systemPrompt !== undefined ? { systemPrompt: this.#definition.systemPrompt } : {}),
 			registry: this.#registry,
 			...(this.#definition.permissionPolicy !== undefined || this.#definition.hooks !== undefined
@@ -218,6 +238,13 @@ export class AgentRuntime {
 		};
 		return new AgentSession(options.id, log, store, adapter, config);
 	}
+}
+
+/** 0.40.0 — what an acknowledged drift replaced: the reasons it was
+ *  material, and the reasoning setting the acknowledgement reset. */
+export interface DriftAcknowledgement {
+	readonly reasons: readonly string[];
+	readonly reasoningReset: import("./provider/metadata.js").ReasoningSetting;
 }
 
 /** The one-liner the README promises. */

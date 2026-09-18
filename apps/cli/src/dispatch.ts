@@ -703,6 +703,9 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 								...(profile.baseUrl !== undefined ? { baseUrl: profile.baseUrl } : {}),
 								...(scope !== undefined ? { scope } : {}),
 								...(reasoning !== undefined ? { reasoning } : {}),
+								// 0.40.0: the NAME the person switched to, recorded for
+								// display — a direct provider/model has none.
+								profileName: direct === null ? profName : null,
 							};
 							ctx.session.setModelBinding(binding);
 							setLastBinding(binding);

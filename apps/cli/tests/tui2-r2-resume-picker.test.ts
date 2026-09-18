@@ -140,7 +140,15 @@ describe("TUI2-R2 ③ — `kiso sessions`: the badges on a TTY, the same bytes i
 	it("TTY: the same projection, printed — a badge per row and the footer that names the next move", async () => {
 		const { env, dirs } = isolatedEnv();
 		await fixtureHome(dirs.home);
-		const raw = ptyRun(["sessions"], env as NodeJS.ProcessEnv, { timeout: 30 });
+		// 0.40.0 — a DECLARED change (lead's ruling): the TTY listing defaults
+		// to the sessions that started in this workspace. These fixtures were
+		// written before sessions recorded one, so they are "workspace
+		// unknown" — never here. The default says so in its header and names
+		// the flag; the projection this gate pins is under --all, unchanged.
+		const scoped = ptyRun(["sessions"], env as NodeJS.ProcessEnv, { timeout: 30 });
+		expect(scoped).toContain("0 of 3 sessions from this workspace · --all lists every one");
+		const raw = ptyRun(["sessions", "--all"], env as NodeJS.ProcessEnv, { timeout: 30 });
+		expect(raw).toContain("all 3 sessions");
 		expect(raw).toContain("refactor the bench"); // R2: the title leads the row
 		expect(raw).toContain("uncertain — needs your verdict");
 		expect(raw).toContain("interrupted mid-run");
