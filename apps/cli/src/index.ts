@@ -65,6 +65,7 @@ import { tmuxMouseHint } from "./tmux-hint.js";
 import { resume } from "./resume.js";
 import { paintWindowTitle } from "./window-title.js";
 import { resumeTail } from "./resume-tail.js";
+import { replayInto } from "./replay.js";
 import { armByteTrace } from "./byte-trace.js";
 import { tmpdir, homedir } from "node:os";
 import { clipboardImage } from "./clipboard.js";
@@ -1222,7 +1223,7 @@ async function chatLoop(
 			// prompt inside a conversation with thousands of events — the
 			// durable log was right there and none of it was shown. Empty for
 			// a fresh session, so `kiso chat` is byte-identical.
-			bodyLog(resumeTail(session.log.all, process.stdout.columns ?? 80).join("\n")); // DC-51: one call, one cell
+			showResumeTail(session.log.all);
 			// R2 (owner, 2026-08-27): the resume list is NOT on the opening
 			// screen. `/resume` is where you go looking for a session; the
 			// opening's job is to say what THIS one is.
@@ -1251,7 +1252,7 @@ async function chatLoop(
 			void announceUpdate();
 		} else {
 			bodyLog(`session ${id} (switched — previous: ${prev}, /resume ${prev} returns)\n`);
-			bodyLog(resumeTail(session.log.all, process.stdout.columns ?? 80).join("\n")); // DC-51: one call, one cell
+			showResumeTail(session.log.all);
 			if (currentFaux) session.setAdapter(createFauxProvider(readFauxScript().slice(fauxSkip(id))));
 		}
 		// XP-1 §3.3.6: a /clear-fresh session INHERITS the live selection,
@@ -1337,6 +1338,19 @@ async function readSecret(prompt: string): Promise<string> {
 		};
 		process.stdin.on("data", onData);
 	});
+}
+
+/**
+ * What a resumed session shows (REL-0152-D5, 4c). On the compositor: the
+ * durable events replayed into cells — the last two turns in full, the
+ * earlier ones in one fold row the ctrl+r viewer reads. Through a pipe
+ * there is no viewer and no cell renderer, so the plain text tail stays
+ * (DC-51: one call, one cell).
+ */
+function showResumeTail(events: Parameters<typeof resumeTail>[0]): void {
+	const W = process.stdout.columns ?? 80;
+	if (dock.active) replayInto(body, events as Parameters<typeof replayInto>[1], W);
+	else bodyLog(resumeTail(events, W).join("\n"));
 }
 
 async function main(): Promise<void> {
@@ -1634,7 +1648,7 @@ async function main(): Promise<void> {
 				if (faux && arg === undefined) session.setAdapter(createFauxProvider(readFauxScript().slice(fauxSkip(id))));
 				// REL-0152-D5 — the same tail on the explicit-id form. NOT on
 				// the -p path above: that one's stdout is a machine's input.
-				bodyLog(resumeTail(session.log.all, process.stdout.columns ?? 80).join("\n")); // DC-51: one call, one cell
+				showResumeTail(session.log.all);
 				await resume(session, prompt, faux, input);
 				break;
 			}

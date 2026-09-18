@@ -265,6 +265,13 @@ export type BodyCell =
 	 *  cell does. */
 	| { kind: "md"; block: MdBlock; done: boolean }
 	| { kind: "notice"; text: string; done: true }
+	/** 4c — the resumed session's earlier history, replayed into cells and
+	 *  FOLDED: the row is ONE line on screen and never expands there (a
+	 *  resize reprint of a six-thousand-event session redraws one row);
+	 *  the children are the replayed cells, read in the ctrl+r viewer.
+	 *  `summary` is a compaction checkpoint's text — what the model sees in
+	 *  place of the turns it covers — null for a plain fold. */
+	| { kind: "fold"; label: string; children: BodyCell[]; summary: string | null; done: true }
 	| { kind: "banner"; version: string; extensionsText: string; resume: ResumeMeta[]; meta?: BannerMeta | undefined; done: true }
 	| { kind: "raw"; lines: string[]; done: true; wrap?: "words" }
 	| { kind: "terminal"; label: string; line: string; done: true }
@@ -312,6 +319,8 @@ export function cellComponent(cell: BodyCell): Component {
 			return new MarkdownBlock(cell);
 		case "notice":
 			return new ErrorLine(cell);
+		case "fold":
+			return new FoldRow(cell);
 		case "banner":
 			return new Banner(cell);
 		case "raw":
@@ -752,7 +761,7 @@ class ToolExecution implements Component {
 			// that is not the ask's own JSON, so a payload this renderer
 			// did not write can never be guessed at.
 			if (c.name === "ask_user" && c.reason === null && !c.isError) {
-				const asked = askedBlock(c.resultText, c.startedAt !== null && c.doneAt !== null ? (c.doneAt - c.startedAt) / 1000 : 0, W);
+				const asked = askedBlock(c.resultText, c.startedAt !== null && c.doneAt !== null ? (c.doneAt - c.startedAt) / 1000 : c.startedAt === null && c.doneAt === null ? null : 0, W);
 				if (asked.length > 0) return asked;
 			}
 			// W19: the pinned deny — the claimed shape verbatim: the FULL
@@ -768,7 +777,10 @@ class ToolExecution implements Component {
 				out.push(...toolBlockBody(c, W, ctx));
 				return out;
 			}
-			const elapsed = c.startedAt !== null && c.doneAt !== null ? settledLabel((c.doneAt - c.startedAt) / 1000) : "?s";
+			// 4c: a card settled from the durable log carries no clock at all
+			// (the log's events have no timestamps) — it says nothing about
+			// time rather than `?s`, which reads as a measurement that failed.
+			const elapsed = c.startedAt !== null && c.doneAt !== null ? settledLabel((c.doneAt - c.startedAt) / 1000) : c.startedAt === null && c.doneAt === null ? "" : "?s";
 			// TUI2-R1.5 ⑤ (VD-6): the line count is stated EXACTLY ONCE. Every
 			// read card carried it twice — `(2 lines, 0.0s) · 2 lines · ctrl+o
 			// expands` — because the parens and the suffix were written by
@@ -1223,7 +1235,9 @@ export function foldTerms(reads: number, edits: number, others: readonly [string
  * reads a payload it did not write, and a guess about what it means
  * would be a row the product cannot stand behind.
  */
-export function askedBlock(resultText: string, seconds: number, W: number): string[] {
+/** `seconds` null: 4c's replayed card, settled from a log with no clock —
+ *  the head names the outcome and says nothing about time. */
+export function askedBlock(resultText: string, seconds: number | null, W: number): string[] {
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(resultText);
@@ -1234,7 +1248,7 @@ export function askedBlock(resultText: string, seconds: number, W: number): stri
 	const asked = parsed as { answers?: { q?: string; choice?: string; choices?: string[]; custom?: string }[]; declined?: string[] };
 	const p = palette();
 	const head = (n: number, outcome: string): string =>
-		cutLine(`  ${p.bold}asked${p.reset} ${n} ${n === 1 ? "question" : "questions"} ${p.dim}(${outcome}, ${seconds.toFixed(1)}s)${p.reset}`, W);
+		cutLine(`  ${p.bold}asked${p.reset} ${n} ${n === 1 ? "question" : "questions"} ${p.dim}(${seconds === null ? outcome : `${outcome}, ${seconds.toFixed(1)}s`})${p.reset}`, W);
 	const row = (body: string): string => cutLine(`  ${p.dim}│${p.reset} ${body}`, W);
 
 	if (Array.isArray(asked.declined) && asked.declined.length > 0) {
@@ -1874,6 +1888,17 @@ class ErrorLine implements Component {
 	render(W: number, _ctx: FrameCtx): string[] {
 		// TUI2-R1.5 9 (VD-10): a notice is a sentence addressed to a human.
 		return foldWords(escapeTerminal(this.cell.text), W);
+	}
+}
+
+/** 4c — the folded history's ONE row. Dim, like every row that is about
+ *  the transcript rather than in it; cut, never wrapped, so it is one row
+ *  at every width. */
+class FoldRow implements Component {
+	constructor(private readonly cell: { label: string }) {}
+	render(W: number, _ctx: FrameCtx): string[] {
+		const p = palette();
+		return [cutLine(`  ${p.dim}${escapeTerminal(this.cell.label)}${p.reset}`, W)];
 	}
 }
 
