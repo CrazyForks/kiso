@@ -59,7 +59,9 @@ describe("TUI2-R1.5 ② — editFileDiff locates the way the tool does (VD-2)", 
 		expect(r.added).toBe(0);
 		expect(r.removed).toBe(0);
 		expect(r.lines.map((l) => l.text)).toEqual(["pattern not found in src/thing.ts"]);
-		expect(r.lines.every((l) => l.kind === " ")).toBe(true);
+		// 0.40.0 — a DECLARED change: the note is its own row kind, never a
+		// context row (it is not a line of the file)
+		expect(r.lines.every((l) => l.kind === "note")).toBe(true);
 	});
 
 	it("the not-found note names the file even when the caller passes none", () => {
@@ -98,8 +100,8 @@ describe("TUI2-R1.5 ② — editFileDiff locates the way the tool does (VD-2)", 
 		expect({ added: r.added, removed: r.removed }).toEqual({ added: 0, removed: 0 });
 		expect(r.lines.map((l) => l.text).join("")).toContain("more than one place");
 		expect(r.lines.map((l) => l.text).join("")).toContain("f.ts");
-		// and nothing is drawn as changed
-		expect(r.lines.every((l) => l.kind === " ")).toBe(true);
+		// and nothing is drawn as changed — the report is a note (0.40.0)
+		expect(r.lines.every((l) => l.kind === "note")).toBe(true);
 	});
 
 	it("a UNIQUE search is still previewed normally", () => {

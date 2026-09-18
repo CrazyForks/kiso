@@ -82,8 +82,12 @@ describe("TUI2-R1.5 ② — the edit approval diff on a real PTY", () => {
 			delays: [[2, "1\r"]],
 			cwd: ws,
 		});
-		const joined = screenAt(raw, "↑↓ move · ⏎ or click confirms · 1-4 instant · esc").join("\n");
+		const screen = screenAt(raw, "↑↓ move · ⏎ or click confirms · 1-4 instant · esc");
+		const joined = screen.join("\n");
 		expect(joined).toContain("pattern not found in src/parser.ts");
+		// 0.40.0: the note is drawn in the MARKER column — not indented where
+		// the file's unchanged lines sit
+		expect(screen.some((l) => /^│ pattern not found in src\/parser\.ts/.test(l))).toBe(true);
 		// nothing invented: the file's own lines are not drawn as removals
 		expect(joined).not.toContain("-export function parseExpr");
 	}, 240_000);
