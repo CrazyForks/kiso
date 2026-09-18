@@ -99,13 +99,30 @@ function loadIndex(skillsDir) {
 			broken.push({ dir, reason: "no SKILL.md" });
 			continue;
 		}
-		const meta = parseFrontmatter(text);
-		if (meta === null) {
+		const parsed = parseFrontmatter(text);
+		if (parsed === null) {
 			broken.push({ dir, reason: "no frontmatter" });
 			continue;
 		}
+		const { meta, emptyBlocks } = parsed;
+		// RF-2: a `>`/`|` with nothing under it is a mistake in the file, not
+		// an empty value — say so, rather than "no description"
+		if (emptyBlocks.has("name") || emptyBlocks.has("description")) {
+			broken.push({ dir, reason: "empty block scalar" });
+			continue;
+		}
 		const name = (meta.name ?? dir).trim();
-		let description = (meta.description ?? "").trim();
+		// RF-2: a name is matched against `/skill <name>` and printed on one
+		// index line — a `|` block or a quoted "\n" cannot make it two
+		if (/[\r\n]/.test(name)) {
+			broken.push({ dir, reason: "name is not one line" });
+			continue;
+		}
+		// the index is ONE line per skill: only a value that CARRIES a newline
+		// (a `|` block, a quoted "\n") is collapsed — a plain value's bytes are
+		// exactly what they were before RF-2, inner spacing included
+		const rawDescription = meta.description ?? "";
+		let description = (/[\r\n]/.test(rawDescription) ? rawDescription.replace(/\s+/g, " ") : rawDescription).trim();
 		if (description === "") {
 			broken.push({ dir, reason: "no description" });
 			continue;
@@ -145,19 +162,60 @@ function skillsCatalog(index, broken) {
 	};
 }
 
-/** The --- wrapped YAML subset: every `key: value` line is parsed; the
- *  loader reads `name`, `description` and `user-invocable` (everything else
- *  is ignored). Null = no valid frontmatter. */
+/** The --- wrapped YAML subset: top-level `key: value` lines; the loader
+ *  reads `name`, `description` and `user-invocable` (everything else is
+ *  ignored). Null = no valid frontmatter.
+ *
+ *  RF-2: skills written for other harnesses use real YAML, so a value may
+ *  be a BLOCK scalar (`>` folds its lines with spaces, `|` keeps them; an
+ *  optional chomping `+`/`-` is accepted) whose text is the following lines
+ *  indented deeper than the key, or a double/single-QUOTED scalar. The flat
+ *  reader indexed `description: >` as the literal ">" and dropped the text.
+ *  A block indicator with no indented lines records the key in
+ *  `emptyBlocks` — the caller names it a broken entry, never an empty
+ *  description. Anchors, flow collections and nesting stay out of scope:
+ *  the index needs three string keys. */
 function parseFrontmatter(text) {
 	if (!text.startsWith("---\n")) return null;
 	const end = text.indexOf("\n---", 4);
 	if (end < 0) return null;
+	const lines = text.slice(4, end).split("\n");
 	const meta = {};
-	for (const line of text.slice(4, end).split("\n")) {
-		const m = /^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$/.exec(line);
-		if (m !== null) meta[m[1]] = m[2].trim();
+	const emptyBlocks = new Set();
+	for (let i = 0; i < lines.length; i += 1) {
+		const m = /^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$/.exec(lines[i]);
+		if (m === null) continue;
+		const [, key, rawValue] = m;
+		const value = rawValue.trim();
+		if (/^[>|][+-]?$/.test(value)) {
+			// the block: every following line indented deeper than the key
+			// (a blank line inside the block belongs to it)
+			const block = [];
+			while (i + 1 < lines.length && (/^\s+\S/.test(lines[i + 1]) || (lines[i + 1].trim() === "" && block.length > 0))) block.push(lines[(i += 1)]);
+			while (block.length > 0 && block[block.length - 1].trim() === "") block.pop();
+			if (block.length === 0) {
+				emptyBlocks.add(key);
+				meta[key] = "";
+				continue;
+			}
+			const indent = Math.min(...block.filter((l) => l.trim() !== "").map((l) => /^\s*/.exec(l)[0].length));
+			const body = block.map((l) => l.slice(indent));
+			meta[key] = value.startsWith(">") ? body.map((l) => l.trim()).join(" ").replace(/ {2,}/g, " ").trim() : body.join("\n").trim();
+		} else {
+			meta[key] = unquote(value);
+		}
 	}
-	return meta;
+	return { meta, emptyBlocks };
+}
+
+/** RF-2: a quoted scalar's text — `"…"` with its backslash escapes, `'…'`
+ *  with `''` for a quote. Anything else is returned as written. */
+function unquote(value) {
+	if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
+		return value.slice(1, -1).replace(/\\(["\\nt])/g, (_, c) => (c === "n" ? "\n" : c === "t" ? "\t" : c));
+	}
+	if (value.length >= 2 && value.startsWith("'") && value.endsWith("'")) return value.slice(1, -1).replace(/''/g, "'");
+	return value;
 }
 
 /** Tier 1: the resident index — one line per skill, sorted by directory
