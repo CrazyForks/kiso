@@ -505,7 +505,11 @@ function bannerExtensionText(): string {
 	// terminal layer (extensionsBannerText — a pure function of the three
 	// name lists, including the "(connecting…)" in-flight label). Which
 	// lists exist is the CLI's fact and stays here.
-	return extensionsBannerText(builtInExtensions, userExtensions, projectExtensions);
+	// 0.40.0: in dontAsk the ask extension is loaded but offers no tool
+	// (builtin.ts offInDontAsk) — the banner says so beside the tier that
+	// turns it off, rather than listing it as if it could ask.
+	const builtIn = builtInExtensions.map((e) => (e.name === "ask" && getMode() === "dontAsk" ? { name: e.name, note: "off in dontAsk" } : e));
+	return extensionsBannerText(builtIn, userExtensions, projectExtensions);
 }
 
 /** E1: the startup banner line(s) — TTY: logo + merged extensions + the

@@ -169,6 +169,9 @@ export function unansweredAskView(executionId: string): PanelView {
 export interface BannerExtension {
 	readonly name: string;
 	readonly connecting?: boolean;
+	/** A fact about the extension in this session, printed in parentheses
+	 *  after its name — "ask (off in dontAsk)". `connecting` wins. */
+	readonly note?: string;
 }
 
 /**
@@ -189,7 +192,8 @@ export function extensionsBannerText(
 ): string {
 	const total = builtIn.length + user.length + project.length;
 	if (total === 0) return "";
-	const label = (e: BannerExtension): string => (e.connecting === true ? `${e.name} (connecting…)` : e.name);
+	const label = (e: BannerExtension): string =>
+		e.connecting === true ? `${e.name} (connecting…)` : e.note !== undefined ? `${e.name} (${e.note})` : e.name;
 	const parts: string[] = [];
 	if (builtIn.length > 0) parts.push(`built-in: ${builtIn.map(label).join(", ")}`);
 	if (user.length > 0) parts.push(user.map(label).join(", "));

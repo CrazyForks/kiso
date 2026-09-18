@@ -424,3 +424,46 @@ describe("T-Q6 — the races, both orderings", () => {
 		expect(log.some((r) => r.event.type === "terminal")).toBe(true);
 	}, 90_000);
 });
+
+describe("0.40.0 — dontAsk offers no ask_user, and leaving dontAsk brings it back (real PTY)", () => {
+	it("in dontAsk the call is an unknown tool — no panel, no decline notice; after `/mode default` the same call opens the panel", () => {
+		const { env, dirs } = isolatedEnv();
+		const dir = mkdtempSync(join(tmpdir(), "kiso-dontask-"));
+		const askAgain = { events: [{ type: "tool_call_end", callId: "q2", name: "ask_user", input: { questions: QUESTIONS } }, { type: "stop", reason: "tool_use" }] };
+		const faux = script(dir, [ASK_TURN, say("first done"), askAgain, say("second done")]);
+		const screen = pty(
+			{ ...env, KISO_FAUX_SCRIPT: faux, KISO_MODE: "dontAsk" },
+			["chat", "dq"],
+			"dq",
+			[
+				["/ commands · ↑ history", "set the project up\r", 0],
+				["first done", "/mode default\r", 1],
+				["mode → default", "again\r", 2],
+				["which bundler?", "\x1b", 3],
+			],
+			["second done"],
+			{ timeout: 30 },
+		);
+		const log = durable(dirs.home, "dq");
+		const resultOf = (id: string) => log.filter((r) => r.event.type === "tool_result" && r.event.callId === id);
+
+		// ① the banner says the ask is off, beside the tier that turned it off
+		//    (at 80 columns the banner's value column wraps inside the note)
+		const flat = screen.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "").replace(/\s+/g, " ");
+		expect(flat).toContain("ask (off in dontAsk)");
+		// ② in dontAsk the tool was not in the table: the kernel refused an
+		//    unknown tool, and neither the panel nor the decline path ran
+		const first = resultOf("q1");
+		expect(first).toHaveLength(1);
+		expect(String(first[0]!.event.content)).toBe("Unknown tool: ask_user");
+		expect(screen).not.toContain("the model's question was declined");
+		// ③ after the switch the same call reached the panel: esc recorded
+		//    an honest decline, as in any asking tier
+		const second = resultOf("q2");
+		expect(second).toHaveLength(1);
+		expect(JSON.parse(String(second[0]!.event.content))).toEqual({
+			declined: ["which bundler? (vite, esbuild)", "which test runners? (vitest, node:test)"],
+		});
+		expect(screen).toContain("second done");
+	}, 90_000);
+});
