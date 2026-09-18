@@ -367,6 +367,9 @@ export class Editor {
 	 *  buffer), and the sheet has no interaction to speak of. */
 	#sheetOpen = false;
 	#menuOpen = false; // v3 §04: the slash-command menu
+	/** 0.40.1: the menu's extra entries (the installed skills), read LIVE on
+	 *  every keystroke — a skill added by /reload appears without rebinding. */
+	#menuExtras: () => readonly MenuItem[] = () => [];
 	#menuSel = 0;
 	// KC3 §3 — the @ file picker. THREE fields and no more: the armed
 	// bit, the selection, and the per-open SNAPSHOT of the file list.
@@ -835,7 +838,18 @@ export class Editor {
 	#menuFiltered(): MenuItem[] {
 		const line = this.line();
 		if (!line.startsWith("/")) return [];
-		return MENU_ITEMS.filter((m) => m.name.startsWith(line));
+		// 0.40.1: the built-ins first, then the extras (skills) — and a
+		// built-in WINS a shared name, so a skill named like a command is
+		// never listed twice and never shadows it (the dispatcher's rule)
+		const builtins = new Set(MENU_ITEMS.map((m) => m.name));
+		const all = [...MENU_ITEMS, ...this.#menuExtras().filter((m) => !builtins.has(m.name))];
+		return all.filter((m) => m.name.startsWith(line));
+	}
+
+	/** 0.40.1 — bind the menu's extra entries (the CLI binds the installed
+	 *  skills). A function, read per keystroke, never a snapshot. */
+	bindMenuExtras(extras: () => readonly MenuItem[]): void {
+		this.#menuExtras = extras;
 	}
 
 	#refreshMenu(): void {

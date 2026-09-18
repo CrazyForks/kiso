@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { SkillsCatalog } from "@vincemakes/kiso-skills-ext";
-import { nearest, resolveSkillLine, skillsRows } from "../src/skill-invoke.js";
+import { nearest, resolveSkillLine, skillMenuItems, skillsRows } from "../src/skill-invoke.js";
 
 const BODIES: Record<string, string> = { review: "Review the diff.", compact: "A skill named like a built-in.", internal: "Model only." };
 
@@ -107,3 +107,22 @@ describe("0.40.0 — nearest", () => {
 		expect(nearest("q", ["alpha"])).toEqual([]);
 	});
 });
+
+describe("0.40.1 — the skills the / menu offers", () => {
+	it("invocable skills only, never a built-in's name, never a broken one", () => {
+		const items = skillMenuItems(catalog, builtins);
+		expect(items.map((i) => i.name)).toEqual(["/review", "/huge"]); // /compact is a built-in; internal is model-only; half is broken
+		expect(items.every((i) => i.desc.endsWith(" · skill"))).toBe(true);
+	});
+	it("menu and dispatch agree: every offered entry is one `/<name>` resolves to a skill", () => {
+		for (const item of skillMenuItems(catalog, builtins)) {
+			const r = resolveSkillLine(item.name, catalog, builtins);
+			expect(r, item.name).not.toBeNull();
+			expect(r!.kind === "submit" || r!.kind === "error", item.name).toBe(true); // /huge is offered and refused with its reason
+		}
+	});
+	it("no catalog, no entries", () => {
+		expect(skillMenuItems(null, builtins)).toEqual([]);
+	});
+});
+
