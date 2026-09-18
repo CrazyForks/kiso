@@ -75,7 +75,10 @@ export function composeHooks(existing: HookHost | undefined, extensions: readonl
 			for (const h of handlers) await h(payload, ctx);
 		};
 	};
-	for (const key of ["onPreLlm", "onEvent", "onPause", "onStop"] as const) {
+	// onRetry (ADR-0005 Amendment 2) is an observer like the rest: every
+	// source hears every retry, in order — the CLI's status row and an
+	// extension's logger must not be made to take turns.
+	for (const key of ["onPreLlm", "onEvent", "onPause", "onStop", "onRetry"] as const) {
 		const handler = observers((h) => h[key]);
 		if (handler !== undefined) (out as Record<string, unknown>)[key] = handler;
 	}

@@ -47,7 +47,8 @@ import { createCodingTools } from "@vincemakes/kiso-tools-node";
 import { MODES, getMode, modeExtensions, modeFromEnv, modeSystemPrompt, setMode } from "./mode.js";
 import { breakerExtension } from "./breaker.js";
 import { builtInLayer } from "./builtin.js";
-import { agentModel, atFiles, body, bodyLog, codingToolOptions, kisoHome, builtInExtensions, currentFaux, dock, extensionsDir, loadedExtensions, mergedConfig, mergedTempPaths, modelChoice, projectExtensions, configModels, configuredWindow, agentBaseUrl, currentModelName, currentAgentExtensions, sessionStoreRef, sessionsDir, setAgentModel, setBody, setConfigModels, setConfiguredWindow, setCurrentAgentExtensions, setCurrentFaux, setCurrentModelName, setExtensionLists, setMergedConfig, setModelChoice, setSessionStore, secretEnvNamesOf, userExtensions, VERSION, type LineInput , lastBinding , acceptDrift, setAcceptDrift } from "./state.js";
+import { agentModel, atFiles, body, bodyLog, codingToolOptions, kisoHome, builtInExtensions, currentFaux, dock, extensionsDir, loadedExtensions, mergedConfig, mergedTempPaths, modelChoice, projectExtensions, configModels, configuredWindow, agentBaseUrl, currentModelName, currentAgentExtensions, sessionStoreRef, sessionsDir, setAgentModel, setBody, setConfigModels, setConfiguredWindow, setCurrentAgentExtensions, setCurrentFaux, setCurrentModelName, setExtensionLists, setMergedConfig, setModelChoice, setSessionStore, setRetryShown, secretEnvNamesOf, userExtensions, VERSION, type LineInput , lastBinding , acceptDrift, setAcceptDrift } from "./state.js";
+import { maxRetriesFromEnv } from "./retries.js";
 import { askUi, resolveProjectTrust } from "./trust-ui.js";
 import { isFirstRun, scaffoldFirstRun } from "./first-run.js";
 import { fauxSkip, readFauxScript } from "./faux-glue.js";
@@ -793,6 +794,7 @@ async function makeAgent(sessionId: string | undefined, input?: LineInput, model
 	// E6: the run-start context policy (captured once — exactOptionalPropertyTypes).
 	const contextPolicy = contextPolicyFromEnv();
 	const idleFromEnv = streamIdleFromEnv(); // read once: a narrowed const, not a call per spread
+	const retriesFromEnv = maxRetriesFromEnv();
 	const definition: AgentDefinition = {
 		model,
 		store,
@@ -858,6 +860,15 @@ async function makeAgent(sessionId: string | undefined, input?: LineInput, model
 		// LT-1: KISO_STREAM_IDLE_MS (the test rigs' knob) beats the profile —
 		// the last spread wins, which is why it sits after the profile's.
 		...(idleFromEnv !== undefined ? { streamIdleMs: idleFromEnv } : {}),
+		...(retriesFromEnv !== undefined ? { maxRetries: retriesFromEnv } : {}),
+		// ADR-0005 Amendment 2: the kernel announces each retry before its
+		// wait; the running row shows it. Composed with every extension's
+		// hooks by the runtime — an extension observing retries too is heard.
+		hooks: {
+			onRetry: async (info) => {
+				setRetryShown({ attempt: info.attempt, maxRetries: info.maxRetries, code: info.code, until: Date.now() + info.delayMs });
+			},
+		},
 	};
 	return createAgent(definition);
 }
