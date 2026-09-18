@@ -505,10 +505,10 @@ export class AgentSession {
 	 *  OpenAI-compatible family as `image_url` with a data URI. Only this
 	 *  signature narrowed it to text, which is why no caller could ever
 	 *  send one. */
-	run(input: string | readonly import("@vincemakes/kiso-core").ContentBlock[], options?: { signal?: AbortSignalLike; source?: import("@vincemakes/kiso-core").MessageSource }): Run {
+	run(input: string | readonly import("@vincemakes/kiso-core").ContentBlock[], options?: { signal?: AbortSignalLike; source?: import("@vincemakes/kiso-core").MessageSource; via?: import("@vincemakes/kiso-core").UserInputVia }): Run {
 		this.ensureHealthy();
 		if (this.#profilePending) this.#recordProfile(); // XP-1: legacy revision 1, before the first request
-		return new Run(this.#store, this.#adapter, this.#effectiveConfig(), this, input, options?.signal, false, options?.source);
+		return new Run(this.#store, this.#adapter, this.#effectiveConfig(), this, input, options?.signal, false, options?.source, options?.via);
 	}
 
 	/**

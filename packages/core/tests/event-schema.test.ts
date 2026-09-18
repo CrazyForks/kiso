@@ -167,6 +167,22 @@ describe("isKisoEvent per-variant schema (A group)", () => {
 		expect(isKisoEvent({ seq: 0, type: "usage", known: false, ...silent, servedModel: "deepseek-flash" })).toBe(true);
 	});
 
+	it("0.40.0: `user_input.via` is optional, and a present one names a skill and the typed line", () => {
+		// ADR-0051 §5 rule 1 (ii): the validator checks the field only when
+		// it is present. ABSENT is every log ever written and stays valid.
+		expect(isKisoEvent({ seq: 0, type: "user_input", content: "hi", source: "user" })).toBe(true);
+		const via = { kind: "skill", name: "review", line: "/review src/a.ts" };
+		expect(isKisoEvent({ seq: 0, type: "user_input", content: "body", source: "user", via })).toBe(true);
+		// a via with no source is still a person's turn — source defaults to "user"
+		expect(isKisoEvent({ seq: 0, type: "user_input", content: "body", via })).toBe(true);
+		// malformed: an unknown kind, an empty name, a missing line, a non-object
+		expect(isKisoEvent({ seq: 0, type: "user_input", content: "b", via: { ...via, kind: "macro" } })).toBe(false);
+		expect(isKisoEvent({ seq: 0, type: "user_input", content: "b", via: { ...via, name: "" } })).toBe(false);
+		expect(isKisoEvent({ seq: 0, type: "user_input", content: "b", via: { kind: "skill", name: "review" } })).toBe(false);
+		expect(isKisoEvent({ seq: 0, type: "user_input", content: "b", via: "skill" })).toBe(false);
+		expect(isKisoEvent({ seq: 0, type: "user_input", content: "b", via: null })).toBe(false);
+	});
+
 	it("round 5: validates ContentBlock shapes (text/image) wherever content blocks appear", () => {
 		const blockContent = [
 			{ type: "text", text: "caption" },

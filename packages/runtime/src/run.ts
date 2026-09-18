@@ -34,6 +34,7 @@ export class Run implements AsyncIterable<Event> {
 	readonly #input: string | readonly ContentBlock[] | undefined;
 	readonly #resume: boolean;
 	readonly #source: import("@vincemakes/kiso-core").MessageSource | undefined;
+	readonly #via: import("@vincemakes/kiso-core").UserInputVia | undefined;
 	readonly #abort = new AbortController();
 	readonly #externalSignal: AbortSignalLike | undefined;
 	readonly #decisionIds: string[] = [];
@@ -51,6 +52,9 @@ export class Run implements AsyncIterable<Event> {
 		// seed's source:"system") — who produced the line, never a
 		// provider-role escalation. Absent = plain user input.
 		source?: import("@vincemakes/kiso-core").MessageSource,
+		// 0.40.0: how a person composed the turn (a skill + the typed line) —
+		// recorded for display, never projected into a request.
+		via?: import("@vincemakes/kiso-core").UserInputVia,
 	) {
 		this.#store = store;
 		this.#adapter = adapter;
@@ -60,6 +64,7 @@ export class Run implements AsyncIterable<Event> {
 		this.#externalSignal = externalSignal;
 		this.#resume = resume;
 		this.#source = source;
+		this.#via = via;
 		this.runId = crypto.randomUUID();
 	}
 
@@ -290,7 +295,7 @@ export class Run implements AsyncIterable<Event> {
 			//    session. The prompt is also the first event the consumer
 			//    sees, so what was asked and what happened live in the same
 			//    stream.
-			const inputEvent = log.append({ type: "user_input", content: this.#input!, ...(this.#source !== undefined ? { source: this.#source } : {}) });
+			const inputEvent = log.append({ type: "user_input", content: this.#input!, ...(this.#source !== undefined ? { source: this.#source } : {}), ...(this.#via !== undefined ? { via: this.#via } : {}) });
 			await this.#session.persist(this.runId, inputEvent);
 			yield inputEvent;
 

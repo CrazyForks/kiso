@@ -4,7 +4,8 @@
  *
  * Tier 1 (resident): the skills index — every ${KISO_SKILLS_DIR:-~/.kiso/
  * skills}/<name>/SKILL.md's frontmatter (a --- wrapped YAML SUBSET; only
- * name/description are read, by a hand-written parser — no deps) becomes
+ * name/description/user-invocable are read, by a hand-written parser — no
+ * deps) becomes
  * one line of the system prompt, sorted by directory name:
  *   Available skills (load with read_skill):
  *   - <name>: <description>
@@ -41,7 +42,8 @@ export default async function createSkillsExtension() {
 	const { index, broken } = loadIndex(skillsDir);
 	// finding #8: no persistent resources — SKILL.md files are read per call;
 	// nothing is spawned or connected — no dispose is needed, explicitly.
-	if (index.length === 0 && broken.length === 0) return { name: "skills", skills: 0, tools: [] };
+	const catalog = skillsCatalog(index, broken);
+	if (index.length === 0 && broken.length === 0) return { name: "skills", skills: 0, tools: [], catalog };
 	const tools = index.length > 0 ? [readSkillTool(index, broken)] : [];
 	return {
 		name: "skills",
@@ -50,6 +52,10 @@ export default async function createSkillsExtension() {
 		// it here rather than walking the directory again — one scan, one
 		// answer, and no second count free to disagree with this one.
 		skills: index.length,
+		// 0.40.0: the same scan, handed to the CLI for `/skill` and
+		// `/skills` — the person's door and the model's index cannot list
+		// different skills, because they are one list.
+		catalog,
 		systemPrompt: { append: skillsPromptAppend(index, broken) },
 	};
 }
@@ -73,9 +79,9 @@ function loadIndex(skillsDir) {
 			} else if (d.isSymbolicLink()) {
 				try {
 					if (statSync(join(skillsDir, d.name)).isDirectory()) dirs.push(d.name);
-					else brokenLinks.push(`${d.name} (symlink target is not a directory)`);
+					else brokenLinks.push({ dir: d.name, reason: "symlink target is not a directory" });
 				} catch {
-					brokenLinks.push(`${d.name} (broken symlink)`);
+					brokenLinks.push({ dir: d.name, reason: "broken symlink" });
 				}
 			}
 		}
@@ -90,28 +96,58 @@ function loadIndex(skillsDir) {
 		try {
 			text = readFileSync(path, "utf8");
 		} catch {
-			broken.push(`${dir} (no SKILL.md)`);
+			broken.push({ dir, reason: "no SKILL.md" });
 			continue;
 		}
 		const meta = parseFrontmatter(text);
 		if (meta === null) {
-			broken.push(`${dir} (no frontmatter)`);
+			broken.push({ dir, reason: "no frontmatter" });
 			continue;
 		}
 		const name = (meta.name ?? dir).trim();
 		let description = (meta.description ?? "").trim();
 		if (description === "") {
-			broken.push(`${dir} (no description)`);
+			broken.push({ dir, reason: "no description" });
 			continue;
 		}
 		if (description.length > MAX_DESCRIPTION) description = `${description.slice(0, MAX_DESCRIPTION)}…[truncated]`;
-		index.push({ name, description, path });
+		// `user-invocable: false` (the key other harnesses use) keeps a skill
+		// out of the person's reach and in the model's. Only the literal
+		// `false` counts: absence cannot be told apart from a skill written
+		// before the key existed, so absence is invocable.
+		index.push({ name, description, dir, path, userInvocable: meta["user-invocable"] !== "false" });
 	}
 	return { index, broken };
 }
 
-/** The --- wrapped YAML subset: only `name:` and `description:` lines are
- *  read (everything else is ignored). Null = no valid frontmatter. */
+/** 0.40.0 — what the CLI reads to let a PERSON invoke a skill. `body` reads
+ *  the file at call time (finding #8: nothing is held), strips the
+ *  frontmatter, and refuses — never truncates — a body over the cap: a
+ *  skill cut in half is a different instruction than the one written. */
+function skillsCatalog(index, broken) {
+	return {
+		entries: index.map(({ name, description, dir, path, userInvocable }) => ({ name, description, dir, path, userInvocable })),
+		broken: broken.map(({ dir, reason }) => ({ dir, reason })),
+		body(name) {
+			const skill = index.find((s) => s.name === name);
+			if (skill === undefined) return { error: "not installed" };
+			let text;
+			try {
+				text = readFileSync(skill.path, "utf8");
+			} catch (err) {
+				return { error: `cannot read ${skill.path}: ${err instanceof Error ? err.message : String(err)}` };
+			}
+			const end = text.indexOf("\n---", 4);
+			const body = text.slice(end + 4).replace(/^[^\n]*\n?/, "").trim();
+			if (body.length > MAX_BODY) return { error: `over the ${MAX_BODY.toLocaleString("en-US")}-character skill cap (${body.length.toLocaleString("en-US")} characters)` };
+			return { body };
+		},
+	};
+}
+
+/** The --- wrapped YAML subset: every `key: value` line is parsed; the
+ *  loader reads `name`, `description` and `user-invocable` (everything else
+ *  is ignored). Null = no valid frontmatter. */
 function parseFrontmatter(text) {
 	if (!text.startsWith("---\n")) return null;
 	const end = text.indexOf("\n---", 4);
@@ -129,14 +165,14 @@ function parseFrontmatter(text) {
 function skillsPromptAppend(index, broken) {
 	const lines = index.map((s) => `- ${s.name}: ${s.description}`);
 	const warning =
-		broken.length > 0 ? `\n[skills] skipped ${broken.length} broken skill(s): ${broken.join(", ")}` : "";
+		broken.length > 0 ? `\n[skills] skipped ${broken.length} broken skill(s): ${broken.map((b) => `${b.dir} (${b.reason})`).join(", ")}` : "";
 	return `Available skills (load with read_skill):\n${lines.join("\n")}${warning}`;
 }
 
 /** Tier 2: read_skill — the full SKILL.md (≤32KB), or an honest,
  *  actionable unknown-name error listing the installed skills. */
 function readSkillTool(index, broken) {
-	const brokenNote = broken.length > 0 ? ` (${broken.length} broken skill(s) skipped: ${broken.map((b) => b.split(" ")[0]).join(", ")})` : "";
+	const brokenNote = broken.length > 0 ? ` (${broken.length} broken skill(s) skipped: ${broken.map((b) => b.dir).join(", ")})` : "";
 	return {
 		name: "read_skill",
 		description: "load a skill's SKILL.md (the available-skills list is in the system prompt)",

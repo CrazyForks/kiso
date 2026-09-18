@@ -1,0 +1,115 @@
+/**
+ * 0.40.0 — a PERSON invokes a skill.
+ *
+ * `/skill <name> [args…]`, or `/<name> [args…]` when no built-in command
+ * has that name — built-ins win, always, so installing a skill can never
+ * take a command away. The invocation is a USER TURN: the SKILL.md body,
+ * then the person's args after a blank line, submitted through the same
+ * path as typed input. The durable record says the turn came from the
+ * person (`source` stays "user") and says HOW it was composed in `via`,
+ * which carries the line they typed — so the chip, the resume tail and the
+ * session's name show what the person wrote, not a body they never saw.
+ *
+ * Pure: the catalog comes from the skills extension's own scan (one scan,
+ * one answer — the model's index and this door are one list), and every
+ * outcome is data. The dispatcher does the printing and the submitting.
+ */
+
+import type { UserInputVia } from "@vincemakes/kiso-core";
+import type { SkillsCatalog } from "@vincemakes/kiso-skills-ext";
+
+export type SkillOutcome =
+	| { readonly kind: "submit"; readonly content: string; readonly via: UserInputVia }
+	| { readonly kind: "error"; readonly message: string }
+	| { readonly kind: "list" };
+
+/**
+ * What a submitted line asks of the skills, if anything. `null` means the
+ * line is not a skill request, and the dispatcher goes on as before — which
+ * is how a typo stays "unknown command" rather than becoming a skill error.
+ */
+export function resolveSkillLine(trimmed: string, catalog: SkillsCatalog | null, builtins: readonly string[]): SkillOutcome | null {
+	if (trimmed.includes("\n") || !trimmed.startsWith("/")) return null;
+	const [word = "", ...rest] = trimmed.split(/\s+/);
+	if (word === "/skills") return rest.length === 0 ? { kind: "list" } : null;
+	if (word === "/skill") {
+		const [name = ""] = rest;
+		if (name === "") return { kind: "error", message: "usage: /skill <name> [args…] — /skills lists them" };
+		return invoke(name, argsOf(trimmed, 2), trimmed, catalog);
+	}
+	// `/<name>`: only a word no built-in claims, and only a skill that
+	// exists — anything else is the dispatcher's own "unknown command".
+	if (builtins.includes(word)) return null;
+	const name = word.slice(1);
+	if (catalog === null || (!catalog.entries.some((e) => e.name === name) && !catalog.broken.some((b) => b.dir === name))) return null;
+	return invoke(name, argsOf(trimmed, 1), trimmed, catalog);
+}
+
+/** The args as typed — everything after the first `words` words, with its
+ *  own spacing kept. A skill that asks for a path wants the path, not a
+ *  re-joined approximation of it. */
+function argsOf(trimmed: string, words: number): string {
+	let rest = trimmed;
+	for (let i = 0; i < words; i += 1) rest = rest.replace(/^\S+\s*/, "");
+	return rest;
+}
+
+function invoke(name: string, args: string, line: string, catalog: SkillsCatalog | null): SkillOutcome {
+	const entry = catalog?.entries.find((e) => e.name === name);
+	if (entry === undefined) {
+		const broken = catalog?.broken.find((b) => b.dir === name);
+		if (broken !== undefined) return { kind: "error", message: `skill "${name}" cannot load: ${broken.reason}` };
+		const near = nearest(name, catalog?.entries.map((e) => e.name) ?? []);
+		const hint = near.length > 0 ? ` — nearest: ${near.join(", ")}` : "";
+		return { kind: "error", message: `no skill named "${name}"${hint} (/skills lists them)` };
+	}
+	if (!entry.userInvocable) return { kind: "error", message: `skill "${name}" is for the model only (user-invocable: false)` };
+	const read = catalog!.body(name);
+	if ("error" in read) return { kind: "error", message: `skill "${name}" cannot load: ${read.error}` };
+	return {
+		kind: "submit",
+		content: args === "" ? read.body : `${read.body}\n\n${args}`,
+		via: { kind: "skill", name, line },
+	};
+}
+
+/** Up to three installed names close to the one typed: a shared prefix, or
+ *  within two edits. Closest first; nothing when nothing is close — a
+ *  suggestion that is not near is noise. */
+export function nearest(name: string, names: readonly string[]): string[] {
+	const scored = names
+		.map((n) => ({ n, d: n.startsWith(name) || name.startsWith(n) ? 0 : distance(name, n) }))
+		.filter((s) => s.d <= 2)
+		.sort((a, b) => a.d - b.d || (a.n < b.n ? -1 : 1));
+	return scored.slice(0, 3).map((s) => s.n);
+}
+
+function distance(a: string, b: string): number {
+	const row = Array.from({ length: b.length + 1 }, (_, j) => j);
+	for (let i = 1; i <= a.length; i += 1) {
+		let prev = row[0]!;
+		row[0] = i;
+		for (let j = 1; j <= b.length; j += 1) {
+			const cur = row[j]!;
+			row[j] = Math.min(row[j]! + 1, row[j - 1]! + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+			prev = cur;
+		}
+	}
+	return row[b.length]!;
+}
+
+/** `/skills` — one row per skill, `name — description`, a `model only` tag
+ *  for `user-invocable: false`, then the broken entries with the loader's
+ *  own reason. Each row names the directory the skill really lives in:
+ *  project and user skills are merged into one scan directory by symlink,
+ *  so the scan root would name a temp directory nobody can find —
+ *  `sourceOf` resolves the entry's directory to where it came from. */
+export function skillsRows(catalog: SkillsCatalog | null, sourceOf: (dir: string) => string, userDir: string): string[] {
+	const entries = catalog?.entries ?? [];
+	const broken = catalog?.broken ?? [];
+	if (entries.length === 0 && broken.length === 0) return [`no skills installed — add one as ${userDir}/<name>/SKILL.md`];
+	const rows = entries.map((e) => `/${e.name} — ${e.description}${e.userInvocable ? "" : " (model only)"} · ${sourceOf(e.dir)}`);
+	for (const b of broken) rows.push(`${b.dir} — cannot load: ${b.reason} · ${sourceOf(b.dir)}`);
+	rows.push("/<name> [args] or /skill <name> [args] runs one · a built-in command wins a shared name");
+	return rows;
+}

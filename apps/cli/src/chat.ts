@@ -29,6 +29,7 @@ import { echoText } from "@vincemakes/kiso-tui-cells/render";
 import { canonicalizeUsage } from "@vincemakes/kiso-runtime";
 import { canonicalizeUsageForModel, requestBudget } from "@vincemakes/kiso-runtime/internal";
 import type { AgentSession, Run } from "@vincemakes/kiso-runtime";
+import type { UserInputVia } from "@vincemakes/kiso-core";
 import { dispatch, type DispatchCtx, abortBangCommand } from "./dispatch.js";
 import { paintWindowTitle } from "./window-title.js";
 import { agentBaseUrl, agentModel, body, bodyLog, configuredWindow, dock, type LineInput } from "./state.js";
@@ -864,6 +865,12 @@ export async function consumeRun(
 					body.notice(`  ${typeof ev.content === "string" ? ev.content : ""}`);
 					break;
 				}
+				// 0.40.0: a skill turn's chip is the line the person TYPED — the
+				// SKILL.md body is what the model read, not what they said.
+				if (ev.via !== undefined) {
+					body.userLine(ev.via.line);
+					break;
+				}
 				// DC-60: a turn that carries an image is a content ARRAY — its words
 				// still echo, the image as a mark; an empty chip was the bug.
 				body.userLine(echoText(ev.content));
@@ -1198,7 +1205,7 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 		input.close();
 	};
 
-	const turn = (text: string, seedSource?: "system"): Promise<void> =>
+	const turn = (text: string, seedSource?: "system", via?: UserInputVia): Promise<void> =>
 		new Promise((resolve, reject) => {
 			queued = Math.max(0, queued - 1); // a queued turn starts
 			// REL-0152-D11: a turn that names an image file carries it. The
@@ -1209,8 +1216,13 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 			// REL-0152-D16: the capsules' files come from the editor, which
 			// is the only thing that knows which number stands for which
 			// screenshot.
-			const content = seedSource !== undefined ? text : attachImages(text, input.attachments?.());
-			const run = seedSource !== undefined ? session.run(content, { source: seedSource }) : session.run(content);
+			//
+			// 0.40.0: a skill turn is not scanned either — its text is a
+			// SKILL.md body, and a body that mentions `diagram.png` must not
+			// attach a file from the workspace the person never pointed at.
+			const content = seedSource !== undefined || via !== undefined ? text : attachImages(text, input.attachments?.());
+			const run =
+				seedSource !== undefined ? session.run(content, { source: seedSource }) : via !== undefined ? session.run(content, { via }) : session.run(content);
 			currentRun = run;
 			turnNo += 1;
 			const myTurn = turnNo;
@@ -1357,9 +1369,13 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 		// BEHIND the correction, in their original order. Ephemeral
 		// reordering of ephemeral state; the durable log still just records
 		// what ran, in the order it ran.
-		const jumped = pendingTurns.map((s) => s.line);
+		// A slot re-enters with its CONTENT and its `via`, never its display
+		// line: a queued skill re-submitted as `/review x` would reach the
+		// model as the literal text of the command.
+		const jumped = pendingTurns.map((s) => ({ content: s.content, via: s.via }));
 		for (let i = jumped.length; i > 0; i -= 1) popQueue();
-		for (const text of [line, ...jumped]) submitTurn(text);
+		submitTurn(line);
+		for (const j of jumped) submitTurn(j.content, j.via);
 	});
 
 	// round 5 (P1-11): the PERSISTENT line listener is installed BEFORE the
@@ -1382,7 +1398,10 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 	// read (the dock renders the lines, the editor pops the last one).
 	// A slot leaves the queue when its turn STARTS or when the user
 	// pops it (cancelled — the chain segment skips it).
-	const pendingTurns: { line: string; cancelled: boolean }[] = [];
+	// 0.40.0: `line` is what the chip shows and what a pop hands back to
+	// the editor — for a skill, the line the person TYPED; `content` is
+	// what the turn submits (the skill's body and args).
+	const pendingTurns: { line: string; content: string; via?: UserInputVia; cancelled: boolean }[] = [];
 	// TV-1B — the offer memory: session-local BY DESIGN (a dead process's
 	// "not now" should not silence a live one; resume re-offers once,
 	// honestly), keyed by the assessed claims' identity.
@@ -1489,8 +1508,8 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 		if (usd === null) return;
 		spentUsd = (spentUsd ?? 0) + usd;
 	};
-	const submitTurn = (line: string): void => {
-		const slot = { line, cancelled: false };
+	const submitTurn = (line: string, via?: UserInputVia): void => {
+		const slot = { line: via?.line ?? line, content: line, ...(via !== undefined ? { via } : {}), cancelled: false };
 		pendingTurns.push(slot);
 		queued += 1;
 		chainRef.current = chainRef.current.then(async () => {
@@ -1510,7 +1529,7 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 			// carries an unanswered call. Composed from existing APIs: zero
 			// core lines, zero runtime lines.
 			if (session.uncertainExecutions().length > 0) await resolveUncertains(session, input, () => cancelled);
-			if (session.uncertainExecutions().length === 0) return turn(line);
+			if (session.uncertainExecutions().length === 0) return turn(line, undefined, via);
 			// The human declined (round 10: a cancelled ask records NOTHING —
 			// the execution stays uncertain and durable), so the turn does not
 			// start. It is never swallowed in silence: the held text is
