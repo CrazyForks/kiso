@@ -249,3 +249,79 @@ describe("0.40.0 skills: the catalog the CLI invokes from", () => {
 		expect(cat.broken).toEqual([]);
 	});
 });
+
+/** RF-2 (reelfo r4, 2026-09-18) — the frontmatter reader was a flat
+ *  `key: value` line reader, so `description: >` indexed as the literal
+ *  ">" and the folded text was dropped silently. Skills written for other
+ *  harnesses use real YAML block and quoted scalars; the README promises
+ *  they drop in and work. */
+function writeRaw(dir: string, name: string, frontmatter: string, body = "\nbody\n"): void {
+	mkdirSync(join(dir, name), { recursive: true });
+	writeFileSync(join(dir, name, "SKILL.md"), `---\n${frontmatter}---\n${body}`, "utf8");
+}
+
+describe("RF-2 skills: block and quoted scalars in the frontmatter", () => {
+	it("`>` folds its indented lines into one description", async () => {
+		const dir = skillDir();
+		writeRaw(dir, "fold", "name: fold\ndescription: >\n  Review the diff for\n  correctness and style.\nother: x\n");
+		const ext = await extWith(dir);
+		expect(ext.systemPrompt?.append).toContain("- fold: Review the diff for correctness and style.");
+	});
+
+	it("`|` keeps its lines, and the index collapses them to one line", async () => {
+		const dir = skillDir();
+		writeRaw(dir, "lit", "name: lit\ndescription: |\n  First line.\n  Second line.\n");
+		const ext = await extWith(dir);
+		expect(ext.systemPrompt?.append).toContain("- lit: First line. Second line.");
+	});
+
+	it("chomping indicators (`>-`, `|+`) and deeper indentation are accepted", async () => {
+		const dir = skillDir();
+		writeRaw(dir, "chomp", "name: chomp\ndescription: >-\n    Deeply indented\n    folded text.\n");
+		const ext = await extWith(dir);
+		expect(ext.systemPrompt?.append).toContain("- chomp: Deeply indented folded text.");
+	});
+
+	it("double- and single-quoted scalars are unquoted", async () => {
+		const dir = skillDir();
+		writeRaw(dir, "dq", 'name: "dq"\ndescription: "Say \\"hi\\": politely"\n');
+		writeRaw(dir, "sq", "name: 'sq'\ndescription: 'It''s quoted'\n");
+		const ext = await extWith(dir);
+		expect(ext.systemPrompt?.append).toContain('- dq: Say "hi": politely');
+		expect(ext.systemPrompt?.append).toContain("- sq: It's quoted");
+	});
+
+	it("a block indicator with no continuation is a broken entry, named", async () => {
+		const dir = skillDir();
+		writeRaw(dir, "good", "description: fine\n");
+		writeRaw(dir, "empty", "name: empty\ndescription: >\nother: x\n");
+		const ext = await extWith(dir);
+		expect(ext.systemPrompt?.append).not.toContain("- empty:");
+		expect(ext.systemPrompt?.append).toContain("empty (empty block scalar)");
+	});
+
+	it("the plain `key: value` form is unchanged — inner spacing included, byte for byte", async () => {
+		const dir = skillDir();
+		writeRaw(dir, "plain", "name: plain\ndescription: a plain line: with a colon\n");
+		writeRaw(dir, "spaced", "name: spaced\ndescription: two  spaces\tand a tab\n");
+		const ext = await extWith(dir);
+		expect(ext.systemPrompt?.append).toContain("- plain: a plain line: with a colon");
+		expect(ext.systemPrompt?.append).toContain("- spaced: two  spaces\tand a tab");
+	});
+
+	it("a quoted value whose escape makes a newline is collapsed to one index line", async () => {
+		const dir = skillDir();
+		writeRaw(dir, "esc", 'name: esc\ndescription: "first\\nsecond"\n');
+		const ext = await extWith(dir);
+		expect(ext.systemPrompt?.append).toContain("- esc: first second");
+	});
+
+	it("a name that is not one line is a broken entry, named", async () => {
+		const dir = skillDir();
+		writeRaw(dir, "good", "description: fine\n");
+		writeRaw(dir, "twoline", "name: |\n  two\n  lines\ndescription: fine\n");
+		const ext = await extWith(dir);
+		expect(ext.systemPrompt?.append).toContain("twoline (name is not one line)");
+		expect(ext.systemPrompt?.append).not.toContain("- two");
+	});
+});
