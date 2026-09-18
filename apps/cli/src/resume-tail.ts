@@ -52,7 +52,10 @@ export function resumeTail(events: readonly { readonly type: string }[], W = 80)
 			// RUNTIME keeps its own `contentText` (R7) because it cannot
 			// depend on tui-cells — two implementations, one per direction,
 			// agreeing on "(image)".
-			const text = echoText(e.content as Parameters<typeof echoText>[0]).trim();
+			// 0.40.0: a skill turn is shown as the line the person typed —
+			// its content is a SKILL.md body they never wrote.
+			const via = (e as { via?: { line?: unknown } }).via;
+			const text = (typeof via?.line === "string" ? via.line : echoText(e.content as Parameters<typeof echoText>[0])).trim();
 			if (text === "") continue;
 			if (ask !== null) turns.push({ ask, reply });
 			ask = text;

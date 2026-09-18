@@ -649,3 +649,42 @@ type-level assertion per retired member (`false` is assignable to
 `K extends keyof T ? true : false` only while the member is absent).
 The typecheck is the drift gate: re-adding any member fails `tsc`.
 Red first: on the pre-CT-1 tree all nine assertions fail to compile.
+
+## Amendment 7 (2026-09-18): `user_input.via` — how a person composed a turn
+
+A person can now invoke a skill (`/skill <name> [args]`, or `/<name>`
+when no built-in command has that name). The turn is a USER turn: its
+`content` is the SKILL.md body followed by the args, exactly what the
+model reads. What the durable record could not say is how the turn was
+composed, so every surface that shows a person their own words — the
+chip, the resume tail, the session's title — would have shown a body
+the person never wrote.
+
+1. **Frozen-class extension by rule 1 (optional-field admission).** The
+   FROZEN `user_input` variant gains one optional field:
+
+   ```
+   user_input.via?: { kind: "skill"; name: string; line: string }
+   ```
+
+   `line` is the line the person typed, verbatim. `source` is untouched:
+   the person asked for the turn, so it stays a person's turn, and
+   `MessageSource` stays closed (an unknown value is corruption, §7).
+   Rule 1's obligations: (i) old logs carry no such field and project
+   byte-identically — and a `via`-bearing log projects to the SAME bytes
+   as the same log without it, because the projection copies only
+   `content` and `source` (`prompt-cache.test.ts` ⑥, the R6 fixture);
+   (ii) the validator checks the field only when present — `kind` must
+   be `"skill"`, `name` and `line` non-empty strings (`event-schema`
+   cases); (iii) no existing byte changes meaning.
+
+2. **Display provenance, never context.** No byte of `via` reaches a
+   provider request; the request of a skill turn is byte-identical to
+   the same content typed by hand (runtime
+   `user-invoked-skill-via.test.ts`). A resume replays the turn as an
+   ordinary user turn.
+
+3. **Rule 5.** An optional field on an existing event; generation
+   detection does not read it. No generation row.
+
+Version: **0.40.0** — rule 1 admission ships as a minor (Amendment 1).

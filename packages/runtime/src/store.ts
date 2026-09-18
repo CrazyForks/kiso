@@ -169,9 +169,11 @@ function contentText(content: unknown): string {
 
 export function sessionTitle(records: readonly StoreRecord[]): string {
 	const asked = records
-		.map((r) => r.event as { type: string; content?: unknown })
+		.map((r) => r.event as { type: string; content?: unknown; via?: { line?: unknown } })
 		.filter((e) => e.type === "user_input")
-		.map((e) => contentText(e.content).trim())
+		// 0.40.0: a skill turn is named by what the person TYPED — its
+		// content is a SKILL.md body the person never wrote.
+		.map((e) => (typeof e.via?.line === "string" ? e.via.line : contentText(e.content)).trim())
 		.filter((t) => t !== "");
 	if (asked.length === 0) return "(no prompt)";
 	const substantive = asked.find((t) => !isOpener(t));

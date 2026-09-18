@@ -10,12 +10,33 @@ import { buildAdapter, lookupModelMetadata, resolveContinuationScope, resolveRea
 import type { AgentSession } from "@vincemakes/kiso-runtime";
 import { MODES, MODE_NOTE, getMode, setMode } from "./mode.js";
 import { clipboardWrite, lastAnswer } from "./clipboard.js";
-import { agentModel, body, bodyLog, codingToolOptions, kisoHome, configModels, dock, lastBinding, mergedConfig, readContextLedger, sessionsDir, setAgentModel, setConfiguredWindow, setCurrentModelName, setModelChoice, type LineInput , setLastBinding } from "./state.js";
+import { agentModel, body, bodyLog, codingToolOptions, kisoHome, configModels, dock, lastBinding, loadedSkillsCatalog, mergedConfig, readContextLedger, sessionsDir, setAgentModel, setConfiguredWindow, setCurrentModelName, setModelChoice, type LineInput , setLastBinding } from "./state.js";
 import { adapterOptionsFor } from "./auth/adapter-options.js";
 import { microcompactThresholdFor } from "./chat.js";
 import { authForProfile, directWriteProfile, profileAvailable, resolveContextWindow, unavailableReason, type ModelProfile } from "./config.js";
 import { shellTool } from "@vincemakes/kiso-tools-node";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { realpathSync } from "node:fs";
+import { homedir } from "node:os";
+import type { UserInputVia } from "@vincemakes/kiso-core";
+import { resolveSkillLine, skillsRows } from "./skill-invoke.js";
+
+/** Where a skill directory really lives. Project and user skills are
+ *  merged into one scan directory by symlink, so the scan root names a
+ *  temp directory; the link's target is the answer a person can use. */
+function skillSource(dir: string): string {
+	const scan = process.env.KISO_SKILLS_DIR ?? join(kisoHome(), "skills");
+	try {
+		return tildePath(dirname(realpathSync(join(scan, dir))));
+	} catch {
+		return tildePath(scan); // a broken link has no target to name
+	}
+}
+
+function tildePath(p: string): string {
+	const home = homedir();
+	return p === home || p.startsWith(`${home}/`) ? `~${p.slice(home.length)}` : p;
+}
 
 /** The picker's CLI half (owner 2026-09-08): a profile's LEGAL effort levels
  *  and its default, from the registry, shown wherever the profile is listed
@@ -105,8 +126,10 @@ export interface DispatchCtx {
 	 *  gone; a binding that has not run yet paints none — an unmeasured
 	 *  cache is not a 0% cache, and it is not the previous model's either. */
 	readonly modelSwitched: () => void;
-	/** submit a real turn: queue + chain (the turn closure lives in chat). */
-	readonly submitTurn: (line: string) => void;
+	/** submit a real turn: queue + chain (the turn closure lives in chat).
+	 *  0.40.0: `via` marks a skill turn — `line` is then the composed
+	 *  content, and the chip shows `via.line`. */
+	readonly submitTurn: (line: string, via?: UserInputVia) => void;
 	/** the /status context estimate. */
 	readonly estimateCtx: () => number;
 	/** TUI2-R1 (E): the model's context window, as the session is
@@ -966,6 +989,23 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 		ctx.chainRef.current = ctx.chainRef.current.then(async () => {
 			for (const id of others) bodyLog(`  ${escapeTerminal(id)}`);
 			bodyLog("switch with /resume <id>");
+			ctx.input.prompt();
+		});
+		return;
+	}
+	// 0.40.0 — a person's skill: `/skills`, `/skill <name> [args]`, or
+	// `/<name> [args]` for a name no built-in above claimed. Placed AFTER
+	// every built-in so a built-in always wins, and BEFORE the unknown-
+	// command line so an installed skill is never called unknown.
+	const skill = resolveSkillLine(trimmed, loadedSkillsCatalog(), slashCommandNames());
+	if (trimmed === "/skills" || trimmed === "/skill" || skill !== null) {
+		if (skill?.kind === "submit") {
+			ctx.submitTurn(skill.content, skill.via);
+			return;
+		}
+		ctx.chainRef.current = ctx.chainRef.current.then(async () => {
+			if (skill?.kind === "list") bodyLog(skillsRows(loadedSkillsCatalog(), skillSource, tildePath(join(kisoHome(), "skills"))).map(escapeTerminal).join("\n"));
+			else if (skill?.kind === "error") bodyLog(escapeTerminal(skill.message));
 			ctx.input.prompt();
 		});
 		return;

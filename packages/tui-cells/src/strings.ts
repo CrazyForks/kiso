@@ -498,6 +498,12 @@ const HELP_TABLE: readonly (readonly [string, string])[] = [
 	// §2.5: the conversation is untouched — this rereads what kiso was
 	// built with, not what it has said.
 	["/reload", "reread extensions, skills and config into this session"],
+	// 0.40.0: a skill is a user turn — its SKILL.md, then your args. The
+	// `/<name>` row says the rule a person needs before they install a
+	// skill named like a command: the command wins.
+	["/skills", "list the installed skills, and any that cannot load"],
+	["/skill", "run a skill as your turn: /skill <name> [args]"],
+	["/<name>", "runs the skill <name> when no command above has that name"],
 	// §2.2: the two shell gestures and their one escape. They sit
 	// beside the slash commands because that is what a reader is
 	// looking for when they look here, even though `!` is not one.
@@ -521,10 +527,10 @@ const HELP_TABLE: readonly (readonly [string, string])[] = [
 	["keys", "enter sends \u00b7 ctrl+J newline (shift+enter where encoded) \u00b7 esc stops the run \u00b7 alt+\u23ce stops it and sends this instead \u00b7 @ files \u00b7 1-4 answers an ask"],
 ];
 
-/** The slash commands `/help` lists. The keys and the `!` gestures in the
- *  table are not commands and are not here. */
+/** The slash commands `/help` lists. The keys, the `!` gestures and the
+ *  `/<name>` skill rule in the table are not commands and are not here. */
 export function slashCommandNames(): readonly string[] {
-	return HELP_TABLE.map(([name]) => name).filter((n) => n.startsWith("/"));
+	return HELP_TABLE.map(([name]) => name).filter((n) => /^\/[a-z]+$/.test(n));
 }
 
 export function helpRows(): string[] {
