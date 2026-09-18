@@ -183,7 +183,8 @@ const REFUSED: readonly (readonly [string, string | RegExp])[] = [
 	["rm -rf .git", "the workspace's .git"],
 	["rm -rf .git/objects", "the workspace's .git"],
 	// R8: system roots and what is inside them; mount and home roots
-	["rm -rf /usr/lib/x", "inside a system root (/usr)"],
+	// the root it names is the platform's: on usr-merged Linux /lib IS /usr/lib
+	["rm -rf /usr/lib/x", "inside a system root"],
 	["rm -rf /opt/x", "inside a system root (/opt)"],
 	// R8, second pass: a software prefix itself — not what is inside it
 	["rm -rf /usr/local", "a software prefix (/usr/local)"],
