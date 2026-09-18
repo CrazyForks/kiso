@@ -15,7 +15,7 @@
  */
 
 import { estimateTokens, DO_NOT_COMPACT, DEFAULT_MAX_RETRIES, RETRY_AFTER_MAX_MS, retryDelayMs } from "@vincemakes/kiso-core";
-import type { AbortSignalLike, Adapter, RetryInfo } from "@vincemakes/kiso-core";
+import type { AbortSignalLike, Adapter, RetryInfo, ToolSpec } from "@vincemakes/kiso-core";
 import type { Event } from "@vincemakes/kiso-core";
 import type { Message } from "@vincemakes/kiso-core";
 import type { RawUsage } from "./usage/canonical.js";
@@ -250,6 +250,15 @@ Rules:
   there is no word cap; completeness wins.`;
 
 /**
+ * ADR-0055 A2 — the IN-BAND form: the run's own request with this appended
+ * as the last user message, so everything before it reads at the cache-hit
+ * price. The same sections, the same validation; the guard sentence first.
+ */
+export const SUMMARY_IN_BAND = `Stop the task for this one reply and write a checkpoint of the conversation above instead.
+
+${SUMMARY_PROMPT}`;
+
+/**
  * E6 (b) — the output-side validation (the finding E6-F4/F5 follow-up):
  * a summary must be a complete checkpoint or NOTHING. The marker family
  * is the auto-T5-1 signature — the model echoing tool-call markup as
@@ -282,6 +291,11 @@ export function validateSummary(text: string): string | null {
 export interface SummarizeConversationOptions {
 	readonly adapter: Adapter;
 	readonly model: string;
+	/** ADR-0055 A2: send `messages` AS THE RUN SENT THEM, under the run's own
+	 *  system prompt and tool table, with SUMMARY_IN_BAND appended — the
+	 *  cache-hot form. Absent: `messages` is the serialized covered range
+	 *  under SUMMARY_PROMPT, the cold form. */
+	readonly inBand?: { readonly systemPrompt?: string; readonly tools: readonly ToolSpec[] };
 	/** The covered conversation — the ONLY material the summary is about. */
 	readonly messages: readonly Message[];
 	readonly signal?: AbortSignalLike;
@@ -457,10 +471,16 @@ async function summaryAttempt(options: SummarizeConversationOptions): Promise<Su
 	};
 	const budget = options.maxOutputTokens ?? null;
 	report({ produced: 0, budget, reasoningUnseen: false, reported: false });
+	const inBand = options.inBand;
 	for await (const ev of adapter.stream({
 		model,
-		messages,
-		systemPrompt: SUMMARY_PROMPT,
+		...(inBand === undefined
+			? { messages, systemPrompt: SUMMARY_PROMPT }
+			: {
+					messages: [...messages, { role: "user" as const, content: SUMMARY_IN_BAND }],
+					...(inBand.systemPrompt !== undefined ? { systemPrompt: inBand.systemPrompt } : {}),
+					tools: inBand.tools,
+				}),
 		...(options.signal !== undefined ? { signal: options.signal } : {}),
 		...(options.maxOutputTokens !== undefined ? { maxTokens: options.maxOutputTokens } : {}),
 		...(options.reasoning !== undefined ? { reasoning: options.reasoning } : {}),

@@ -36,7 +36,6 @@
 import { isAdapterEvent, type Adapter, type AbortSignalLike } from "../protocol/adapter.js";
 import type { Continuation, ContinuationEntry, ContinuationScope, Event, StopReason, StructuredError, Terminal, ToolCallEnd } from "../protocol/events.js";
 import type { ApprovalChain, ChainVerdict } from "../protocol/extension.js";
-import { estimateTokens } from "./compaction.js";
 import { EventLog } from "./event-log.js";
 import type { EventInput } from "./event-log.js";
 import type {
@@ -83,22 +82,14 @@ export interface LoopConfig {
 	/** The run's event log. Pass the session's log to make this run durable. */
 	readonly log?: EventLog;
 	/**
-	 * C area: MICROCOMPACT — when the projected context exceeds the threshold,
-	 * append ONE durable `microcompacted` boundary (clearing compactable tool
-	 * results older than the recent turns). The decision is a persisted fact:
-	 * the projection derives the same cleared view from the same events,
-	 * byte for byte, across crash/resume. Never a per-turn progressive
-	 * clearing.
-	 *
-	 * `measure` (0.40.0): what the context holds, as the caller knows it —
-	 * the runtime anchors it on the last BILLED request. Absent, the
-	 * estimate over the projected messages decides, as before.
+	 * ADR-0055 (A1b): the COMPACTION POINT — called before every request with
+	 * the log and the messages about to be sent. It returns the durable facts
+	 * to append (a `summarized` boundary, a `microcompacted` prune), or none.
+	 * The kernel appends and yields them and re-derives; it keeps no policy.
+	 * `why` is "overflow" once, after the provider refused the context: a
+	 * run that gets nothing back then ends on that refusal.
 	 */
-	readonly microcompact?: {
-		readonly thresholdTokens: number;
-		readonly keepResults?: number;
-		readonly measure?: (events: readonly Event[], messages: readonly Message[]) => number;
-	};
+	readonly compact?: (events: readonly Event[], messages: readonly Message[], why: "request" | "overflow") => Promise<readonly EventInput[]>;
 	readonly signal?: AbortSignalLike;
 	readonly temperature?: number;
 	readonly maxTokens?: number;
@@ -577,7 +568,11 @@ export async function* loop(config: LoopConfig): AsyncGenerator<Event> {
 	};
 
 	let turns = 0;
-	while (true) {
+	// ADR-0055 §3: the provider's refusal of the context, held for ONE
+	// compaction and ONE retry; a second refusal ends the run as before.
+	let overflow: StructuredError | null = null;
+	let overflowRetried = false;
+	turn: while (true) {
 		if (aborted()) {
 			yield await terminal({ kind: "aborted", by: "user" });
 			return;
@@ -588,16 +583,20 @@ export async function* loop(config: LoopConfig): AsyncGenerator<Event> {
 		}
 		turns += 1;
 
-		// ── C area: one-shot microcompact boundary when over the threshold ──
-		const mc = config.microcompact;
-		if (mc !== undefined && (mc.measure !== undefined ? mc.measure(log.all, messages) : estimateTokens(messages)) > mc.thresholdTokens) {
-			const beforeSeq = microcompactBoundarySeq(log.all, mc.keepResults ?? KEEP_COMPACTABLE_RESULTS);
-			if (beforeSeq !== undefined) {
-				const full = log.append({ type: "microcompacted", beforeSeq });
+		// ── ADR-0055 (A1b): the compaction point, before every request ──
+		if (config.compact !== undefined) {
+			const added = await config.compact(log.all, messages, overflow === null ? "request" : "overflow");
+			for (const e of added) {
+				const full = log.append(e);
 				if (hooks.onEvent) await hooks.onEvent(full, {}).catch(() => {});
 				yield full;
-				messages = derive();
 			}
+			if (overflow !== null && added.length === 0) {
+				yield await terminal({ kind: "error", error: overflow });
+				return;
+			}
+			overflow = null;
+			if (added.length > 0) messages = derive();
 		}
 
 		if (hooks.onPreLlm) await hooks.onPreLlm({ model: config.model, turns }, {});
@@ -819,6 +818,11 @@ export async function* loop(config: LoopConfig): AsyncGenerator<Event> {
 					turnStart = log.lastSeq;
 					continue;
 				}
+				if (structured.code === "context_overflow" && config.compact !== undefined && !overflowRetried) {
+					overflowRetried = true;
+					overflow = structured;
+					continue turn;
+				}
 				yield await terminal({ kind: "error", error: structured });
 				return;
 			}
@@ -950,7 +954,13 @@ export async function* loop(config: LoopConfig): AsyncGenerator<Event> {
 		// A turn with no tool calls ends on its OWN stop reason (Phase B,
 		// Area 6) — never a blanket `completed`. Reached only once committed.
 		if (voided === null && pending.length === 0) {
-			yield await terminal(terminalForStop(lastStop));
+			const t = terminalForStop(lastStop);
+			if (t.kind === "error" && t.error.code === "context_overflow" && config.compact !== undefined && !overflowRetried) {
+				overflowRetried = true;
+				overflow = t.error;
+				continue;
+			}
+			yield await terminal(t);
 			return;
 		}
 
@@ -1513,47 +1523,6 @@ function sleep(ms: number, signal?: AbortSignalLike): Promise<void> {
 			{ once: true },
 		);
 	});
-}
-
-/**
- * C area (bootstrap #3): the DEFAULT for how many of the NEWEST compactable tool
- * results survive a microcompact boundary (overridable per config via
- * microcompact.keepResults) — the model must keep reasoning over the
- * recent results, whatever turn they belong to.
- */
-const KEEP_COMPACTABLE_RESULTS = 4;
-
-/**
- * C area: the boundary seq for a microcompact — drawn by COMPACTABLE-RESULT
- * recentness, never user turns: a SINGLE user turn that reads several big
- * files (the coding agent's main overflow shape) crosses the threshold and
- * must trigger. The newest `keepResults` still-visible compactable tool
- * results stay intact; the boundary points AT the (K+1)th-newest of them,
- * so it and everything older is cleared. Results already cleared by an
- * earlier boundary do not count toward the kept window — each new boundary
- * makes progress. Undefined when fewer than keepResults+1 compactable
- * results remain (the kept window is the whole context).
- */
-function microcompactBoundarySeq(events: readonly Event[], keepResults: number): number | undefined {
-	const callName = new Map<string, string>();
-	let lastCleared = -1;
-	for (const ev of events) {
-		if (ev.type === "tool_call_end") callName.set(ev.callId, ev.name);
-		if (ev.type === "microcompacted" && ev.beforeSeq > lastCleared) lastCleared = ev.beforeSeq;
-	}
-	const visible: number[] = [];
-	for (const ev of events) {
-		if (ev.type !== "tool_result" || ev.seq <= lastCleared) continue;
-		const name = callName.get(ev.callId);
-		// the ergonomics batch C6 (P4): the do-not-compact tag makes a result UN-CLEARABLE
-		// (the projection keeps it) — the count must EXCLUDE it, exactly like
-		// the clearing side. A tagged result counted here would steal a keep
-		// window slot forever and could anchor the boundary at a result the
-		// projection refuses to clear (the count and the clearing share one rule).
-		if (name !== undefined && MICROCOMPACTABLE.has(name) && !(ev.tags ?? []).includes(DO_NOT_COMPACT)) visible.push(ev.seq);
-	}
-	if (visible.length <= keepResults) return undefined;
-	return visible[visible.length - keepResults - 1]!;
 }
 
 /** A signal that never aborts — for executions outside any abort scope. */

@@ -17,6 +17,7 @@ export * from "./session.js";
 export * from "./run.js";
 export * from "./recovery.js";
 export * from "./compose.js";
+export * from "./compaction-policy.js";
 export * from "./summarize.js";
 export * from "./store.js";
 export * from "./lock-adapter.js";

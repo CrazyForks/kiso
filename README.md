@@ -159,12 +159,17 @@ SAYS the state kiso will resume into, in words:
 | `N uncertain — needs your verdict` | the uncertain ledger is not empty | ask you to rule on the interrupted side effect first |
 | `N asks pending` | a permission request nobody answered | put the question back in front of you |
 
-**Context relief is on by default.** Past half the model window, one
-`microcompacted` boundary event is appended and the projection derives the
-compacted view from it — old read/list/search/shell output becomes a fixed
-placeholder, writes and edits never do. `/compact` compresses the older
-CONVERSATION into one durable summary. Both are persisted facts, so a crash and
-resume land on the byte-identical projection — [docs/context.md](docs/context.md).
+**Context relief is on by default, inside a run.** The context is measured by
+the provider's own count of the last request. Past half the model window (at
+most 400K), kiso compacts at the next round that ends a phase — the checks ran,
+the edits finished, the reading finished, or a new turn began; past 80% (at
+most 700K) it compacts at the next round regardless. The summary is requested
+on the run's own cached prefix and lands as one durable `summarized` event;
+the most recent tenth of the window (at most 100K) stays verbatim. If the
+provider still refuses the context, kiso compacts once and retries once.
+`/compact` does the same on demand. Every boundary is a persisted fact, so a
+crash and resume land on the byte-identical projection —
+[docs/context.md](docs/context.md).
 
 ## Modes
 
@@ -488,7 +493,7 @@ in either direction turns the check red.
 Comments do not count — explain freely, implement tersely. The gate is a
 snapshot discipline, not a self-adjusting ratchet: it has moved exactly twice,
 each by adjudicated amendment, and the standing escape hatch is EXTRACTION
-(ADR-0043). The core sits at **2,196 of 2,200** lines today. The product
+(ADR-0043). The core sits at **2,192 of 2,200** lines today. The product
 surfaces run a different regime since Amendment 8 — printed every check for
 visibility, never failing it, protected by the architecture gates instead.
 
@@ -507,14 +512,14 @@ a blob, and a blob is the thing you eventually fight —
 | **Reference** | [cli.md](docs/cli.md) — commands, approvals, modes, the keys · [configuration.md](docs/configuration.md) — models, effort, credentials · [extensions.md](docs/extensions.md) — the contract and the five official extensions |
 | **The design** | [durability.md](docs/durability.md) — the runtime, the frozen contract, the `kill -9` proof · [context.md](docs/context.md) — microcompact, `/compact`, the byte discipline · [concepts.md](docs/concepts.md) — the vocabulary · [architecture.md](docs/architecture.md) — the responsibility map · [kernel-rule.md](docs/kernel-rule.md) — the 2,200-line rule and the two layers |
 | **The surfaces** | [sdk.md](docs/sdk.md) — the public surface and the Event Stream Contract · [usage.md](docs/usage.md) — the canonical usage schema and the pricing table · [request-trace.md](docs/request-trace.md) — the request trace ledger |
-| **The record** | [status.md](docs/status.md) — what is delivered, surface by surface · [docs/adrs/](docs/adrs/README.md) — 39 architecture decision records · [bench/README.md](bench/README.md) — the bench: same model, same tasks, three agents |
+| **The record** | [status.md](docs/status.md) — what is delivered, surface by surface · [docs/adrs/](docs/adrs/README.md) — 42 architecture decision records · [bench/README.md](bench/README.md) — the bench: same model, same tasks, three agents |
 
 CI installs from the lockfile, then runs `npm run check`, which is the whole
 gate: build → typecheck → tests → size → pack → API surface → hero →
 whitespace → CJK → versions → PTY manifest → dist inventory → bench repro →
 bench tests → bytes → `git diff --check` → consumer smoke tiers → demo.
 **3,120 tests green in 426 files** (2,468 unit, 652 PTY), 6 incident fixtures
-on the real runtime, 40 ADRs.
+on the real runtime, 42 ADRs.
 
 ## Why another one
 
