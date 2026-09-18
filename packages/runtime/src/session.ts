@@ -40,6 +40,7 @@ import {
 	type Tool,
 	type ToolSpec,
 	type EventInput,
+	type RetryInfo,
 } from "@vincemakes/kiso-core";
 import { executionLedger } from "./ledger.js";
 import { assessTasks, type TaskAssessment } from "./task-assessment.js";
@@ -64,6 +65,7 @@ import {
 	MANUAL_SUMMARY_BUDGET,
 	SUMMARY_MAX_OUTPUT,
 	summarizeConversation,
+	SummaryBudgetExhausted,
 	summaryBoundarySeq,
 } from "./summarize.js";
 import { canonicalizeUsageForModel } from "./usage/canonical.js";
@@ -72,9 +74,9 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { estimateTokens } from "@vincemakes/kiso-core";
 import { StaleWriterError, type SessionStore } from "./store.js";
-import { composeHooks, microcompactFor } from "./compose.js";
+import { composeHooks, composeSystemPrompt, microcompactFor, runBasePrompt } from "./compose.js";
 import { checkpointBoundarySeq } from "./checkpoint.js";
-import { breakEvenFactor, guardedPruneSeq, KEEP_COMPACTABLE_RESULTS, microcompactBoundarySeq, phaseEnd, runsACheck, tiersFor } from "./compaction-policy.js";
+import { breakEvenFactor, guardedPruneSeq, KEEP_COMPACTABLE_RESULTS, microcompactBoundarySeq, phaseEnd, runsACheck, tierReason, tiersFor } from "./compaction-policy.js";
 import { Run } from "./run.js";
 // TUI2-R3v2 ③ — the side query rides the SAME tracer the runs ride; that
 // sameness is the whole point (one ledger, one shape, no second path).
@@ -388,8 +390,7 @@ export class AgentSession {
 			const maxOutput = this.#config.maxTokens ?? lookupModelMetadata(this.#model, this.#baseUrl)?.capabilities.maxOutputTokens ?? 0;
 			const t = tiersFor(window, Math.max(maxOutput, MANUAL_SUMMARY_BUDGET));
 			const isCheck = tiersPolicy.isCheck ?? ((command: string) => runsACheck(command));
-			const reason =
-				why === "overflow" ? "overflow" : used > t.emergency ? "emergency" : used > t.hard ? "hard" : used > t.soft ? phaseEnd(events, lastSummaryPoint(events), isCheck) : null;
+			const reason = tierReason(used, t, why, () => phaseEnd(events, lastSummaryPoint(events), isCheck));
 			if (reason === null) return [];
 			const urgent = reason === "overflow" || reason === "emergency";
 			if (!urgent && this.#summaryFailures >= (tiersPolicy.maxFailures ?? MAX_SUMMARY_FAILURES)) return [];
@@ -400,6 +401,52 @@ export class AgentSession {
 			const beforeSeq = guardedPruneSeq(events, breakEvenFactor(pricing?.inputPerM, pricing?.cacheReadPerM));
 			return beforeSeq === undefined ? [] : [{ type: "microcompacted", beforeSeq }];
 		};
+	}
+
+	/**
+	 * ADR-0055 A2 — one checkpoint call, both paths: IN-BAND first (the
+	 * messages as a run sends them, under the run's system prompt and tool
+	 * table, the instruction appended — the prefix reads at the cache-hit
+	 * price), and ONCE the serialised covered range when that reply is
+	 * rejected (a tool call, markup, a missing section). An
+	 * abort is never answered with the second call. Throws when both fail.
+	 */
+	async #checkpointCall(args: {
+		readonly messages: readonly Message[];
+		readonly inBand: { readonly systemPrompt?: string; readonly tools: readonly ToolSpec[]; readonly focus?: string };
+		readonly reasoning?: { readonly thinking?: "adaptive" | "enabled" | "disabled"; readonly effort?: string };
+		readonly serialized: () => string;
+		readonly serializedReasoning: boolean;
+		readonly budget: number;
+		readonly signal?: AbortSignalLike;
+		readonly onProgress?: (progress: import("./summarize.js").SummaryProgress) => void;
+	}): Promise<{ readonly result: Awaited<ReturnType<typeof summarizeConversation>>; readonly path: "in-band" | "serialized" }> {
+		const common = {
+			adapter: this.#adapter,
+			model: this.#model,
+			maxOutputTokens: args.budget,
+			...(args.signal !== undefined ? { signal: args.signal } : {}),
+			...(this.#config.maxRetries !== undefined ? { maxRetries: this.#config.maxRetries } : {}),
+			onRetry: async (info: RetryInfo) => {
+				await this.#config.hooks?.onRetry?.(info, {});
+			},
+			...(args.onProgress !== undefined ? { onProgress: args.onProgress } : {}),
+		};
+		try {
+			const result = await summarizeConversation({ ...common, messages: args.messages, inBand: args.inBand, ...(args.reasoning !== undefined ? { reasoning: args.reasoning } : {}) });
+			return { result, path: "in-band" };
+		} catch (err) {
+			// Only a REJECTED reply earns the second call: a transport failure
+			// already spent its retries, and an exhausted budget would exhaust
+			// the serialised call the same way.
+			if (args.signal?.aborted === true || !(err instanceof Error) || err instanceof SummaryBudgetExhausted) throw err;
+			const result = await summarizeConversation({
+				...common,
+				messages: [{ role: "user", content: args.serialized() }],
+				...(args.serializedReasoning ? summaryReasoning(this.#model, this.#baseUrl) : {}),
+			});
+			return { result, path: "serialized" };
+		}
 	}
 
 	/** A2 — one in-run summary: in-band first, the serialised form once on
@@ -414,32 +461,21 @@ export class AgentSession {
 	): Promise<EventInput | null> {
 		const boundary = checkpointBoundarySeq(events, { keepTokens: tail });
 		if (boundary === undefined) return null;
-		const common = {
-			adapter: this.#adapter,
-			model: this.#model,
-			maxOutputTokens: MANUAL_SUMMARY_BUDGET,
-			...(run.signal !== undefined ? { signal: run.signal } : {}),
-			...(run.maxRetries !== undefined ? { maxRetries: run.maxRetries } : {}),
-		};
-		let path = "in-band";
+		let path: "in-band" | "serialized";
 		let result: Awaited<ReturnType<typeof summarizeConversation>>;
 		try {
-			result = await summarizeConversation({
-				...common,
+			({ result, path } = await this.#checkpointCall({
 				messages,
 				inBand: { ...(run.systemPrompt !== undefined ? { systemPrompt: run.systemPrompt } : {}), tools: run.tools() },
 				...(run.reasoning !== undefined ? { reasoning: run.reasoning } : {}),
-			});
+				serialized: () => serializeCovered({ events, prevPoint: lastSummaryPoint(events), boundary }),
+				serializedReasoning: true,
+				budget: MANUAL_SUMMARY_BUDGET,
+				...(run.signal !== undefined ? { signal: run.signal } : {}),
+			}));
 		} catch {
-			if (run.signal?.aborted === true) return null;
-			path = "serialized";
-			try {
-				const serialized = serializeCovered({ events, prevPoint: lastSummaryPoint(events), boundary });
-				result = await summarizeConversation({ ...common, messages: [{ role: "user", content: serialized }], ...summaryReasoning(this.#model, this.#baseUrl) });
-			} catch {
-				this.#summaryFailures += 1;
-				return null;
-			}
+			if (run.signal?.aborted !== true) this.#summaryFailures += 1;
+			return null;
 		}
 		this.#summaryFailures = 0;
 		// Every in-run fire is recorded — its reason and path are what the
@@ -802,6 +838,7 @@ export class AgentSession {
 		});
 		let summary: string;
 		let usage: import("./usage/canonical.js").RawUsage | null = null;
+		let summaryPath: "in-band" | "serialized" | null = null;
 		// OR-1 (the second review): the summary is priced by the binding that
 		// MADE the request. A /model switch during this call — the session's
 		// longest single request — moves #model/#baseUrl/#provider under it;
@@ -815,30 +852,31 @@ export class AgentSession {
 			// placeholder replaces the covered range (experiment-only).
 			summary = DROP_PLACEHOLDER;
 		} else {
-			const call = await summarizeConversation({
-				adapter: binding.adapter,
-				model: binding.model,
-				// E6 (a): ONE serialized user message — the DSML bug's
-				// raw-message array is structurally dead on this path.
-				messages: [{ role: "user", content: serializedInput }],
-				// E6 (g): the summary call ALWAYS carries an explicit output
-				// budget (a wire-level truncation is caught by the (b)
-				// required-section validation, never silently passed).
-				// 0.39.2: measured for the manual gesture, fixed for the policy.
-				...(options.manualBudget === true
-					? { maxOutputTokens: MANUAL_SUMMARY_BUDGET, ...summaryReasoning(binding.model, binding.baseUrl) }
-					: { maxOutputTokens: SUMMARY_MAX_OUTPUT }),
-				...(options.signal !== undefined ? { signal: options.signal } : {}),
-				// ADR-0005 Amendment 2: the kernel's retry budget and its
-				// announcement, for the one call that does not go through the
-				// kernel — the manual gesture and the auto policy alike.
-				...(this.#config.maxRetries !== undefined ? { maxRetries: this.#config.maxRetries } : {}),
-				onRetry: async (info) => {
-					await this.#config.hooks?.onRetry?.(info, {});
+			// ADR-0055 A2 (the lead's ruling on the /compact gap): the checkpoint
+			// is asked IN-BAND on the prefix a run sends — the session's base
+			// prompt, the tool table, the extension appends, the registry's
+			// tools, the session's reasoning — so a /compact on a warm session
+			// reads its context at the cache-hit price; the serialised form is
+			// the one fallback. The budget is unchanged: measured for the
+			// manual gesture, fixed for the policy (0.39.2).
+			const cfg = this.#effectiveConfig();
+			const systemPrompt = composeSystemPrompt(runBasePrompt(cfg.systemPrompt, cfg.registry), cfg.extensions ?? []);
+			const wire = cfg.reasoning === undefined ? undefined : resolveReasoning(binding.model, cfg.reasoning, binding.baseUrl);
+			const { result: call, path } = await this.#checkpointCall({
+				messages: this.projected(),
+				inBand: {
+					...(systemPrompt !== undefined ? { systemPrompt } : {}),
+					tools: cfg.registry.snapshot().specs,
+					...(options.focus !== undefined ? { focus: options.focus } : {}),
 				},
-				// 0.40.0: the compacting row's bar — observation only
+				...(wire !== undefined && wire.ok && Object.keys(wire.wire).length > 0 ? { reasoning: wire.wire } : {}),
+				serialized: () => serializedInput,
+				serializedReasoning: options.manualBudget === true,
+				budget: options.manualBudget === true ? MANUAL_SUMMARY_BUDGET : SUMMARY_MAX_OUTPUT,
+				...(options.signal !== undefined ? { signal: options.signal } : {}),
 				...(options.onProgress !== undefined ? { onProgress: options.onProgress } : {}),
 			});
+			summaryPath = path;
 			summary = call.text;
 			usage = call.usage;
 		}
@@ -862,7 +900,7 @@ export class AgentSession {
 		if (usage !== null) {
 			try {
 				const canonical = canonicalizeUsageForModel(binding.model, binding.baseUrl, binding.provider ?? "adapter", usage);
-				const line = JSON.stringify({ kind: "summary", canonical }) + "\n";
+				const line = JSON.stringify({ kind: "summary", canonical, ...(summaryPath !== null ? { path: summaryPath } : {}) }) + "\n";
 				mkdirSync(join(this.#store.root, "traces"), { recursive: true, mode: 0o700 }); // DF-0322-F1
 				appendFileSync(join(this.#store.root, "traces", `${this.id}.jsonl`), line, { mode: 0o600 });
 			} catch (err) {

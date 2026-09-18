@@ -23,6 +23,15 @@ const TOOL_RULES: ReadonlyArray<{ readonly tool: string; readonly line: string }
 	{ tool: "shell", line: "shell for what the file tools cannot do: commands, git, the network, the system" },
 ];
 
+/** The base a run's system prompt is composed on: the session's prompt,
+ *  then the tool table (generated machinery sits BETWEEN the base and the
+ *  extension appends). One function, so an in-band summary outside a run
+ *  (ADR-0055 A2, /compact) sends the exact prefix a run sends. */
+export function runBasePrompt(systemPrompt: string | undefined, registry: ToolRegistry): string | undefined {
+	const toolTable = composeToolTable(registry);
+	return toolTable === "" ? systemPrompt : systemPrompt === undefined ? toolTable : `${systemPrompt}\n\n${toolTable}`;
+}
+
 /** The table, or "" when the registry is empty (no vocabulary, no tools). */
 export function composeToolTable(registry: ToolRegistry): string {
 	const tools = registry.list();

@@ -16,7 +16,7 @@ import { createFauxProvider, type FauxScript } from "@vincemakes/kiso-evals";
 import { defineTool, projectMessages, type Adapter, type Message, type StreamOptions } from "@vincemakes/kiso-core";
 import { createAgent, SessionStore } from "../src/index.js";
 import { SUMMARY_IN_BAND, SUMMARY_PROMPT } from "../src/summarize.js";
-import { breakEvenFactor, guardedPruneSeq, phaseEnd, pruneBreaksEven, runsACheck, tiersFor } from "../src/compaction-policy.js";
+import { breakEvenFactor, guardedPruneSeq, phaseEnd, pruneBreaksEven, runsACheck, tierReason, tiersFor } from "../src/compaction-policy.js";
 
 describe("the tiers, as ruled", () => {
 	it("a 1M window: soft 400K, hard 700K, emergency window − reserve, tail 100K (v1)", () => {
@@ -28,6 +28,24 @@ describe("the tiers, as ruled", () => {
 	it("emergency never falls below hard: DeepSeek's 384K output on 1M, and a small window", () => {
 		expect(tiersFor(1_000_000, 384_000).emergency).toBe(700_000);
 		expect(tiersFor(600, 32_000)).toEqual({ soft: 300, hard: 480, emergency: 480, tail: 60 });
+	});
+});
+
+describe("A1B-M1 (the lead's ruling) — at the clamp, the shared boundary is hard", () => {
+	it("emergency = hard on a small window: a fire there is `hard`, so it is not prune-eligible", () => {
+		const t = tiersFor(600, 32_000); // hard = emergency = 480
+		expect(tierReason(500, t, "request", () => null)).toBe("hard");
+	});
+	it("emergency strictly above hard: past it is `emergency`, between the two is `hard`", () => {
+		const t = tiersFor(200_000, 32_000); // hard 160k, emergency 168k
+		expect(tierReason(170_000, t, "request", () => null)).toBe("emergency");
+		expect(tierReason(165_000, t, "request", () => null)).toBe("hard");
+	});
+	it("soft asks the phase detector; an overflow outranks every tier", () => {
+		const t = tiersFor(200_000, 32_000);
+		expect(tierReason(120_000, t, "request", () => "phase:check")).toBe("phase:check");
+		expect(tierReason(120_000, t, "request", () => null)).toBeNull();
+		expect(tierReason(10, t, "overflow", () => null)).toBe("overflow");
 	});
 });
 

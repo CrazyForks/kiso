@@ -533,6 +533,9 @@ describe("E6 (g) — the trigger is window minus the reserve, and the summarize 
 
 describe("E6 (h) — the circuit breaker: ≤3 summary failures stand the auto policy down", () => {
 	const FAIL_TURN: FauxScript = [{ events: [{ type: "stop", reason: "end_turn" }] }];
+/** ADR-0055 A2: one failed summary FIRE is two calls — the in-band attempt
+ *  and its one serialised fallback — so a failing fire scripts two failures. */
+const FAIL_FIRE: FauxScript = [...FAIL_TURN, ...FAIL_TURN];
 
 	/** A call-counting pass-through — the faux provider carries the
 	 *  scripted failure/success turns, the wrapper counts every stream
@@ -551,7 +554,7 @@ describe("E6 (h) — the circuit breaker: ≤3 summary failures stand the auto p
 		const store = new SessionStore(dir);
 		await seedLongSession(store);
 		const adapter = new CountingFaux(
-			createFauxProvider([...FAIL_TURN, ...ONE_TURN, ...FAIL_TURN, ...ONE_TURN, ...FAIL_TURN, ...ONE_TURN, ...ONE_TURN]),
+			createFauxProvider([...FAIL_FIRE, ...ONE_TURN, ...FAIL_FIRE, ...ONE_TURN, ...FAIL_FIRE, ...ONE_TURN, ...ONE_TURN]),
 		);
 		const agent = createAgent({
 			model: "faux",
@@ -572,8 +575,9 @@ describe("E6 (h) — the circuit breaker: ≤3 summary failures stand the auto p
 		// NOTHING persisted — every fire failed ("nothing happened"), and
 		// the breaker skipped the fourth attempt.
 		expect(store.load("s").filter((r) => r.event.type === "summarized")).toHaveLength(0);
-		// 3 summary calls (the breaker held the 4th) + 4 loop turns.
-		expect(adapter.calls).toBe(7);
+		// 3 failed fires × 2 calls (in-band + its fallback; the breaker held
+		// the 4th) + 4 loop turns.
+		expect(adapter.calls).toBe(10);
 	});
 
 	it("a successful fire resets the breaker — the failure budget starts fresh", async () => {
@@ -582,17 +586,17 @@ describe("E6 (h) — the circuit breaker: ≤3 summary failures stand the auto p
 		await seedLongSession(store);
 		const adapter = new CountingFaux(
 			createFauxProvider([
-				...FAIL_TURN,
+				...FAIL_FIRE,
 				...ONE_TURN,
-				...FAIL_TURN,
+				...FAIL_FIRE,
 				...ONE_TURN,
 				{ events: [{ type: "text_delta", text: VALID_SUMMARY }, { type: "stop", reason: "end_turn" }] },
 				...ONE_TURN,
-				...FAIL_TURN,
+				...FAIL_FIRE,
 				...ONE_TURN,
-				...FAIL_TURN,
+				...FAIL_FIRE,
 				...ONE_TURN,
-				...FAIL_TURN,
+				...FAIL_FIRE,
 				...ONE_TURN,
 			]),
 		);
@@ -623,14 +627,14 @@ describe("E6 (h) — the circuit breaker: ≤3 summary failures stand the auto p
 		const summaries = store.load("s").filter((r) => r.event.type === "summarized");
 		expect(summaries).toHaveLength(1);
 		expect((summaries[0]!.event as { summary: string }).summary).toBe(VALID_SUMMARY);
-		expect(adapter.calls).toBe(12);
+		expect(adapter.calls).toBe(17); // 5 failed fires × 2 + 1 in-band success + 6 loop turns
 	});
 
 	it("the configurable limit: maxFailures 1 stands the policy down after ONE failure", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "kiso-e6-h3-"));
 		const store = new SessionStore(dir);
 		await seedLongSession(store);
-		const adapter = new CountingFaux(createFauxProvider([...FAIL_TURN, ...ONE_TURN, ...ONE_TURN, ...ONE_TURN]));
+		const adapter = new CountingFaux(createFauxProvider([...FAIL_FIRE, ...ONE_TURN, ...ONE_TURN, ...ONE_TURN]));
 		const agent = createAgent({
 			model: "faux",
 			store,
@@ -645,7 +649,7 @@ describe("E6 (h) — the circuit breaker: ≤3 summary failures stand the auto p
 			}
 		}
 		// ONE summary attempt (failed) — the second fire is skipped.
-		expect(adapter.calls).toBe(3); // 1 summary + 2 loop turns
+		expect(adapter.calls).toBe(4); // 1 failed fire (in-band + fallback) + 2 loop turns
 		expect(store.load("s").filter((r) => r.event.type === "summarized")).toHaveLength(0);
 	});
 });

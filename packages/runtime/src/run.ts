@@ -9,7 +9,7 @@ import type { SessionStore } from "./store.js";
 import { ABORTED, MergedSignal, abortable, openRunId } from "./recovery.js";
 import { resolveReasoning, type WireReasoning } from "./provider/metadata.js";
 import { deriveRecoveryPlan, invocationSeqOf } from "./recovery-plan.js";
-import { composeApprovalChain, composeSystemPrompt, composeToolTable } from "./compose.js";
+import { composeApprovalChain, composeSystemPrompt, runBasePrompt } from "./compose.js";
 import { truncationGuard } from "./truncation-guard.js";
 import { DEFAULT_STREAM_IDLE_MS, idleGuard } from "./idle-guard.js";
 import { RequestTracer, traceGuard } from "./trace/guard.js";
@@ -97,10 +97,7 @@ export class Run implements AsyncIterable<Event> {
 			// session's base prompt and the extension appends: generated
 			// machinery never outranks the deliberate extension text (the E2
 			// "append lands at the END" contract holds). "" when empty.
-			const toolTable = composeToolTable(this.#config.registry);
-			const basePrompt = toolTable === "" ? this.#config.systemPrompt
-				: this.#config.systemPrompt === undefined ? toolTable
-				: `${this.#config.systemPrompt}\n\n${toolTable}`;
+			const basePrompt = runBasePrompt(this.#config.systemPrompt, this.#config.registry);
 			// E3 — the ledger's parts: the base as CONFIGURED (what the CLI
 			// handed the runtime — the tool table is generated machinery, R3)
 			// and the extension appends in load order (R4 attribution). The
