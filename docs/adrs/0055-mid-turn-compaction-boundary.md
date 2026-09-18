@@ -630,8 +630,11 @@ instruction, plus "text only, no tool calls"). The ADR-0044 required-
 sections contract is unchanged, and the response IS the summary.
 `/compact` asks the same way (the lead's ruling, 2026-09-18): a
 serialised `/compact` pays the whole context at the miss price, about 50×
-the in-band call. The in-band call carries the session's own reasoning,
-because that is part of the prefix a run sends; 0.39.2's thinking-off
+the in-band call. The in-band call keeps the session's own reasoning
+setting, so the request is the run's own; on some providers a changed
+thinking parameter invalidates the cache. Its reasoning tokens are therefore
+billed and count against the 32K budget, and the measurement's average of
+~3.3K output per checkpoint is that figure. 0.39.2's thinking-off
 optimisation now applies only to the serialised fallback. The fallback
 fires only on a REJECTED reply. A transport failure has already spent its
 retries, and an exhausted budget would exhaust the serialised call too.
