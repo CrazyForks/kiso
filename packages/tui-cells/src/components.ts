@@ -1792,7 +1792,12 @@ export function diffBody(diff: import("./diff.js").DiffLine[] | null, W: number,
 				? `${p.red}- ${escapeTerminal(d.text)}${p.reset}`
 				: d.kind === "+"
 					? `${p.green}+ ${escapeTerminal(d.text)}${p.reset}`
-					: `${p.dim}  ${escapeTerminal(d.text)}${p.reset}`;
+					: d.kind === "note"
+						? // 0.40.0: a note starts in the MARKER column, where no line
+							// of the file ever does — it reads as kiso's sentence about
+							// the diff, not as an unchanged line inside it
+							`${p.dim}${escapeTerminal(d.text)}${p.reset}`
+						: `${p.dim}  ${escapeTerminal(d.text)}${p.reset}`;
 		// W2: the diff body is a bounded block's body — the │ gutter
 		// (dim), never the old bold ▎ rail (the table lists no ▎); the
 		// +/- marks and their colors ride the content
