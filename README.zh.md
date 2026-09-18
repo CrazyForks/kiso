@@ -71,7 +71,7 @@ Profile 存在 `~/.kiso/config.json`(ADR-0045)。**凭据永远不在里面**—
     // 订阅:不设 apiKeyEnv——由 `kiso login chatgpt` 拥有
     "chatgpt": { "kind": "openai-responses", "model": "gpt-5.5", "baseUrl": "https://chatgpt.com/backend-api" }
   },
-  "mode": "default"                          // manual/default/accept-edits/plan/bypass
+  "mode": "default"                          // default/accept-edits/plan/dontAsk/bypass
 }
 ```
 
@@ -110,17 +110,30 @@ kiso sessions                  列出持久会话及其状态
 
 | 档位 | 这一档的贡献 |
 |---|---|
-| `default` | 读放行;write/edit/shell 问人;扩展工具归扩展自己管 |
-| `manual` | 每个工具都问——已保存的放行规则照样放行 |
-| `accept-edits` | `default` 加上 write_file/edit_file 放行;shell 问人——已保存的放行规则照样放行 |
+| `default` | 读放行,能证明只读的 shell 命令(`ls`、`cat`、`git status`/`log`/`diff`)也放行;write/edit/其余 shell 问人;扩展工具归扩展自己管 |
+| `manual` | 每个工具都问——已保存的放行规则照样放行。配置里仍然接受;`/mode` 和 shift+tab 不再提供 |
+| `accept-edits` | `default` 加上 write_file/edit_file 放行,但写入 `.git/` 或 `.kiso/` 除外(那里是会被执行的配置,总是问人);shell 除非能证明只读,否则问人——已保存的放行规则照样放行 |
 | `plan` | read/list/search/read_skill 放行;其余一律以 `plan mode: read-only` **拒绝**——而拒绝是谁也压不过的 |
 | `bypass` | 全部放行——但用户扩展的 `deny` 依然胜出 |
+| `dontAsk` | 从不问人:凡是要问的一律拒绝并给出一行提示,运行继续;所有放行照样放行(读、只读 shell、已保存的放行规则)。无人值守 / CI 用的档位 |
 
 **想被重新问,就删掉那条规则。** 「别再问了」的授权写在
 `~/.kiso/extensions/dont-ask-again.mjs`,这个文件可以人工编辑、人工删除:
 把某个工具从集合里去掉,或者整个删掉文件,下一次调用就会问。
 该文件按设计**只会放行**——永远不会产生 deny 或 ask——所以 mode 与 safe-defaults
-两道护城河的牙齿都还在。
+两道护城河的牙齿都还在。它也永远不会替你放行破坏性命令,或写入 `.git/`、`.kiso/`:
+这些每次都会问你。
+
+**灾难兜底。** 在任何模式下(包括 bypass),kiso 都拒绝目标无法恢复的破坏性命令
+(`rm`、`git clean -f`、`git reset --hard`、`git checkout -- <路径>` / `.` / `-f`、`git restore`、
+`git switch -f`、不带选择条件的 `find … -delete`):
+`/`、系统根目录及其内部(临时目录除外)、你的家目录、工作区根目录或它之上的任何目录、
+工作区的 `.git`、`~/.ssh`、`~/.config`、
+`~/.kiso`、`~/.gnupg`、`~/.aws` 及其内部、覆盖以上任何一处的通配符,以及只有一个变量的
+目标(`rm -rf $DIR/`)。其余一切按模式执行——`rm -rf /tmp/probe` 在 bypass 下照样运行。
+拒绝会记为 `decidedBy: floor`,并告诉模型原因。兜底读的是命令行,不是沙箱。在
+`~/.kiso/config.json` 里写 `"floor": "off"` 可以关掉它(项目配置不行),此时状态行会显示
+`floor off`。
 
 启动时:`--mode <name>` 或 `KISO_MODE=<name>`。状态栏写出当前档位,约束是看得见的,而不是编码在色相里。
 

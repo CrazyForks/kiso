@@ -32,12 +32,12 @@ import type { AgentSession, Run } from "@vincemakes/kiso-runtime";
 import type { UserInputVia } from "@vincemakes/kiso-core";
 import { dispatch, type DispatchCtx, abortBangCommand } from "./dispatch.js";
 import { paintWindowTitle } from "./window-title.js";
-import { agentBaseUrl, agentModel, body, bodyLog, configuredWindow, dock, retryOnRow, retryShown, setRetryShown, type LineInput } from "./state.js";
+import { agentBaseUrl, agentModel, body, bodyLog, configuredWindow, dock, retryOnRow, retryShown, setRetryShown, floorOn, type LineInput } from "./state.js";
 import { attachImages } from "./attachments.js";
 import { lookupModelMetadata } from "@vincemakes/kiso-runtime/internal";
 import { addDontAskAgainRule, askPanel, fixHintFor, pendingAsk, resolveUncertains } from "./trust-ui.js";
 import { FauxExhaustionError, failOnFauxExhaustion } from "./faux-glue.js";
-import { MODES, getMode, setMode } from "./mode.js";
+import { OFFERED_MODES, getMode, setMode } from "./mode.js";
 
 /** B area: default context window for the ~ctx estimate (config overridable). */
 const DEFAULT_CONTEXT_WINDOW = 200_000;
@@ -990,8 +990,17 @@ export async function consumeRun(
 				//  - Yes+amend → approve(true), the words ride the NEXT turn;
 				//  - esc       → cancel, the conservative denial.
 				const name = (ev as { name: string }).name;
-				body.toolApproval(ev.callId, approvalDiff(name, ev.input ?? {}));
 				const decisionId = (ev as { decisionId: string }).decisionId;
+				// Launch-weekend plan §2 — dontAsk: the chain's final ASK is
+				// denied HERE, at the one place kiso asks, so every allow the
+				// chain gave still stands (a tier deny would outrank them). The
+				// reason is the tool result: the model sees why and goes on.
+				if (getMode() === "dontAsk") {
+					body.notice(`[dontAsk] ${escapeTerminal(name)} would ask — denied`);
+					await session.approve(decisionId, false, `dontAsk: ${name} needs a human's approval, and this session never asks — denied`);
+					break;
+				}
+				body.toolApproval(ev.callId, approvalDiff(name, ev.input ?? {}));
 				// TUI2-R3v2 ③: the on-demand alternatives provider. It is built
 				// per approval and captured by the panel; it fires ONLY if the
 				// human presses option 3, which is the whole zero-ambient-rent
@@ -1480,6 +1489,7 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 				// blind and invariant ① cuts whatever sits last — which is how
 				// a measured rate went missing at 100 columns.
 				rowWidth(),
+				!floorOn,
 			),
 		);
 	};
@@ -1630,10 +1640,11 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 	// they are the same sentinel: one implementation, one behaviour.
 	input.onCopy(() => dispatch("\x18copy", dispatchCtx));
 	// R3a — Shift+Tab: the approval-tier cycle (the /mode ring, in the
-	// MODES order). The switch is the SAME live-extension flip /mode
-	// performs; the status row repaints at once with a one-line notice.
+	// OFFERED order — a session started in `manual` steps to the first).
+	// The switch is the SAME live-extension flip /mode performs; the status
+	// row repaints at once with a one-line notice.
 	input.onModeCycle?.(() => {
-		const next = MODES[(MODES.indexOf(getMode()) + 1) % MODES.length]!;
+		const next = OFFERED_MODES[(OFFERED_MODES.indexOf(getMode()) + 1) % OFFERED_MODES.length]!;
 		setMode(next);
 		paintIdle();
 		body.notice(`mode → ${next} (shift+tab cycles)`);

@@ -63,6 +63,7 @@ const CONFIG_SAMPLE: Record<string, unknown> = {
 	autoCompact: { thresholdRatio: 0.5 },
 	projectTrust: "ask",
 	theme: "dark",
+	floor: "off", // 0.40.0, user-level only — "round-trip" is not a <cwd> source
 	checks: { test: "npm test" },
 };
 

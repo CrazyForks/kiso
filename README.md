@@ -120,7 +120,7 @@ a comment-free minimal profile you can paste directly.
     // the subscription: no apiKeyEnv — `kiso login chatgpt` owns it
     "chatgpt": { "kind": "openai-responses", "model": "gpt-5.5", "baseUrl": "https://chatgpt.com/backend-api" }
   },
-  "mode": "default"                          // manual/default/accept-edits/plan/bypass
+  "mode": "default"                          // default/accept-edits/plan/dontAsk/bypass
 }
 ```
 
@@ -179,17 +179,33 @@ rules you already granted.
 
 | tier | its contribution |
 |---|---|
-| `default` | reads allow; write/edit/shell ask the human; extension tools are the extensions' business |
-| `manual` | every tool asks — a saved allow still allows |
-| `accept-edits` | `default` + write_file/edit_file allow; shell asks — a saved allow still allows |
+| `default` | reads allow, and shell commands proven read-only (`ls`, `cat`, `git status`/`log`/`diff`); write/edit/other shell ask the human; extension tools are the extensions' business |
+| `manual` | every tool asks — a saved allow still allows. Still accepted in config; no longer offered by `/mode` or shift+tab |
+| `accept-edits` | `default` + write_file/edit_file allow, except into `.git/` or `.kiso/` (configuration that runs — those always ask); shell asks unless proven read-only — a saved allow still allows |
 | `plan` | read/list/search/read_skill allow; everything else **denied** with `plan mode: read-only` — and a deny is what nothing overrides |
 | `bypass` | everything allows — but a user extension's `deny` still wins |
+| `dontAsk` | never asks: whatever would ask is denied with a one-line notice, and the run goes on; every allow still allows (reads, read-only shell, a saved allow). The unattended / CI tier |
 
 **To be asked again, remove the rule.** Grants from "don't ask again" are
 written to `~/.kiso/extensions/dont-ask-again.mjs`, which is human-editable and
 human-deletable: drop a tool from its set, or delete the file, and the next call
 asks. The file is allow-only by design — it can never deny or ask — so the mode
-and safe-defaults moats keep their teeth.
+and safe-defaults moats keep their teeth. It never carries a destructive command
+or a write into `.git/` or `.kiso/`: those reach you every time.
+
+**The catastrophe floor.** In every mode, bypass included, kiso refuses a
+destructive command (`rm`, `git clean -f`, `git reset --hard`,
+`git checkout -- <paths>` / `.` / `-f`, `git restore`, `git switch -f`,
+`find … -delete` with no selecting primary) whose target cannot be recovered:
+`/`, a system root or what is inside it (temp directories excepted), your home
+directory, the workspace root or anything above it, the workspace's `.git`,
+`~/.ssh`, `~/.config`, `~/.kiso`, `~/.gnupg`, `~/.aws` or anything inside them,
+a wildcard over any of those, or a target that is only a variable
+(`rm -rf $DIR/`). Everything else runs as the mode says — `rm -rf /tmp/probe`
+runs in bypass. A refusal is recorded as `decidedBy: floor`, and the model is
+told why. The floor reads the command line; it is not a sandbox. `"floor": "off"`
+in `~/.kiso/config.json` turns it off — a project config cannot — and the status
+row then says `floor off`.
 
 Startup: `--mode <name>` or `KISO_MODE=<name>`; the status bar names the tier,
 so the constraint is visible rather than encoded in a hue.

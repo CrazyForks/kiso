@@ -490,7 +490,7 @@ const HELP_TABLE: readonly (readonly [string, string])[] = [
 	// been dispatchable since TUI2-R1 slice 6 and was never listed here,
 	// so the only way to learn it existed was to read the source.
 	["/context", "show where the context went — the per-request rent ledger"],
-	["/mode", "show the approval tier; /mode <name> switches (manual/default/accept-edits/plan/bypass)"],
+	["/mode", "show the approval tier; /mode <name> switches (default/accept-edits/plan/dontAsk/bypass)"],
 	["/model", "list model profiles; /model <name|provider/model> switches"],
 	["/compact", "summarize the older conversation to free context"],
 	["/clear", "start a fresh conversation (the old session stays resumable)"],

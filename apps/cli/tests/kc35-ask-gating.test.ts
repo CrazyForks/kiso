@@ -102,7 +102,7 @@ describe("T-Q3 / slice ⓪ — the extraction changed no bytes", () => {
 			// was to read the source. The computed stop does not move:
 			// `/compact` is eight characters and `/context` is eight.
 			"/context    show where the context went — the per-request rent ledger",
-			"/mode       show the approval tier; /mode <name> switches (manual/default/accept-edits/plan/bypass)",
+			"/mode       show the approval tier; /mode <name> switches (default/accept-edits/plan/dontAsk/bypass)",
 			"/model      list model profiles; /model <name|provider/model> switches",
 			"/compact    summarize the older conversation to free context",
 			"/clear      start a fresh conversation (the old session stays resumable)",

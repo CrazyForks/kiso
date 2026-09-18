@@ -14,7 +14,8 @@ import { askDeclineAll, askView, projectTrustRows, projectTrustView, projectUntr
 import type { AskUI } from "@vincemakes/kiso-ask-ext";
 import { projectArtifacts, recordTrust, trustFor, type ProjectArtifacts } from "@vincemakes/kiso-runtime";
 import type { AgentSession, KisoExtension } from "@vincemakes/kiso-runtime";
-import { bodyLog, currentAgentExtensions, dock, extensionsDir, kisoHome, mergedTempPaths, type LineInput } from "./state.js";
+import { bodyLog, currentAgentExtensions, dock, extensionsDir, kisoHome, mergedTempPaths, neverInherited, type LineInput } from "./state.js";
+import { guardSavedAllow } from "./protected-writes.js";
 import { loadUserConfig, resolveProjectTrustPolicy } from "./config.js";
 import { getMode } from "./mode.js";
 
@@ -147,6 +148,13 @@ export function parseFallbackAnswer(answer: string): { action: "allow" | "deny";
 export function askUi(input: LineInput): AskUI {
 	return {
 		ask: async (spec: AskSpec): Promise<AskResult> => {
+			// Launch-weekend plan §2: dontAsk asks nobody anything — a
+			// question the model puts is declined, recorded as unanswered,
+			// exactly as a non-interactive session declines it.
+			if (getMode() === "dontAsk") {
+				bodyLog("[dontAsk] the model's question was declined — nothing asks in dontAsk");
+				return askDeclineAll(spec);
+			}
 			const verdict = await askPanel(input, askView(spec));
 			return verdict.action === "answers" ? verdict.result : askDeclineAll(spec);
 		},
@@ -238,8 +246,11 @@ export async function addDontAskAgainRule(rule: string): Promise<void> {
 	// bytes of the first.
 	const mod = (await import(`${pathToFileURL(file).href}?grant=${(grantSerial += 1)}`)) as { default?: unknown };
 	if (mod.default === undefined) return;
-	if (at >= 0) currentAgentExtensions[at] = mod.default as KisoExtension;
-	else currentAgentExtensions.push(mod.default as KisoExtension);
+	// 0.40.0: wrapped as at startup — a first grant must not carry what a
+	// saved allow never carries.
+	const joined = guardSavedAllow(mod.default as KisoExtension, neverInherited);
+	if (at >= 0) currentAgentExtensions[at] = joined;
+	else currentAgentExtensions.push(joined);
 }
 
 /** RL-F5 — the rules a generated file already holds. The `new Set([...])`
@@ -305,8 +316,11 @@ export async function resolveProjectTrust(input: LineInput): Promise<ProjectArti
 	if (record?.decision === "refused") return null; // refused is sticky — no re-ask
 	// First discovery — list every artifact (file name + digest short
 	// prefix) and ask the human ONCE.
-	if (!process.stdin.isTTY) {
-		console.error(projectUntrustedNote(artifacts.files.length, artifacts.root));
+	// The lead's review of #63, B5: dontAsk takes this same path — nothing
+	// asks, so the project is not loaded, the note says so, and no refusal
+	// is recorded (a later asking session can still decide).
+	if (!process.stdin.isTTY || getMode() === "dontAsk") {
+		console.error(`${getMode() === "dontAsk" ? "[dontAsk] " : ""}${projectUntrustedNote(artifacts.files.length, artifacts.root)}`);
 		return null;
 	}
 	// v2c: the shared input (the editor on a TTY) reads the answer.
@@ -460,6 +474,15 @@ export async function resolveUncertains(
 	input: LineInput,
 	isCancelled: () => boolean,
 ): Promise<void> {
+	// The lead's review of #63, B5: under dontAsk nothing asks, so the
+	// uncertain executions are left exactly as a cancel leaves them —
+	// uncertain and durable, no rerun or abandon fabricated — and the one
+	// line says what to do. An unattended session must not sit on a panel.
+	if (getMode() === "dontAsk") {
+		const n = session.uncertainExecutions().length;
+		if (n > 0) bodyLog(`[dontAsk] ${n} uncertain execution${n === 1 ? "" : "s"} left unresolved — resolve them in an asking mode`);
+		return;
+	}
 	for (const uncertain of session.uncertainExecutions()) {
 		// KC3.5 §4: an interrupted ask_user is not a side effect that may
 		// have applied — it is a question nobody answered. The COPY says
