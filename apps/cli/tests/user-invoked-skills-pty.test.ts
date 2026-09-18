@@ -101,4 +101,3 @@ describe("0.40.0 — user-invoked skills (PTY)", () => {
 		expect(out).toMatch(/▸ boss-call\s+mailbox between sessions · skill/);
 	}, 300_000);
 });
-
