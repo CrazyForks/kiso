@@ -8,7 +8,7 @@
  *     the recalled line as a real turn (the session runs it).
  */
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -177,73 +177,21 @@ describe("A2: ↑↓ recall the session history", () => {
 	});
 });
 
-describe("C8: /compact auto-trigger (opt-in via KISO_AUTO_COMPACT)", () => {
-	it("after the turn ends, a ~ctx ratio over the threshold runs the /compact FULL path — the notice + a durable summarized event", () => {
-		const dir = mkdtempSync(join(tmpdir(), "kiso-feel-c8-"));
+describe("C8 retired (ADR-0055 Amendment 1): KISO_AUTO_COMPACT", () => {
+	// The between-turn auto-trigger C8 pinned is retired by the owner's
+	// ruling (2026-09-18): the in-run tiers compact inside a run and before
+	// its first request. The env var is accepted, ignored, and named once;
+	// the piped run it used to race with the exit completes as any run does.
+	it("the env var prints the retirement notice once, compacts nothing, and a piped run completes", () => {
+		const dir = mkdtempSync(join(tmpdir(), "kiso-feel-c8r-"));
 		const { env: isoEnv, dirs } = isolatedEnv();
-		// The shape: 5 chunky reads (130K chars each). The recovery's
-		// continuation microcompacts r0 (the newest 4 stay — ~520K chars ≈
-		// 0.65 of the 200K window — under the 0.7 trigger, so the recovery
-		// does NOT trigger). The live turn then adds 50K chars of MODEL
-		// TEXT (assistant text is never compactable and displaces nothing):
-		// the post-turn ratio ≈ 0.71 crosses the threshold, and the
-		// auto-trigger fires AFTER the turn — WITHOUT the human typing
-		// /compact. (A tool RESULT would not work: tool results cap at
-		// OUTPUT_CAP = 100K chars, and the microcompact's kept window
-		// would displace a seed result with the smaller read.)
-		seedSession(dirs.home, "c8", { rounds: 5, resultChars: 130_000 });
-		// fauxSkip = 5 (the seed's results; no stops in the seed): 5 fillers
-		// + the recovery's end_turn + the live long-text answer + the auto
-		// summary.
-		const script = [
-			...Array.from({ length: 5 }, () => ({ events: [{ type: "stop", reason: "end_turn" }] })),
-			{ events: [{ type: "stop", reason: "end_turn" }] },
-			{ events: [{ type: "text_delta", text: "a".repeat(50_000) }, { type: "stop", reason: "end_turn" }] },
-			{ events: [{ type: "text_delta", text: "## Goal\nserve the file reads\n## Constraints\nnothing may be dropped\n## User requests\nseven rounds of reads\n## Files and changes\nf0-f6.ts read\n## Errors and fixes\nnone\n## Current work\nseven rounds summarized\n## Next steps\nkeep going" }, { type: "stop", reason: "end_turn" }] },
-		];
 		const scriptPath = join(dir, "faux.json");
-		writeFileSync(scriptPath, JSON.stringify(script), "utf8");
-
-		const out = ptyRun(
-			{ ...isoEnv, KISO_AUTO_COMPACT: "0.7", KISO_FAUX_SCRIPT: scriptPath },
-			[
-				// ONE turn ("go") — the auto-trigger then fires WITHOUT any
-				// /compact keystroke; the recap is the auto notice.
-				["▌ ", "go\r"],
-				["[/compact] ✦ compacted", "exit\r"],
-			],
-			dir,
-			"c8",
-		);
-		expect(stripANSI(out)).toContain("[/compact] ✦ compacted ·"); // the auto notice
-		const durable = readFileSync(join(dirs.home, "sessions", "c8.jsonl"), "utf8");
-		expect(durable).toContain('"type":"summarized"'); // the durable /compact fact
-	});
-
-	it("PIPE mode: the auto-trigger still completes — the exit must await the appended /compact segment", () => {
-		// The published-artifact probe found the race: in pipe mode EOF
-		// closes the input early, so the exit-time `await chain` captured
-		// the chain BEFORE the turn's auto-compact append — the summarize
-		// never ran. The exit re-await covers it. This pins the pipe shape.
-		const dir = mkdtempSync(join(tmpdir(), "kiso-feel-c8pipe-"));
-		const { env: isoEnv, dirs } = isolatedEnv();
-		seedSession(dirs.home, "c8pipe", { rounds: 5, resultChars: 130_000 });
-		const script = [
-			...Array.from({ length: 5 }, () => ({ events: [{ type: "stop", reason: "end_turn" }] })),
-			{ events: [{ type: "stop", reason: "end_turn" }] },
-			{ events: [{ type: "text_delta", text: "a".repeat(50_000) }, { type: "stop", reason: "end_turn" }] },
-			{ events: [{ type: "text_delta", text: "## Goal\nserve the file reads\n## Constraints\nnothing may be dropped\n## User requests\nseven rounds of reads\n## Files and changes\nf0-f6.ts read\n## Errors and fixes\nnone\n## Current work\nseven rounds summarized\n## Next steps\nkeep going" }, { type: "stop", reason: "end_turn" }] },
-		];
-		const scriptPath = join(dir, "faux.json");
-		writeFileSync(scriptPath, JSON.stringify(script), "utf8");
-
-		const out = execFileSync(
-			"node",
-			[CLI, "chat", "c8pipe"],
-			{ encoding: "utf8", timeout: 90_000, input: "go\n", env: { ...isoEnv, KISO_AUTO_COMPACT: "0.7", KISO_FAUX_SCRIPT: scriptPath } },
-		);
-		expect(stripANSI(out)).toContain("[/compact] ✦ compacted ·"); // W18: the recap
-		const durable = readFileSync(join(dirs.home, "sessions", "c8pipe.jsonl"), "utf8");
-		expect(durable).toContain('"type":"summarized"');
+		writeFileSync(scriptPath, JSON.stringify([{ events: [{ type: "text_delta", text: "hello" }, { type: "stop", reason: "end_turn" }] }]), "utf8");
+		const res = spawnSync("node", [CLI, "chat", "c8r"], { encoding: "utf8", timeout: 60_000, input: "go\n", env: { ...isoEnv, KISO_AUTO_COMPACT: "0.0001", KISO_FAUX_SCRIPT: scriptPath } });
+		expect(res.status, res.stderr).toBe(0);
+		expect(res.stderr.match(/\[autoCompact\] retired in 0\.40\.0/g) ?? []).toHaveLength(1);
+		const durable = readFileSync(join(dirs.home, "sessions", "c8r.jsonl"), "utf8");
+		expect(durable).not.toContain('"type":"summarized"');
+		expect(durable).toContain('"kind":"completed"');
 	});
 });

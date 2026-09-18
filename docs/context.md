@@ -5,17 +5,30 @@ that clears old tool output, a model summary that compresses the
 conversation itself, and the byte contract that keeps both of them
 cache-friendly and replayable.
 
-## MicroCompact — zero-API context relief
+## In-run compaction — the tiers (ADR-0055 Amendment 1)
 
-**The CLI ships it ON by default**: threshold = half the LIVE model's
-window (`KISO_CONTEXT_WINDOW` override included — 200k window → 100k
-tokens). Live means live: `/model` recomputes it for the model it is
-switching to, and a session opened on a model this process was not started
-with — the `/resume` case, where the recorded model wins — takes that
-model's window too. Before finding CTX-1 the threshold was computed once at
-startup and neither door moved it, so the status row could report a
-1,000,000 window while old tool results were still being cleared at
-100,000.
+**The CLI ships it ON by default**, drawn from the LIVE model's window
+(`/model` and `/resume` move the window with the model — CTX-1). Before
+every request the kernel asks the runtime whether to compact; the context is
+measured by the provider's own count of the last request (§1a), the
+estimate only where no bill describes it. `soft = min(0.5·window, 400K)`
+makes compaction eligible and it fires at the next settled round that ends a
+phase (a check ran, edits finished, reading finished, a new turn);
+`hard = min(0.8·window, 700K)` fires at the next round regardless;
+`emergency = max(window − reserve, hard)` before the next request. The
+summary is requested IN-BAND — the run's own cached prefix with the
+instruction appended — with one fallback to the serialised form, and the
+most recent `min(0.1·window, 100K)` stays verbatim. A provider that still
+refuses the context gets one compaction and one retry.
+
+## MicroCompact — the prune primitive
+
+**No longer a standing trigger** (ADR-0055 Amendment 1, A4): repeated
+mid-history clearing breaks the prompt cache on every clear. The
+`microcompacted` event and its projection stay; the tiers use a prune only
+when a summary cannot complete, and only where the break-even rule says it
+pays. Library callers that configure `microcompact: { thresholdTokens }`
+explicitly keep its old standing behaviour, now run by the runtime.
 
 A model the registry has no window for falls back to 200,000, and its
 threshold to 100,000. That is a stated unknown, not a measurement: the
@@ -25,7 +38,8 @@ currently answers together, and the 2:1 ratio between them has never been
 measured.
 Library users opt in with `microcompact: { thresholdTokens }` in
 `createAgent`. When a session's projected context crosses the threshold,
-the loop appends **one** `microcompacted` boundary event to the stream —
+the runtime appends **one** `microcompacted` boundary event through the
+kernel's compaction point —
 never a per-turn progressive clearing. The projection then derives the
 compacted view deterministically: tool results older than the boundary
 whose tool is in the whitelist (`read_file`, `list_dir`, `search_text`,

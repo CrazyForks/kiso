@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { type Adapter, type AdapterEvent } from "@vincemakes/kiso-core";
 import { createAgent, SessionStore } from "@vincemakes/kiso-runtime";
-import { COLD_AFTER_MS, coldResumeOffer } from "../src/chat.js";
+import { COLD_AFTER_MS, coldAfter, coldResumeOffer } from "../src/chat.js";
 
 const adapter = {
 	stream: async function* (): AsyncIterable<AdapterEvent> {
@@ -48,5 +48,23 @@ describe("the cold-resume offer", () => {
 		const unbilled = await sessionBilled(null);
 		expect(unbilled.lastUsageAt).toBeUndefined();
 		expect(coldResumeOffer(unbilled, Date.now() + 60 * 60_000)).toBeNull();
+	});
+});
+
+describe("the recap's cold-cache condition (0.40.0, the owner)", () => {
+	const usage = (fresh: number, cache: number) => ({ known: true, in: fresh, out: 100, cache });
+
+	it("idle past the cache's life and a surfaced miss: cold, in whole minutes", () => {
+		expect(coldAfter(58 * 60_000 + 20_000, 727_000, usage(735_000, 3_456))).toEqual({ coldAfterMinutes: 58 });
+	});
+	it("no surfaced miss but under half the prompt from cache: cold", () => {
+		expect(coldAfter(10 * 60_000, null, usage(600_000, 100_000))).toEqual({ coldAfterMinutes: 10 });
+	});
+	it("idle long, but the cache still answered: not cold — the time alone is not evidence", () => {
+		expect(coldAfter(58 * 60_000, null, usage(2_000, 700_000))).toEqual({});
+	});
+	it("a short gap, or no bill to measure from, is never cold", () => {
+		expect(coldAfter(COLD_AFTER_MS - 1, 727_000, usage(735_000, 0))).toEqual({});
+		expect(coldAfter(undefined, 727_000, usage(735_000, 0))).toEqual({});
 	});
 });

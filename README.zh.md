@@ -98,7 +98,7 @@ kiso sessions                  列出持久会话及其状态
 | `N uncertain — needs your verdict` | uncertain 账本非空 | 先请你对被打断的副作用作出裁决 |
 | `N asks pending` | 有没人回答的权限请求 | 把问题重新摆回你面前 |
 
-**上下文缓解默认开启。** 越过模型窗口的一半后,会追加一个 `microcompacted` 边界事件,投影据此推导压缩视图——旧的 read/list/search/shell 输出变成固定占位符,写入与编辑永远不变。`/compact` 把更早的**对话**压缩成一条持久摘要。两者都是持久化事实,所以崩溃后恢复会落在字节一致的投影上——见 [docs/context.md](docs/context.md)。
+**上下文缓解默认开启,而且在一次运行之内生效。** 上下文按服务商对上一次请求的实际计数来算。越过模型窗口的一半(最多 400K)后,kiso 会在下一个结束一个阶段的回合压缩——检查跑完了、编辑做完了、阅读告一段落,或者开始了新一轮;越过 80%(最多 700K)后,在下一个回合无条件压缩。摘要用这次运行自己已缓存的前缀去请求,落成一条持久的 `summarized` 事件;最近十分之一的窗口(最多 100K)原样保留。如果服务商仍然拒绝这么长的上下文,kiso 会压缩一次、重试一次。`/compact` 是同一件事的手动版。每个边界都是持久化事实,所以崩溃后恢复会落在字节一致的投影上——见 [docs/context.md](docs/context.md)。
 
 ## 模式
 
@@ -301,7 +301,7 @@ for await (const ev of session.run("What is 2+3?")) {
 
 > 内核不能超过 **2,200 行**。任何把它推过线的 PR 都会被关掉,无论特性多好。CI 用机器强制它——size 门跑在 `npm run check` 链条里,在 build、typecheck 和测试之后——所以没人能把它挥手放过。需要更多,就生长一个包。这正是重点。
 
-注释不计入——解释可以充分,实现必须精悍。这道门是快照纪律,不是自调节棘轮:它只移动过两次,每次都经裁定修正,而常备的逃生口是**抽取**(ADR-0043)。今天内核停在 **2,196 / 2,200** 行。产品面自 Amendment 8 起走另一套体制——每次 check 打印以供观察,但从不让 check 失败,它们的保护转移到了架构门禁上。
+注释不计入——解释可以充分,实现必须精悍。这道门是快照纪律,不是自调节棘轮:它只移动过两次,每次都经裁定修正,而常备的逃生口是**抽取**(ADR-0043)。今天内核停在 **2,192 / 2,200** 行。产品面自 Amendment 8 起走另一套体制——每次 check 打印以供观察,但从不让 check 失败,它们的保护转移到了架构门禁上。
 
 内核拥有 L1 协议、L2 内核、带 JSON Schema 校验的工具契约,以及 eval 钩子。它拒绝拥有循环业务逻辑、UI、权限策略、计费、技能内容与检索:那些活在包里,行数上限不约束它们。一个替你决定这些的内核就是一坨 blob,而 blob 正是你最终要跟它搏斗的东西。[docs/kernel-rule.md](docs/kernel-rule.md) 写全了。
 
@@ -313,9 +313,9 @@ for await (const ev of session.run("What is 2+3?")) {
 | **参考** | [cli.md](docs/cli.md)——命令、审批、模式、键位 · [configuration.md](docs/configuration.md)——模型、effort、凭据 · [extensions.md](docs/extensions.md)——契约与五个官方扩展 |
 | **设计** | [durability.md](docs/durability.md)——持久运行时、冻结契约、`kill -9` 证明 · [context.md](docs/context.md)——microcompact、`/compact`、字节纪律 · [concepts.md](docs/concepts.md)——词汇表 · [architecture.md](docs/architecture.md)——职责地图 · [kernel-rule.md](docs/kernel-rule.md)——2,200 行规则与两层结构 |
 | **面** | [sdk.md](docs/sdk.md)——公开面与事件流契约 · [usage.md](docs/usage.md)——规范 usage schema 与价格表 · [request-trace.md](docs/request-trace.md)——请求追踪账本 |
-| **记录** | [status.md](docs/status.md)——逐个面的交付状态 · [docs/adrs/](docs/adrs/README.md)——39 份架构决策记录 · [bench/README.md](bench/README.md)——bench:同一个模型、同一批任务、三个 Agent |
+| **记录** | [status.md](docs/status.md)——逐个面的交付状态 · [docs/adrs/](docs/adrs/README.md)——42 份架构决策记录 · [bench/README.md](bench/README.md)——bench:同一个模型、同一批任务、三个 Agent |
 
-CI 先按锁文件安装,然后跑 `npm run check`——这就是完整门链:build → typecheck → tests → size → pack → API 面 → hero → whitespace → CJK → versions → PTY manifest → dist inventory → bench repro → bench tests → bytes → `git diff --check` → 消费者冒烟层 → demo。**3,120 个测试全绿,426 个文件**(单元 2,468,PTY 652),6 个事故夹具跑在真实运行时上,40 份 ADR。
+CI 先按锁文件安装,然后跑 `npm run check`——这就是完整门链:build → typecheck → tests → size → pack → API 面 → hero → whitespace → CJK → versions → PTY manifest → dist inventory → bench repro → bench tests → bytes → `git diff --check` → 消费者冒烟层 → demo。**3,120 个测试全绿,426 个文件**(单元 2,468,PTY 652),6 个事故夹具跑在真实运行时上,42 份 ADR。
 
 ## 为什么还要做一个
 

@@ -41,7 +41,7 @@ import {
 	type AgentDefinition,
 	type ContextPolicy,
 } from "@vincemakes/kiso-runtime";
-import { listSessionSidecars, migrateSummaries, readProfile, summaryMigrationPending } from "@vincemakes/kiso-runtime/internal";
+import { listSessionSidecars, migrateSummaries, readProfile, runsACheck, summaryMigrationPending } from "@vincemakes/kiso-runtime/internal";
 import { skillMenuItems } from "./skill-invoke.js";
 import { createFauxProvider } from "@vincemakes/kiso-evals";
 import { createCodingTools } from "@vincemakes/kiso-tools-node";
@@ -57,7 +57,7 @@ import { maxRetriesFromEnv } from "./retries.js";
 import { askUi, resolveProjectTrust } from "./trust-ui.js";
 import { isFirstRun, scaffoldFirstRun } from "./first-run.js";
 import { fauxSkip, readFauxScript } from "./faux-glue.js";
-import { chat, displayCtxRatio, microcompactThresholdFor, statusModelLabel } from "./chat.js";
+import { chat, contextWindowTokens, displayCtxRatio, microcompactThresholdFor, statusModelLabel } from "./chat.js";
 import { adapterOptionsFor } from "./auth/adapter-options.js";
 import { loadProjectConfig, loadUserConfig, mergeConfigs, resolveAutoCompact, resolveContextWindow, resolveModel } from "./config.js";
 import { checkForUpdate, knownUpdate, updateCardLines } from "./update-check.js";
@@ -846,15 +846,15 @@ async function makeAgent(sessionId: string | undefined, input?: LineInput, model
 			const extra = modeSystemPrompt();
 			return extra === undefined ? sp : `${sp}\n\n${extra}`;
 		})(),
-		// C area: microcompact is ON by default in the product — threshold =
-		// half the model window (KISO_CONTEXT_WINDOW override included;
-		// 200k window → 100k tokens). Long sessions compact old read/list/
-		// search/shell outputs instead of silently growing past the window.
-		// CTX-1: the startup value; `/model` recomputes it through the same
-		// function, so the two can never drift apart.
-		microcompact: { thresholdTokens: microcompactThresholdFor() },
-		// E6: the run-start context policy — OFF unless env-armed (beats the microcompact default when both fire).
-		...(contextPolicy !== undefined ? { contextPolicy } : {}),
+		// ADR-0055 Amendment 1 (A1b): compaction is ON by default and runs
+		// INSIDE a run, by tiers drawn from the model's window (CTX-1: the
+		// binding step moves the window with /model and /resume). The
+		// standing microcompact at half the window is gone (A4). Phase rule
+		// 1 reads the user's configured checks first, then the runner table.
+		contextPolicy: {
+			...(contextPolicy ?? {}),
+			tiers: { windowTokens: contextWindowTokens(), isCheck: (command: string) => runsACheck(command, Object.values(merged.checks ?? {})) },
+		},
 		// R3e (owner ruling, 2026-08-28): NO turn limit on an interactive
 		// session. This was `maxTurns: 20`, hardcoded on 2026-08-03 with no
 		// stated reason and no way to change it — and it was the thing that
@@ -993,6 +993,22 @@ async function pickSession(agent: Awaited<ReturnType<typeof makeAgent>>, input: 
  * row the moment either changed.
  */
 /**
+ * ADR-0055 Amendment 1 (the owner, 2026-09-18): `autoCompact` — the
+ * between-turn ratio, from config or KISO_AUTO_COMPACT — is RETIRED. The
+ * in-run tiers compact inside a run and before its first request, which is
+ * everything it did and more. 0.40.0 accepts it, ignores it and says so
+ * once; 0.41.0 removes it.
+ */
+let autoCompactNoticed = false;
+function retiredAutoCompact(merged: Parameters<typeof resolveAutoCompact>[0]): undefined {
+	if (!autoCompactNoticed && (process.env.KISO_AUTO_COMPACT !== undefined || resolveAutoCompact(merged) !== undefined)) {
+		autoCompactNoticed = true;
+		console.error("[autoCompact] retired in 0.40.0 — compaction now runs inside a run, by tiers; this setting is ignored and goes in 0.41.0");
+	}
+	return undefined;
+}
+
+/**
  * CTX-1 (Astra F34-1): EVERY entry point that opens a session must bind the
  * policy that follows the session's OWN model.
  *
@@ -1017,6 +1033,7 @@ function bindRestoredSession(session: {
 	readonly baseUrl: string | undefined;
 	readonly driftAcknowledgement?: { readonly reasoningReset: { readonly thinking: string; readonly effort: string } } | null;
 	setMicrocompactThreshold(n: number): void;
+	setContextWindow(n: number): void;
 }): void {
 	// 0.40.0: an acknowledged drift says what it did, once — including the
 	// owner-ruled reasoning reset, which was silent until now.
@@ -1033,6 +1050,7 @@ function bindRestoredSession(session: {
 			...(session.baseUrl !== undefined ? { baseUrl: session.baseUrl } : {}),
 		}),
 	);
+	session.setContextWindow(contextWindowTokens({ model: session.model, ...(session.baseUrl !== undefined ? { baseUrl: session.baseUrl } : {}) }));
 }
 
 function paintBootStatus(session: { log: { all: readonly unknown[] }; reasoning?: { readonly effort: string } }): void {
@@ -1584,7 +1602,7 @@ async function main(): Promise<void> {
 				agent = await makeAgent(id, input, modelFlag);
 				applyConfigMode();
 				faux = currentFaux;
-				await chatLoop(agent, id, input, resolveAutoCompact(mergedConfig));
+				await chatLoop(agent, id, input, retiredAutoCompact(mergedConfig));
 				break;
 			}
 			case "resume": {
@@ -1616,7 +1634,7 @@ async function main(): Promise<void> {
 					// type `kiso chat <id>`. The explicit-id one-shot form
 					// (`kiso resume <id> ["prompt"]`) keeps its exact bytes.
 					faux = currentFaux;
-					await chatLoop(agent, picked, input, resolveAutoCompact(mergedConfig));
+					await chatLoop(agent, picked, input, retiredAutoCompact(mergedConfig));
 					break;
 				}
 				const session = await agent.session({ id, ...(acceptDrift() ? { acceptDrift: true } : {}) });
@@ -1818,7 +1836,7 @@ async function main(): Promise<void> {
 				// lives inside the resolver. It used to pass the env-only
 				// reader, so a user's config.json autoCompact worked on
 				// `kiso chat` and silently vanished on the default entry.
-				await chatLoop(agent, id, input, resolveAutoCompact(mergedConfig));
+				await chatLoop(agent, id, input, retiredAutoCompact(mergedConfig));
 				break;
 			}
 		}

@@ -1,13 +1,15 @@
 /**
- * C area (kiso code review, fix 2): the CLI wires microcompact ON by default —
- * threshold = half the model window (KISO_CONTEXT_WINDOW override included).
+ * ADR-0055 Amendment 1, A4 — the DECLARED REVERSAL of the C area's "microcompact
+ * ON by default at half the model window". The standing prune is gone:
+ * repeated mid-history clearing breaks the prompt cache on every clear, and
+ * pruning is now a primitive the in-run tiers use, never a trigger of its own.
  *
- * A seeded long session (7 chunky read results, ~1,750 estimated tokens) is
- * resumed with a tiny window (600 tokens → 300-token threshold): the run
- * must record the `microcompacted` boundary on disk and still complete.
- * This is the product-level verification of the "50% by default" claim —
- * with a FIXED threshold (no derivation) or no wiring at all, the boundary
- * never lands.
+ * The same seeded session (7 read results, ~1,750 estimated tokens) is
+ * resumed on a 3,000-token window. Half the window is 1,500, so the removed
+ * trigger WOULD have written a `microcompacted` boundary here; the gate pins
+ * that it does not, and that the run still completes. (The soft tier is
+ * also 1,500 and is eligible, but this crash-shaped seed has no settled
+ * round to cut at, so the tiers correctly do nothing.)
  */
 
 import { execFileSync } from "node:child_process";
@@ -41,8 +43,8 @@ function seedSession(home: string, id: string): void {
 	writeFileSync(join(dir, `${id}.jsonl`), lines.join("\n") + "\n", "utf8");
 }
 
-describe("C area cli: microcompact is on by default at half the model window", () => {
-	it("a resume over the threshold records the boundary and completes", () => {
+describe("A4 cli: the standing microcompact at half the window is gone", () => {
+	it("a resume over half the window records NO standing boundary, and completes", () => {
 		const dir = mkdtempSync(join(tmpdir(), "kiso-mc-cli-"));
 		const { env: isoEnv, dirs } = isolatedEnv();
 		const home = dirs.home;
@@ -54,15 +56,15 @@ describe("C area cli: microcompact is on by default at half the model window", (
 		const scriptPath = join(dir, "faux.json");
 		writeFileSync(scriptPath, JSON.stringify(script), "utf8");
 
-		// Window 600 tokens → threshold 300; the seeded ~1,750 estimated
-		// tokens cross it BEFORE the first model turn.
+		// Window 3,000 tokens: half is 1,500, under the seeded ~1,750 — where
+		// the removed trigger fired, before the first model turn.
 		const out = execFileSync(process.execPath, [CLI, "resume", "k9"], {
 			encoding: "utf8",
 			timeout: 60_000,
-			env: { ...isoEnv, KISO_FAUX_SCRIPT: scriptPath, KISO_CONTEXT_WINDOW: "600" },
+			env: { ...isoEnv, KISO_FAUX_SCRIPT: scriptPath, KISO_CONTEXT_WINDOW: "3000" },
 		});
 		const durable = readFileSync(join(home, "sessions", "k9.jsonl"), "utf8");
-		expect(durable).toContain('"type":"microcompacted"');
+		expect(durable).not.toContain('"type":"microcompacted"');
 		expect(durable).toContain('"kind":"completed"');
 		expect(out).toContain("✦"); // the recap line ends the resumed run
 	}, 90_000);

@@ -6,11 +6,12 @@
  * so a user's config.json autoCompact worked on one documented entry
  * and silently vanished on the default one (audit F9, static trace).
  *
- * The gate is behavioral, not textual: the same config.json, the same
- * five turns, the same faux script — both entry points must reach the
- * post-run auto-compaction and leave a `summarized` event in the log.
- * KISO_AUTO_COMPACT is unset throughout (the env override is not the
- * subject; the config path is).
+ * ADR-0055 Amendment 1 (the owner, 2026-09-18): `autoCompact` is RETIRED —
+ * the in-run tiers replace the between-turn ratio. The equivalence the gate
+ * exists for still holds, now for the retirement: the same config.json on
+ * both entry points prints the same one-line notice, and neither runs the
+ * old post-run compaction (five short turns are far below every tier).
+ * KISO_AUTO_COMPACT is unset throughout (the config path is the subject).
  */
 
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -40,20 +41,18 @@ function fixture(): { env: NodeJS.ProcessEnv; home: string } {
 
 const FIVE = "hi\nhi\nhi\nhi\nhi\nexit\n";
 
-describe("CX-1 F9 — entry-point equivalence for autoCompact", () => {
-	it("`kiso chat <id>` honors config.json autoCompact (the reference behavior)", () => {
-		const { env, home } = fixture();
-		const res = runCli(["chat", "f9-chat"], env, { input: FIVE, timeout: 60_000 });
-		expect(res.status, res.stderr).toBe(0);
-		const log = readFileSync(join(home, "sessions", "f9-chat.jsonl"), "utf8");
-		expect(log).toContain('"summarized"');
-	});
-
-	it("bare `kiso <id>` honors the SAME config.json autoCompact — the default entry is not the odd one out", () => {
-		const { env, home } = fixture();
-		const res = runCli(["f9-bare"], env, { input: FIVE, timeout: 60_000 });
-		expect(res.status, res.stderr).toBe(0);
-		const log = readFileSync(join(home, "sessions", "f9-bare.jsonl"), "utf8");
-		expect(log).toContain('"summarized"');
-	});
+describe("CX-1 F9 — entry-point equivalence for the retired autoCompact", () => {
+	for (const [name, args, id] of [
+		["`kiso chat <id>`", ["chat", "f9-chat"], "f9-chat"],
+		["bare `kiso <id>`", ["f9-bare"], "f9-bare"],
+	] as const) {
+		it(`${name}: config.json autoCompact prints the retirement notice once, and compacts nothing`, () => {
+			const { env, home } = fixture();
+			const res = runCli([...args], env, { input: FIVE, timeout: 60_000 });
+			expect(res.status, res.stderr).toBe(0);
+			expect(res.stderr.match(/\[autoCompact\] retired in 0\.40\.0/g) ?? []).toHaveLength(1);
+			const log = readFileSync(join(home, "sessions", `${id}.jsonl`), "utf8");
+			expect(log).not.toContain('"summarized"');
+		});
+	}
 });

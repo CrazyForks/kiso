@@ -4,12 +4,12 @@
  * verbatim from session.ts.
  */
 
-import { denialResult, estimateTokens, loop, type AbortSignalLike, type Adapter, type ApprovalChain, type ChainVerdict, type ContentBlock, type Event, type EventLog, type HookHost, type PermissionDecision, type ToolCallPayload, type ToolResult } from "@vincemakes/kiso-core";
+import { denialResult, loop, type AbortSignalLike, type Adapter, type ApprovalChain, type ChainVerdict, type ContentBlock, type Event, type EventLog, type HookHost, type PermissionDecision, type ToolCallPayload, type ToolResult } from "@vincemakes/kiso-core";
 import type { SessionStore } from "./store.js";
 import { ABORTED, MergedSignal, abortable, openRunId } from "./recovery.js";
 import { resolveReasoning, type WireReasoning } from "./provider/metadata.js";
 import { deriveRecoveryPlan, invocationSeqOf } from "./recovery-plan.js";
-import { composeApprovalChain, composeSystemPrompt, composeToolTable, microcompactFor } from "./compose.js";
+import { composeApprovalChain, composeSystemPrompt, composeToolTable } from "./compose.js";
 import { truncationGuard } from "./truncation-guard.js";
 import { DEFAULT_STREAM_IDLE_MS, idleGuard } from "./idle-guard.js";
 import { RequestTracer, traceGuard } from "./trace/guard.js";
@@ -135,18 +135,29 @@ export class Run implements AsyncIterable<Event> {
 			// extension providing a compaction config supplies it. E6: the
 			// contextPolicy override beats the session's own, and its minTurns
 			// no-fire guard may omit the config below the floor.
-			const configured = microcompactFor(this.#config, log.all);
-			// 0.40.0: the trigger reads the context as the last BILL measured
-			// it (context-anchor.ts), the estimate only when no bill describes it.
-			const microcompact =
-				configured === undefined
-					? undefined
-					: { ...configured, measure: (events: readonly Event[], messages: Parameters<typeof estimateTokens>[0]) => this.#session.contextAnchor(events) ?? estimateTokens(messages) };
 			// E2: the session's own systemPrompt first, then every extension
 			// append in LOAD order — deterministic (same extensions → same
 			// prompt); no appends → byte-identical to the extension-less run.
 			const systemPrompt = composeSystemPrompt(basePrompt, this.#config.extensions ?? []);
 			const approvalChain = composeApprovalChain(this.#config.extensions ?? []);
+			// ADR-0055 Amendment 1 (A1b): the compaction point the kernel asks
+			// before every request — the run's own prefix, so an in-band
+			// summary reads it at the cache-hit price.
+			// The loop resolves the same setting when it builds each request; a
+			// setting that cannot run refuses the run there, before any compaction.
+			let wireReasoning: WireReasoning | undefined;
+			try {
+				wireReasoning = this.#config.reasoning !== undefined ? resolveReasoningOrThrow(this.#config.model, this.#config.reasoning, this.#config.baseUrl).reasoning : undefined;
+			} catch {
+				wireReasoning = undefined;
+			}
+			const compact = this.#session.compactionPoint({
+				...(systemPrompt !== undefined ? { systemPrompt } : {}),
+				tools: () => this.#config.registry.snapshot().specs,
+				...(wireReasoning !== undefined ? { reasoning: wireReasoning } : {}),
+				signal,
+				...(this.#config.maxRetries !== undefined ? { maxRetries: this.#config.maxRetries } : {}),
+			});
 			const loopConfig = () =>
 				({
 					// 0.1.40 (R-C item 3): the truncation guard gates the model
@@ -163,7 +174,7 @@ export class Run implements AsyncIterable<Event> {
 					...(this.#config.maxTurns !== undefined ? { maxTurns: this.#config.maxTurns } : {}),
 					...(this.#config.maxTokens !== undefined ? { maxTokens: this.#config.maxTokens } : {}),
 					...(this.#config.temperature !== undefined ? { temperature: this.#config.temperature } : {}),
-					...(microcompact !== undefined ? { microcompact } : {}),
+					...(compact !== undefined ? { compact } : {}),
 					...(this.#config.maxRetries !== undefined ? { maxRetries: this.#config.maxRetries } : {}),
 					// MG-1 (A5): the kernel stamps committed envelopes with this.
 					...(this.#config.continuationScope !== undefined ? { continuationScope: this.#config.continuationScope } : {}),
