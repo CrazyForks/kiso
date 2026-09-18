@@ -16,6 +16,10 @@ declare module "*.mjs" {
 		reason: string;
 		diag: string;
 	}>;
+	// 0.40.0: the settled row's marker and the failure kinds it counts
+	export type FailKind = "timeout" | "acceptance" | "error";
+	export function failKindOf(status: string, verification: { passed?: boolean; skipped?: string } | null): FailKind;
+	export function delegateSummary(sections: readonly { failed: boolean; failKind?: FailKind; toolCalls?: number }[], roles: number): string;
 	// DT-1a
 	export const UNRESOLVED_INSTRUCTION: string;
 	export function globToRegExp(glob: string): RegExp;
