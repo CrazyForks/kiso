@@ -11,8 +11,11 @@
  * from the full diff.
  */
 
-/** The diff block's per-row kind. */
-export type DiffLine = { kind: "-" | "+" | " "; text: string };
+/** The diff block's per-row kind. `note` (0.40.0) is kiso's sentence
+ *  ABOUT the diff — the renderer's cut, a search that is not there or is
+ *  there more than once — never a line of the file, so never drawn where
+ *  the file's lines are. */
+export type DiffLine = { kind: "-" | "+" | " " | "note"; text: string };
 
 export interface DiffResult {
 	/** The FULL diff (with context, not truncated) — the display truncates. */
@@ -106,7 +109,7 @@ export function truncateDiff(diff: DiffLine[]): DiffLine[] {
 	const omitted = diff.length - 2 * TRUNCATE_KEEP;
 	return [
 		...diff.slice(0, TRUNCATE_KEEP),
-		{ kind: " ", text: `… ${omitted} lines (/last for full)` },
+		{ kind: "note", text: `… ${omitted} lines (/last for full)` },
 		...diff.slice(diff.length - TRUNCATE_KEEP),
 	];
 }
@@ -147,7 +150,7 @@ export function editFileDiff(oldContent: string, search: string, replace: string
 	const at = oldContent.indexOf(search);
 	if (at < 0) {
 		return {
-			lines: [{ kind: " ", text: `pattern not found in ${path ?? "the file"}` }],
+			lines: [{ kind: "note", text: `pattern not found in ${path ?? "the file"}` }],
 			added: 0,
 			removed: 0,
 			outcome: "not-found",
@@ -161,7 +164,7 @@ export function editFileDiff(oldContent: string, search: string, replace: string
 	// same rule as the miss above, for the same reason.
 	if (search.length > 0 && oldContent.indexOf(search, at + 1) > at) {
 		return {
-			lines: [{ kind: " ", text: `pattern matches more than one place in ${path ?? "the file"}` }],
+			lines: [{ kind: "note", text: `pattern matches more than one place in ${path ?? "the file"}` }],
 			added: 0,
 			removed: 0,
 			outcome: "ambiguous",
