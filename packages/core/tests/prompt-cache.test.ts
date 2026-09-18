@@ -143,4 +143,25 @@ describe("D: byte-identical projection discipline", () => {
 		// and the id itself appears nowhere in the bytes a provider would see
 		expect(JSON.stringify(withField)).not.toContain("served-elsewhere");
 	});
+	it("⑥ 0.40.0: a user_input carrying `via` projects to the SAME bytes as one without it", () => {
+		// ADR-0051 §5 rule 1, R6 — the byte-discipline fixture for the
+		// optional field. `via` records HOW a person's turn was composed (a
+		// skill, and the line they typed); the model already receives the
+		// composed text as `content`. A byte of `via` in a request would be
+		// the typed line sent twice — and a request that differs from the
+		// replayed one after a resume.
+		const build = (withField: boolean): ReturnType<typeof projectMessages> => {
+			const log = new EventLog();
+			const via = { kind: "skill" as const, name: "review", line: "/review src/a.ts" };
+			log.append(withField ? { type: "user_input", content: "Review the file.\n\nsrc/a.ts", source: "user", via } : { type: "user_input", content: "Review the file.\n\nsrc/a.ts", source: "user" });
+			log.append({ type: "text_delta", text: "ok" });
+			log.append({ type: "stop", reason: "end_turn" });
+			log.append({ type: "user_input", content: "next" });
+			// a reload (JSON round-trip) is what a resume projects from
+			return projectMessages(JSON.parse(JSON.stringify(log.all)) as Parameters<typeof projectMessages>[0]);
+		};
+		const withField = build(true);
+		expect(JSON.stringify(withField), "via leaked into the projection — it is display provenance, not context").toBe(JSON.stringify(build(false)));
+		expect(JSON.stringify(withField)).not.toContain("/review");
+	});
 });

@@ -17,6 +17,21 @@ Skill directories: `~/.kiso/skills/<name>/SKILL.md` (or the project-level
 `.kiso/skills/` after the trust gate). No configuration file — the
 extension scans the skills dir at startup.
 
+## Invoking a skill yourself
+
+`/skill <name> [args]` sends a skill as your turn: its SKILL.md body, then
+your args after a blank line. `/<name> [args]` does the same when no
+built-in command has that name — a built-in always wins. `/skills` lists
+what is installed, where each skill lives, and any that cannot load with
+the reason.
+
+A skill whose frontmatter says `user-invocable: false` stays in the
+model's index and out of your reach. Only the literal `false` counts; a
+skill without the key is invocable.
+
+The body is sent as written — there is no placeholder substitution; your
+args follow it. A body over 32,768 characters is refused, not cut.
+
 ## Versioning
 
 The version counter is this package's own. It is pinned exactly by the kiso

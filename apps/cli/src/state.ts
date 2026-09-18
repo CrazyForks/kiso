@@ -413,6 +413,15 @@ export function setExtensionLists(
 	loadedExtensions = loaded;
 }
 
+/** 0.40.0: the skills catalog of the loaded skills extension — the scan the
+ *  model's index came from, so `/skill` and `/skills` cannot list a
+ *  different set. Null when no skills extension is loaded (or a user
+ *  extension named "skills" shadows it and reports none). */
+export function loadedSkillsCatalog(): import("@vincemakes/kiso-skills-ext").SkillsCatalog | null {
+	const ext = loadedExtensions.find((e) => e.name === "skills") as { catalog?: import("@vincemakes/kiso-skills-ext").SkillsCatalog } | undefined;
+	return ext?.catalog ?? null;
+}
+
 /** W21: the CURRENT agent's extensions array — set by makeAgent, the
  *  don't-ask-again writer pushes the generated extension into it so a
  *  first-time rule joins the chain at the NEXT run (the run's policies
