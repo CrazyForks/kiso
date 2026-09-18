@@ -41,6 +41,7 @@ def driver(cli, home, script_path, session_id, workdir, kills_at, resume_keys):
     pid, fd = pty.fork()
     if pid == 0:
         os.environ["KISO_HOME"] = home
+        os.environ["KISO_SESSIONS_DIR"] = os.path.join(home, "sessions")  # 0.40.0: the pin follows the home
         os.environ["KISO_FAUX_SCRIPT"] = script_path
         # Hermetic: the real ~/.kiso may hold extensions + an MCP config —
         # the gate must never load them (an MCP npx server at startup makes
@@ -230,6 +231,7 @@ def driver(cli, home, script_path, session_id, workdir, kills_at, resume_keys):
     pid, fd = pty.fork()
     if pid == 0:
         os.environ["KISO_HOME"] = home
+        os.environ["KISO_SESSIONS_DIR"] = os.path.join(home, "sessions")  # 0.40.0: the pin follows the home
         os.environ["KISO_FAUX_SCRIPT"] = script_path
         ext_dir = os.path.join(home, "ext")
         os.makedirs(ext_dir, exist_ok=True)
@@ -529,6 +531,7 @@ driver(${JSON.stringify(CLI)}, ${JSON.stringify(home)}, ${JSON.stringify(join(di
 		const env = {
 			...isolatedEnv().env,
 			KISO_HOME: home,
+			KISO_SESSIONS_DIR: join(home, "sessions"), // 0.40.0: the pin follows the home
 			KISO_FAUX_SCRIPT: join(dir, "faux.json"),
 			KISO_CONTEXT_WINDOW: "20000",
 		};

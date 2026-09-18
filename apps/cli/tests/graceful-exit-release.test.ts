@@ -63,6 +63,7 @@ def driver(mode, cli, home, script_path, session_id, workdir):
         if slave > 2:
             os.close(slave)
         os.environ["KISO_HOME"] = home
+        os.environ["KISO_SESSIONS_DIR"] = os.path.join(home, "sessions")  # 0.40.0: the one folder read back
         os.environ["KISO_FAUX_SCRIPT"] = script_path
         ext_dir = os.path.join(home, "ext")
         os.makedirs(ext_dir, exist_ok=True)

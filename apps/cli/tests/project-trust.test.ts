@@ -235,6 +235,7 @@ describe("E3: the project trust gate (project-trust)", () => {
 		const { env, dirs } = isolatedEnv();
 		const kiso = join(dirs.home, ".kiso");
 		env.KISO_HOME = kiso; // the user-level config dir itself
+		env.KISO_SESSIONS_DIR = join(kiso, "sessions"); // 0.40.0: the pin follows the home
 		mkdirSync(join(kiso, "extensions"), { recursive: true });
 		writeFileSync(join(kiso, "extensions", "x.mjs"), "export default { name: \"x\", tools: [] };\n", "utf8");
 		writeFileSync(join(kiso, "mcp.json"), JSON.stringify({ mcpServers: { fs: { command: "/bin/echo", args: ["a"] } } }), "utf8");

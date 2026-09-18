@@ -36,6 +36,7 @@ def driver(cli, home, ext_dir, mcp_config):
     pid, fd = pty.fork()
     if pid == 0:
         os.environ["KISO_HOME"] = home
+        os.environ["KISO_SESSIONS_DIR"] = os.path.join(home, "sessions")  # 0.40.0: the pin follows the home
         os.environ["KISO_EXTENSIONS_DIR"] = ext_dir
         os.environ["KISO_MCP_CONFIG"] = mcp_config
         os.execvp("node", ["node", cli, "chat", "dispose-t"])
@@ -159,6 +160,7 @@ def driver(cli, home, workdir, ext_dir, mcp_config, script_path):
     pid, fd = pty.fork()
     if pid == 0:
         os.environ["KISO_HOME"] = home
+        os.environ["KISO_SESSIONS_DIR"] = os.path.join(home, "sessions")  # 0.40.0: the pin follows the home
         os.environ["KISO_EXTENSIONS_DIR"] = ext_dir
         os.environ["KISO_MCP_CONFIG"] = mcp_config
         os.environ["KISO_FAUX_SCRIPT"] = script_path

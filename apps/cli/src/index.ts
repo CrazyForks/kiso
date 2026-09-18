@@ -43,6 +43,8 @@ import {
 } from "@vincemakes/kiso-runtime";
 import { listSessionSidecars, migrateSummaries, readProfile, runsACheck, summaryMigrationPending } from "@vincemakes/kiso-runtime/internal";
 import { skillMenuItems } from "./skill-invoke.js";
+import { canonicalPath, claimProjectDir, hasSession, locateSession, projectLayoutActive, sessionFolders, type SessionFolder, type SessionRoute } from "./projects.js";
+import { migrationNotice, pendingLegacyIds, planMigration, reverseMigration, runMigration } from "./session-migration.js";
 import { createFauxProvider } from "@vincemakes/kiso-evals";
 import { createCodingTools } from "@vincemakes/kiso-tools-node";
 import { MODES, OFFERED_MODES, getMode, modeExtensions, modeFromEnv, modeSystemPrompt, setMode } from "./mode.js";
@@ -52,7 +54,7 @@ import { guardSavedAllow, isProtectedWrite } from "./protected-writes.js";
 import { floorExtension, isDestructiveCall } from "./floor.js";
 import { breakerExtension } from "./breaker.js";
 import { builtInLayer } from "./builtin.js";
-import { agentModel, atFiles, body, bodyLog, codingToolOptions, kisoHome, builtInExtensions, currentFaux, dock, extensionsDir, loadedExtensions, mergedConfig, mergedTempPaths, modelChoice, projectExtensions, configModels, configuredWindow, agentBaseUrl, currentModelName, currentAgentExtensions, sessionStoreRef, sessionsDir, setAgentModel, setBody, setConfigModels, setConfiguredWindow, setCurrentAgentExtensions, setCurrentFaux, setCurrentModelName, setExtensionLists, setMergedConfig, setModelChoice, setSessionStore, setRetryShown, setNeverInherited, secretEnvNamesOf, userExtensions, VERSION, type LineInput, lastBinding, acceptDrift, setAcceptDrift, setFloorOn, floorOn, loadedSkillsCatalog } from "./state.js";
+import { agentModel, atFiles, body, bodyLog, codingToolOptions, kisoHome, workspaceRoot, projectRoot, ownSessionsDir, setOpenSessionFolder, builtInExtensions, currentFaux, dock, extensionsDir, loadedExtensions, mergedConfig, mergedTempPaths, modelChoice, projectExtensions, configModels, configuredWindow, agentBaseUrl, currentModelName, currentAgentExtensions, sessionStoreRef, sessionsDir, setAgentModel, setBody, setConfigModels, setConfiguredWindow, setCurrentAgentExtensions, setCurrentFaux, setCurrentModelName, setExtensionLists, setMergedConfig, setModelChoice, setSessionStore, setRetryShown, setNeverInherited, secretEnvNamesOf, userExtensions, VERSION, type LineInput, lastBinding, acceptDrift, setAcceptDrift, setFloorOn, floorOn, loadedSkillsCatalog } from "./state.js";
 import { maxRetriesFromEnv } from "./retries.js";
 import { askUi, resolveProjectTrust } from "./trust-ui.js";
 import { isFirstRun, scaffoldFirstRun } from "./first-run.js";
@@ -735,7 +737,12 @@ async function makeAgent(sessionId: string | undefined, input?: LineInput, model
 	// dir (SessionStore's constructor mkdirs) moved behind the gate too:
 	// the trust record is the first home write, the scaffold the second.
 	if (isFirstRun()) scaffoldFirstRun();
-	const store = new SessionStore(sessionsDir());
+	// 0.40.0 — one folder per project: the one-time move of the legacy
+	// folder, then this project's folder claimed (made, its workspace
+	// recorded). Both write, so both sit behind the verdict, with the store.
+	prepareSessionFolders();
+	activeStoreDir = sessionsDir();
+	const store = new SessionStore(activeStoreDir);
 	// TUI2-R2 ②/③: the navigation surfaces read through THIS store — one
 	// store per process, and the picker/listing never write through it.
 	setSessionStore(store);
@@ -772,7 +779,12 @@ async function makeAgent(sessionId: string | undefined, input?: LineInput, model
 	// DT-1a: what a delegated task may NAME — the configured checks and the
 	// model profiles — handed to the (in-process) subagent extension through
 	// the environment. A model never supplies a command; it names a check.
-	process.env.KISO_DELEGATION_CONFIG_JSON = JSON.stringify({ checks: merged.checks ?? {}, profiles: Object.keys(merged.models ?? {}) });
+	// 0.40.0: and the folder this process keeps its sessions in — a child
+	// writes beside its parent, whatever directory it runs in. Through this
+	// channel and not an exported KISO_SESSIONS_DIR: a variable in
+	// process.env would reach every shell child, and a kiso started from a
+	// shell tool would then write into this project's folder.
+	process.env.KISO_DELEGATION_CONFIG_JSON = JSON.stringify({ checks: merged.checks ?? {}, profiles: Object.keys(merged.models ?? {}), sessionsDir: sessionsDir() });
 	setConfigModels(merged.models ?? {});
 
 	const resolved = resolveModel(modelFlag, merged);
@@ -903,15 +915,7 @@ async function makeAgent(sessionId: string | undefined, input?: LineInput, model
 	return createAgent(definition);
 }
 
-/** 0.40.0 — the workspace a session records: the realpath of where kiso
- *  runs, so `/a/link` and `/a/target` are one workspace in the picker. */
-export function workspaceRoot(): string {
-	try {
-		return realpathSync(process.cwd());
-	} catch {
-		return process.cwd();
-	}
-}
+export { workspaceRoot } from "./state.js";
 
 /** TUI2-R2 ② — the picker's affordance row: the keys, said where the
  *  keys are useful. */
@@ -925,17 +929,135 @@ const PICKER_HINT = "↑↓ pick · ⏎ resumes · type filters · esc";
 async function sessionCards(_agent: Awaited<ReturnType<typeof makeAgent>>, announce: (line: string) => void = (l) => bodyLog(l)): Promise<SessionCardView[]> {
 	const store = sessionStoreRef;
 	if (store === null) return []; // unreachable: makeAgent builds the store first
-	const root = sessionsDir();
+	const folders = listingFolders();
 	// 0.40.0 dogfood (item 2, lead's ruling A): the ONE-TIME migration — the
 	// first list after the upgrade reads each legacy log exactly once and
-	// writes its summary into the sidecar; announced with its count
-	if (summaryMigrationPending(root)) {
-		const pending = listSessionSidecars(root).filter((l) => l.summary === null).length;
-		if (pending > 0) announce(`recording summaries for ${pending} older session${pending === 1 ? "" : "s"} — once`);
-		migrateSummaries(root, (id) => store.load(id));
+	// writes its summary into the sidecar; announced with its count. Per
+	// folder: each carries its own marker.
+	const pending = folders.filter((f) => summaryMigrationPending(f.dir));
+	const count = pending.reduce((n, f) => n + listSessionSidecars(f.dir).filter((l) => l.summary === null).length, 0);
+	if (count > 0) announce(`recording summaries for ${count} older session${count === 1 ? "" : "s"} — once`);
+	for (const f of pending) {
+		const reader = f.dir === activeStoreDir ? store : new SessionStore(f.dir);
+		migrateSummaries(f.dir, (id) => reader.load(id));
 	}
-	// …and from then on, the SIDECARS only: no log is opened to draw a row
-	return cardsFromListings(listSessionSidecars(root));
+	// …and from then on, the SIDECARS only: no log is opened to draw a row.
+	// A project folder's sessions are that project's; one without a recorded
+	// workspace was placed by inference and says so.
+	return cardsFromListings(
+		folders.flatMap((f) =>
+			listSessionSidecars(f.dir).map((l) =>
+				f.kind === "project" ? { ...l, workspace: f.workspace ?? l.workspace, inferred: l.workspace === null } : f.kind === "unknown" ? { ...l, workspace: null } : l,
+			),
+		),
+	);
+}
+
+/**
+ * 0.40.0 — the folders a listing reads: every project's under the
+ * per-project layout (the picker opens on this one, `tab` shows all), and
+ * the one folder otherwise. This process's folder is always first, even
+ * before its first session exists.
+ */
+function listingFolders(): SessionFolder[] {
+	const here = ownSessionsDir();
+	const home = kisoHome();
+	if (!projectLayoutActive(home)) return [{ dir: here, workspace: null, kind: "legacy" }];
+	const all = sessionFolders(home);
+	const mine = all.find((f) => f.dir === here) ?? { dir: here, workspace: projectRoot(), kind: "project" as const };
+	return [mine, ...all.filter((f) => f.dir !== here)];
+}
+
+/**
+ * 0.40.0 — before any session opens: the one-time move of the legacy
+ * folder into project folders (announced once, with the undo), then this
+ * project's folder claimed. Nothing happens under a pinned folder or after
+ * a reversed migration.
+ */
+function prepareSessionFolders(): void {
+	const home = kisoHome();
+	if (!projectLayoutActive(home)) return;
+	if (pendingLegacyIds(home).length > 0) {
+		const result = runMigration(home, planMigration(home));
+		if (result !== null && result.moved > 0) {
+			const line = migrationNotice(result);
+			if (process.stdout.isTTY) bodyLog(line);
+			else process.stderr.write(`${line}\n`);
+		}
+	}
+	claimProjectDir(ownSessionsDir(), projectRoot());
+}
+
+/**
+ * 0.40.0 (the owner's dogfood: a uooki session resumed from flowpix2) —
+ * whether a session id may open in this project. Its own folder: yes. A
+ * session another project RECORDED: refused, with where to go. One whose
+ * project is unknown, or was only inferred, is never refused and never
+ * moved (the lead's ruling: a resume changes no placement) — it opens where
+ * it is, and the line says the tools work here. A pure read. `null` = not
+ * found anywhere (the caller's own rule applies: a new session, or "no
+ * such session").
+ */
+export function routeSession(id: string): SessionRoute | null {
+	const own = ownSessionsDir();
+	if (hasSession(own, id)) return { kind: "here" };
+	const home = kisoHome();
+	if (!projectLayoutActive(home)) return null;
+	const found = locateSession(home, id, own);
+	if (found === null) return null;
+	const profile = readProfile(found.dir, id);
+	const recorded = profile.kind === "ok" && profile.profile.workspace !== null ? canonicalPath(profile.profile.workspace) : null;
+	const cwd = projectRoot();
+	const owner = found.kind === "project" ? (found.workspace ?? recorded) : recorded;
+	if (recorded !== null && owner !== null && owner !== cwd) {
+		return { kind: "refused", line: `this session belongs to ${tildeOf(owner)} — cd there to resume it` };
+	}
+	// recorded here, and still in the legacy folder (open elsewhere when the
+	// move ran): nothing to warn about
+	if (recorded !== null) return { kind: "elsewhere", dir: found.dir, line: null };
+	const inferred = found.kind === "project" && owner !== null ? `workspace inferred as ${tildeOf(owner)}, never recorded` : "workspace unknown";
+	return { kind: "elsewhere", dir: found.dir, line: `${inferred} — tools work in ${tildeOf(workspaceRoot())}` };
+}
+
+/** The folder a session opens in: the one the store is on when it holds
+ *  it, else this project's, else where the route found it. A new id opens
+ *  in this project's folder. */
+function sessionFolderOf(id: string): string {
+	if (hasSession(activeStoreDir, id)) return activeStoreDir;
+	const route = routeSession(id);
+	return route?.kind === "elsewhere" ? route.dir : ownSessionsDir();
+}
+
+/** The folder makeAgent built the store on. */
+let activeStoreDir = "";
+
+/** The workspace a listing is scoped to: a project folder's identity under
+ *  the per-project layout, the recorded realpath in one pinned folder. */
+function scopeRoot(): string {
+	return projectLayoutActive(kisoHome()) ? projectRoot() : workspaceRoot();
+}
+
+function tildeOf(path: string): string {
+	const home = homedir();
+	return path === home || path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path;
+}
+
+/** The explicit-id doors (`chat <id>`, `resume <id>`, `-p … <id>`), BEFORE
+ *  makeAgent builds the store: a refusal is the entry's error (the line on
+ *  stderr, exit 2); a session in another folder opens there. Returns the
+ *  line to say once the session is up. */
+function enterRouted(id: string): string | null {
+	const route = routeSession(id);
+	if (route === null || route.kind === "here") return null;
+	if (route.kind === "refused") throw new CliUsageError(route.line);
+	setOpenSessionFolder(route.dir);
+	return route.line;
+}
+
+function sayRouteLine(line: string | null): void {
+	if (line === null) return;
+	if (process.stdout.isTTY) bodyLog(line);
+	else process.stderr.write(`${line}\n`);
 }
 
 /**
@@ -965,7 +1087,7 @@ async function pickSession(agent: Awaited<ReturnType<typeof makeAgent>>, input: 
 	dock.setStatus("", PICKER_HINT);
 	const picked = await new Promise<string | null>((resolve) => {
 		// 0.40.0: scoped to the running workspace; tab flips to all
-		input.pick!(() => cards, resolve, workspaceRoot());
+		input.pick!(() => cards, resolve, scopeRoot());
 	});
 	dock.setStatus("", null);
 	return picked;
@@ -1119,6 +1241,7 @@ async function reloadAgent(
 	old: Awaited<ReturnType<typeof makeAgent>>,
 	id: string,
 	input: LineInput,
+	announce = true,
 ): Promise<Awaited<ReturnType<typeof makeAgent>>> {
 	// Snapshot BEFORE makeAgent: it overwrites every one of these, so the
 	// old set would be unreachable by the time we needed to dispose it.
@@ -1194,7 +1317,7 @@ async function reloadAgent(
 			// best-effort — the temp dir would be reaped by the OS
 		}
 	}
-	bodyLog(`[reload] ${loadedExtensions.length} extensions, ${skillCount()} skills — the conversation is unchanged`);
+	if (announce) bodyLog(`[reload] ${loadedExtensions.length} extensions, ${skillCount()} skills — the conversation is unchanged`);
 	return next;
 }
 
@@ -1213,6 +1336,27 @@ async function chatLoop(
 	// as a new session, which is the one thing it is not.
 	let rebuilt = false;
 	for (;;) {
+		// 0.40.0 (the lead's ruling): a session opens in the folder that holds
+		// it, never moved — a switch that crosses folders rebuilds the agent
+		// on the other folder's store, and one back rebuilds it on this
+		// project's. A failed rebuild switches nothing.
+		const folder = sessionFolderOf(id);
+		if (folder !== activeStoreDir) {
+			const was = { dir: activeStoreDir, store: sessionStoreRef };
+			setOpenSessionFolder(folder === ownSessionsDir() ? null : folder);
+			const next = await reloadAgent(agent, id, input, false);
+			if (next === agent) {
+				// makeAgent may have built the new store before it failed
+				activeStoreDir = was.dir;
+				if (was.store !== null) setSessionStore(was.store);
+				setOpenSessionFolder(was.dir === ownSessionsDir() ? null : was.dir);
+				if (prev === null) return;
+				id = prev;
+				rebuilt = true;
+				continue;
+			}
+			agent = next;
+		}
 		const session = await agent.session({ id, ...(acceptDrift() ? { acceptDrift: true } : {}) });
 		if (rebuilt) {
 			rebuilt = false;
@@ -1279,6 +1423,7 @@ async function chatLoop(
 			// 0.40.0 dogfood: the ids only — agent.sessions() read every log whole
 			// (seconds on the owner's 118 sessions) before /resume could open
 			sessions: () => agent.sessionIds(),
+			route: (sessionId: string) => routeSession(sessionId),
 			...(process.stdin.isTTY ? { pick: () => pickSession(agent, input) } : {}),
 		};
 		const end = await chat(session, currentFaux, input, autoCompact, nav);
@@ -1459,7 +1604,15 @@ async function main(): Promise<void> {
 	// them. Parsed only there, so neither ever becomes a session id. Absent
 	// = each form's default (TTY: current; pipe: all, today's bytes).
 	let listScope: "all" | "current" | undefined;
+	let reverseManifest: string | undefined;
 	if (args[0] === "sessions") {
+		// 0.40.0: the undo of the per-project move, named by its manifest
+		const r = args.indexOf("--reverse-migration");
+		if (r !== -1) {
+			reverseManifest = args[r + 1];
+			if (reverseManifest === undefined || reverseManifest.startsWith("--")) throw new CliUsageError("kiso sessions --reverse-migration <manifest> — the path the move announced");
+			args.splice(r, 2);
+		}
 		for (const flag of ["--all", "--current"] as const) {
 			const i = args.indexOf(flag);
 			if (i === -1) continue;
@@ -1583,8 +1736,10 @@ async function main(): Promise<void> {
 			// the -p flow: recovery-first one-shot, the resume() machinery
 			// verbatim (a fresh id makes the recovery a no-op)
 			const id = command ?? newSessionId(sessionsDir());
+			const routeLine = command !== undefined ? enterRouted(id) : null;
 			agent = await makeAgent(id, input, modelFlag);
 			applyConfigMode();
+			sayRouteLine(routeLine);
 			const session = await agent.session({ id, ...(acceptDrift() ? { acceptDrift: true } : {}) });
 			bindRestoredSession(session); // CTX-1 (F34-1): the -p door, too
 			faux = currentFaux;
@@ -1601,8 +1756,10 @@ async function main(): Promise<void> {
 				dock.enter();
 				// E area: a resumed session continues the script at its durable
 				// position — never restarts it (fauxSkip).
+				const routeLine = arg !== undefined ? enterRouted(id) : null;
 				agent = await makeAgent(id, input, modelFlag);
 				applyConfigMode();
+				sayRouteLine(routeLine);
 				faux = currentFaux;
 				await chatLoop(agent, id, input, retiredAutoCompact(mergedConfig));
 				break;
@@ -1621,6 +1778,7 @@ async function main(): Promise<void> {
 				// (argv = [node, script, resume, id, prompt?]).
 				const prompt = process.argv[4];
 				dock.enter();
+				const routeLine = arg !== undefined ? enterRouted(arg) : null;
 				agent = await makeAgent(arg, input, modelFlag);
 				applyConfigMode();
 				let id = arg;
@@ -1630,6 +1788,14 @@ async function main(): Promise<void> {
 					// normal outcome, so it exits 0 with nothing said — never
 					// an error, never a session started behind their back.
 					if (picked === null) break;
+					// 0.40.0: `tab` lists every project, and another project's
+					// recorded session is refused here, with where to go
+					const route = routeSession(picked);
+					if (route?.kind === "refused") {
+						bodyLog(route.line);
+						break;
+					}
+					if (route?.kind === "elsewhere" && route.line !== null) bodyLog(route.line);
 					// the mini-spec (a DECLARED SUPERSESSION of the one-shot
 					// picker flow): a PICKED session enters the full REPL —
 					// "resume and keep working" no longer requires knowing to
@@ -1639,6 +1805,7 @@ async function main(): Promise<void> {
 					await chatLoop(agent, picked, input, retiredAutoCompact(mergedConfig));
 					break;
 				}
+				sayRouteLine(routeLine);
 				const session = await agent.session({ id, ...(acceptDrift() ? { acceptDrift: true } : {}) });
 				bindRestoredSession(session); // CTX-1 (F34-1): the explicit-id door
 				faux = currentFaux;
@@ -1663,6 +1830,13 @@ async function main(): Promise<void> {
 				// "reading 'question'" on the dock-less branch). The input
 				// exists so the gate's ask can be answered; the listing
 				// itself never touches it.
+				if (reverseManifest !== undefined) {
+					// before makeAgent: its folder preparation would otherwise run
+					// the very move this undoes
+					const { restored, left } = reverseMigration(kisoHome(), reverseManifest);
+					console.log(`moved ${restored} session${restored === 1 ? "" : "s"} back to ${join(kisoHome(), "sessions")}; one folder per project is off until ${join(kisoHome(), "projects", ".migration-reversed")} is removed${left > 0 ? ` — ${left} created since the move stay in their project folders` : ""}`);
+					break;
+				}
 				agent = await makeAgent(undefined, input, modelFlag);
 				// TUI2-R2 ③ — the same projection the picker renders, printed.
 				// The PIPE keeps today's bytes exactly: `kiso sessions` is
@@ -1672,7 +1846,7 @@ async function main(): Promise<void> {
 				// says so in a header line with both counts; the PIPE defaults to
 				// every session with today's bytes — scripts must not change
 				// under them. An explicit --all or --current applies to both.
-				const here = workspaceRoot();
+				const here = scopeRoot();
 				if (process.stdout.isTTY) {
 					const every = await sessionCards(agent, (l) => console.log(l));
 					const all = (listScope ?? "current") === "all";
@@ -1691,12 +1865,21 @@ async function main(): Promise<void> {
 					for (const card of cards) console.log(sessionListRow(card, W, now, col, all ? here : null));
 					console.log(sessionListFooter(cards.length, W));
 				} else {
+					// 0.40.0: every folder's sessions, merged in id order — today's
+					// bytes; --current is this project's folder (in a single pinned
+					// folder, the sessions that recorded this workspace)
+					const folders = listingFolders();
+					const single = folders.length === 1 && folders[0]!.kind === "legacy";
 					const workspaceOf = (id: string): string | null => {
 						const r = readProfile(sessionsDir(), id);
 						return r.kind === "ok" ? r.profile.workspace : null;
 					};
-					for (const meta of agent.sessions()) {
-						if (listScope === "current" && workspaceOf(meta.id) !== here) continue;
+					const metas = folders
+						.filter((f) => listScope !== "current" || single || f.dir === sessionsDir())
+						.flatMap((f) => (f.dir === sessionsDir() ? agent!.sessions() : new SessionStore(f.dir).list()))
+						.sort((a, b) => a.id.localeCompare(b.id));
+					for (const meta of metas) {
+						if (listScope === "current" && single && workspaceOf(meta.id) !== here) continue;
 						console.log(renderSessionLine(meta));
 					}
 				}

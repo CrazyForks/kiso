@@ -76,6 +76,7 @@ def driver(cli, home, script_path, workdir, args, sessions_mode):
     pid, fd = pty.fork()
     if pid == 0:
         os.environ["KISO_HOME"] = home
+        os.environ["KISO_SESSIONS_DIR"] = os.path.join(home, "sessions")  # 0.40.0: the pin follows the home
         os.environ["KISO_FAUX_SCRIPT"] = script_path
         ext_dir = os.path.join(home, "ext")
         os.makedirs(ext_dir, exist_ok=True)

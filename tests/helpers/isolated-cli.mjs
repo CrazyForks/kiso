@@ -36,6 +36,9 @@ export function isolatedEnv(extra = {}) {
 		env: {
 			...process.env,
 			KISO_HOME: dirs.home,
+			// 0.40.0: the sessions stay in the one folder every test names
+			// (`<home>/sessions`); the per-project layout's own tests delete it
+			KISO_SESSIONS_DIR: join(dirs.home, "sessions"),
 			KISO_EXTENSIONS_DIR: dirs.extensions,
 			KISO_MCP_CONFIG: dirs.mcpConfig,
 			KISO_SKILLS_DIR: dirs.skills,

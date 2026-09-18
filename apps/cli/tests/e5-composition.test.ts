@@ -186,6 +186,7 @@ describe("E5 composition — a plan-carrying session resumes under the new defau
 		const env2 = {
 			...process.env,
 			KISO_HOME: home,
+			KISO_SESSIONS_DIR: join(home, "sessions"), // 0.40.0: the one folder this test reads
 			KISO_EXTENSIONS_DIR: emptyExt,
 			KISO_MCP_CONFIG: env.KISO_MCP_CONFIG as string,
 			KISO_SKILLS_DIR: env.KISO_SKILLS_DIR as string,

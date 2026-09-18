@@ -4,6 +4,7 @@
  * the context (the chain, the run state, the prompt arming).
  */
 
+import type { SessionRoute } from "./projects.js";
 import { contextRows, contextUnavailableRows, displayVerb, escapeTerminal, helpRows, kUnit, modePickView, modelPickView, compactingStatus, type CompactingProgress, palette, renderEvent, settledLabel, slashCommandNames, type PickOption, type PickResult } from "@vincemakes/kiso-tui";
 import { newSessionId } from "./session-id.js";
 import { buildAdapter, lookupModelMetadata, resolveContinuationScope, resolveReasoning } from "@vincemakes/kiso-runtime/internal";
@@ -143,6 +144,10 @@ export interface DispatchCtx {
 	readonly requestReload: () => void;
 	/** every durable session id (the /resume validation + listing). */
 	readonly sessions: () => readonly string[];
+	/** 0.40.0: an id outside this project's folder — refused with where to
+	 *  go, or opened where it is with a line (absent: every such id is "no
+	 *  such"). */
+	readonly route?: (id: string) => SessionRoute | null;
 	/** the dock's session picker, when one exists (bare /resume). */
 	readonly pickSession?: () => Promise<string | null>;
 }
@@ -983,8 +988,14 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 			// would; the validation is the difference
 			if (!ctx.sessions().includes(arg)) {
 				ctx.chainRef.current = ctx.chainRef.current.then(async () => {
-					bodyLog(`no such session: ${escapeTerminal(arg)} — /resume lists them`);
-					ctx.input.prompt();
+					const route = ctx.route?.(arg) ?? null;
+					if (route === null || route.kind === "refused") {
+						bodyLog(route?.line ?? `no such session: ${escapeTerminal(arg)} — /resume lists them`);
+						ctx.input.prompt();
+						return;
+					}
+					if (route.kind === "elsewhere" && route.line !== null) bodyLog(route.line);
+					ctx.requestSwitch(arg);
 				});
 				return;
 			}
@@ -1006,6 +1017,15 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 					ctx.input.prompt(); // esc — nothing switched, nothing said
 					return;
 				}
+				// 0.40.0: `tab` lists every project; another project's recorded
+				// session is refused with where to go
+				const route = ctx.sessions().includes(picked) ? null : (ctx.route?.(picked) ?? null);
+				if (route?.kind === "refused") {
+					bodyLog(route.line);
+					ctx.input.prompt();
+					return;
+				}
+				if (route?.kind === "elsewhere" && route.line !== null) bodyLog(route.line);
 				ctx.requestSwitch(picked);
 			});
 			return;

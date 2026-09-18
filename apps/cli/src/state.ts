@@ -13,6 +13,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AT_CAP, AT_SKIP, Dock, type AtItem, type Body, type PanelVerdict, type PanelView, type SaferAnswer, type SessionCardView } from "@vincemakes/kiso-tui";
 import type { KisoExtension, StoreRecord } from "@vincemakes/kiso-runtime";
+import { canonicalPath, LEGACY_SESSIONS_DIR, projectDirFor, projectLayoutActive } from "./projects.js";
 
 /** finding #11: KISO_HOME is the ONE root — every default path derives from
  *  it (sessions, trust, extensions, mcp config, skills). The dedicated
@@ -52,8 +53,59 @@ export function codingToolOptions(): {
 	return { workspaceRoot: process.cwd(), excludeRoots: [kisoHome()], secretEnvNames: secretEnvNamesOf(configModels) };
 }
 
+/** 0.40.0 — the workspace a session records: the realpath of where kiso
+ *  runs, so `/a/link` and `/a/target` are one workspace (and one folder). */
+export function workspaceRoot(): string {
+	try {
+		return realpathSync(process.cwd());
+	} catch {
+		return process.cwd();
+	}
+}
+
+/** 0.40.0 — the project a session folder belongs to: the cwd as the disk
+ *  spells it (projects.ts canonicalPath). Only the folder's identity uses
+ *  it; the tools keep workspaceRoot(). */
+export function projectRoot(): string {
+	return canonicalPath(process.cwd());
+}
+
+let projectSessions: { readonly key: string; readonly dir: string } | null = null;
+
+/**
+ * 0.40.0 (the owner's dogfood) — this project's session folder
+ * (projects.ts). `KISO_SESSIONS_DIR` pins it (tests, bench runners, a
+ * delegated child beside its parent), and a reversed migration restores
+ * the single legacy folder.
+ *
+ * A pure read — the folder is claimed (made, and its workspace recorded)
+ * only after the trust gate, where the store is built.
+ */
+export function ownSessionsDir(): string {
+	const pinned = process.env.KISO_SESSIONS_DIR;
+	if (pinned !== undefined && pinned !== "") return pinned;
+	const home = kisoHome();
+	if (!projectLayoutActive(home)) return join(home, LEGACY_SESSIONS_DIR);
+	const workspace = projectRoot();
+	const key = `${home}\0${workspace}`;
+	if (projectSessions?.key !== key) projectSessions = { key, dir: projectDirFor(home, workspace) };
+	return projectSessions.dir;
+}
+
+let openFolder: string | null = null;
+
+/** 0.40.0 (the lead's ruling) — a session from `_unknown`, or placed in
+ *  another project's folder only by inference, resumes WHERE IT IS: a
+ *  resume never moves a session. The store is then built on that folder,
+ *  and null returns this process to its own. */
+export function setOpenSessionFolder(dir: string | null): void {
+	openFolder = dir;
+}
+
+/** The folder of the session this process has open: its own project's,
+ *  or the one an unknown or inferred session was resumed in. */
 export function sessionsDir(): string {
-	return join(kisoHome(), "sessions");
+	return openFolder ?? ownSessionsDir();
 }
 
 /** E1: the extension scan directory — KISO_EXTENSIONS_DIR overrides. */
