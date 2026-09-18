@@ -125,4 +125,3 @@ describe("0.40.1 — the skills the / menu offers", () => {
 		expect(skillMenuItems(null, builtins)).toEqual([]);
 	});
 });
-

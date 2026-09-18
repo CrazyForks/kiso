@@ -203,4 +203,3 @@ export function cardFromListing(l: SessionListing): SessionCard {
 export function cardsFromListings(listings: readonly SessionListing[]): SessionCard[] {
 	return listings.map(cardFromListing).sort((a, b) => b.updatedAt - a.updatedAt);
 }
-

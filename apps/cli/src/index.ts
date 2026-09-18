@@ -394,7 +394,7 @@ function userThemeSetting(): string | undefined {
 function makeLineInput(): LineInput {
 	const userTheme = userThemeSetting();
 	if (process.stdin.isTTY) {
-		const editor = new Editor(() => (dock.active ? dock.redraw() : editor.selfRender()));
+		const editor = new Editor((fromKey) => (dock.active ? dock.redraw(fromKey) : editor.selfRender()));
 		// 0.40.1: the installed skills join the `/` menu — read live, so a
 		// skill /reload adds is offered on the next keystroke
 		editor.bindMenuExtras(() => skillMenuItems(loadedSkillsCatalog(), slashCommandNames()));
