@@ -32,20 +32,41 @@ def driver(cli, argv, env, feeds, workdir, timeout):
     full = b""
     fed = set()
     end = time.time() + timeout
+    # The paste is delivered in CHUNKS, interleaved with reads. It used to
+    # be one blocking os.write of the whole ~40 KB, which cannot finish
+    # while the CLI's own output is not being read: the CLI echoes as it
+    # consumes, its output buffer fills, it blocks writing, it stops
+    # reading, and both ends wait on each other until the outer 110 s
+    # timeout — an intermittent deadlock whose odds depend on who is a
+    # little faster, which is why this gate passed five times and failed
+    # twice. A real terminal also delivers a large paste in pieces, so
+    # chunking makes the gate more like the world, not less.
+    fl = fcntl.fcntl(fd, fcntl.F_GETFL)
+    fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+    pending = b""
     while time.time() < end:
-        r, _, _ = select.select([fd], [], [], 0.1)
+        r, w, _ = select.select([fd], [fd] if pending else [], [], 0.1)
         if r:
             try:
-                data = os.read(fd, 4096)
+                data = os.read(fd, 65536)
+            except BlockingIOError:
+                data = None
             except OSError:
                 break
-            if not data:
-                break
-            full += data
-            for i, (needle, text) in enumerate(feeds):
-                if i not in fed and needle.encode() in full:
-                    os.write(fd, text.encode())
-                    fed.add(i)
+            if data is not None:
+                if not data:
+                    break
+                full += data
+                for i, (needle, text) in enumerate(feeds):
+                    if i not in fed and needle.encode() in full:
+                        pending += text.encode()
+                        fed.add(i)
+        if w and pending:
+            try:
+                n = os.write(fd, pending[:4096])
+                pending = pending[n:]
+            except BlockingIOError:
+                pass
     try:
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:

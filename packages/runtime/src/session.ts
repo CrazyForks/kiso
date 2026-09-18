@@ -48,7 +48,7 @@ import { assessTasks, type TaskAssessment } from "./task-assessment.js";
 const DEFAULT_EVIDENCE_TOOLS: ReadonlySet<string> = new Set(["shell"]);
 import { denialResult, type ContinuationScope } from "@vincemakes/kiso-core";
 import { buildProfile, readProfile, writeProfile } from "./profile.js";
-import type { ReasoningSetting } from "./provider/metadata.js";
+import { resolveReasoning, type ReasoningSetting } from "./provider/metadata.js";
 import {
 	DROP_PLACEHOLDER,
 	estimateSummarySavings,
@@ -58,6 +58,7 @@ import {
 	MAX_SUMMARY_FAILURES,
 	policyTriggerFromWindow,
 	serializeCovered,
+	MANUAL_SUMMARY_BUDGET,
 	SUMMARY_MAX_OUTPUT,
 	summarizeConversation,
 	summaryBoundarySeq,
@@ -141,6 +142,25 @@ export interface CompactInfo {
 }
 
 /** @deprecated the canonical name is `Session` (root export, 1.1.0); this alias is removed in the next major. */
+/**
+ * 0.39.2 — thinking OFF for a manual summary, where it can be turned off.
+ *
+ * The summary call sent no reasoning at all, so it ran at the provider's
+ * default, and for a model whose thinking defaults ON the reasoning tokens
+ * came out of the same output budget as the checkpoint. Resolved through
+ * `resolveReasoning` — the one authority the `/model` path uses — so it
+ * only ever sends a NATIVE value for a model the registry knows. For a
+ * model it does not know (66 of the 73 profiles on the machine this was
+ * found on, the failing one among them) it sends nothing, exactly as
+ * before: a raw field to an unknown model can be a 400. That is why this
+ * is an optimisation and the scaled budget is the fix — the budget
+ * reaches every model, this reaches the ones we can vouch for.
+ */
+function summaryReasoning(model: string, baseUrl: string | undefined): { reasoning?: { readonly thinking?: "adaptive" | "enabled" | "disabled"; readonly effort?: string } } {
+	const r = resolveReasoning(model, { thinking: "disabled", effort: "default" }, baseUrl);
+	return r.ok && r.wire.thinking !== undefined ? { reasoning: r.wire } : {};
+}
+
 export class AgentSession {
 	readonly id: string;
 	readonly log: EventLog;
@@ -537,7 +557,12 @@ export class AgentSession {
 		// R3a: `focus` — an optional steer for the summary call ("keep the
 		// auth details"). Rides the serialized input as ONE instruction
 		// line; absent = byte-identical to the pre-round call.
-		options: { keepRounds?: number; keepTokens?: number; signal?: AbortSignalLike; onStart?: (info: CompactInfo) => void; drop?: boolean; focus?: string } = {},
+		// 0.39.2: `manualBudget` — the MANUAL `/compact` gesture's summary
+		// call: the measured output budget, and thinking off where the
+		// registry says the model can turn it off. Absent — the auto
+		// policy — the call is byte-identical to before; see
+		// `MANUAL_SUMMARY_BUDGET` for the measurement and for why.
+		options: { keepRounds?: number; keepTokens?: number; signal?: AbortSignalLike; onStart?: (info: CompactInfo) => void; drop?: boolean; focus?: string; manualBudget?: boolean } = {},
 	): Promise<SummarizeResult | null> {
 		this.ensureHealthy();
 		const keepRounds = options.keepRounds ?? KEEP_RECENT_ROUNDS;
@@ -566,10 +591,11 @@ export class AgentSession {
 		// are knowable BEFORE the adapter call; the summary itself is ONE
 		// call with no fraction (kiso never invents a percentage here).
 		if (options.signal !== undefined && options.signal.aborted) throw cancelled();
+		const coveredTokens = estimateTokens(covered);
 		options.onStart?.({
 			coversToSeq: boundary,
 			rounds: events.filter((e) => e.type === "user_input" && e.seq > prevPoint && e.seq <= boundary).length,
-			tokens: estimateTokens(covered),
+			tokens: coveredTokens,
 		});
 		let summary: string;
 		let usage: import("./usage/canonical.js").RawUsage | null = null;
@@ -592,11 +618,13 @@ export class AgentSession {
 				// E6 (a): ONE serialized user message — the DSML bug's
 				// raw-message array is structurally dead on this path.
 				messages: [{ role: "user", content: serializedInput }],
-				// E6 (g): the summary call ALWAYS carries the explicit
-				// output budget — 4,000 adapter maxTokens (a wire-level
-				// truncation is caught by the (b) required-section
-				// validation, never silently passed).
-				maxOutputTokens: SUMMARY_MAX_OUTPUT,
+				// E6 (g): the summary call ALWAYS carries an explicit output
+				// budget (a wire-level truncation is caught by the (b)
+				// required-section validation, never silently passed).
+				// 0.39.2: measured for the manual gesture, fixed for the policy.
+				...(options.manualBudget === true
+					? { maxOutputTokens: MANUAL_SUMMARY_BUDGET, ...summaryReasoning(binding.model, binding.baseUrl) }
+					: { maxOutputTokens: SUMMARY_MAX_OUTPUT }),
 				...(options.signal !== undefined ? { signal: options.signal } : {}),
 			});
 			summary = call.text;

@@ -50,7 +50,63 @@ export const SUMMARY_RESULT_MAX_CHARS = 2000;
 export const SUMMARY_MAX_OUTPUT = 4000;
 export const KEEP_TOKENS_DEFAULT = 20000;
 export const IN_FLIGHT_HEADROOM = 8000;
+/** ONE NUMBER, TWO CONSUMERS. `SUMMARY_MAX_OUTPUT` is both the summary
+ *  call's output budget AND a term of this reserve — the reserve buys
+ *  back room for exactly that much summary. Change one and you have
+ *  changed the other; see `MANUAL_SUMMARY_BUDGET` for why the manual
+ *  gesture's larger budget does NOT reach the auto policy that reads this. */
 export const POLICY_RESERVE = SUMMARY_MAX_OUTPUT + KEEP_TOKENS_DEFAULT + IN_FLIGHT_HEADROOM;
+
+/**
+ * 0.39.2 — the output budget of a MANUAL `/compact`, and it is MEASURED.
+ *
+ * The fixed 4,000 failed live sessions: `the summary turn ended with
+ * max_tokens`. On the failing profile (an unregistered DeepSeek model
+ * behind a gateway), a covered range the size of the reported one —
+ * ~100k tokens of real source — was run three ways:
+ *
+ *   budget  4,000  → max_tokens   reasoning 3,093   checkpoint    828   3 of 7 sections
+ *   budget  8,391  → max_tokens   reasoning 1,613   checkpoint  6,544   4 of 7
+ *   budget 32,000  → end_turn     reasoning 3,557   checkpoint 15,261   7 of 7
+ *
+ * A complete checkpoint took 18,837 output tokens. At 4,000 the reasoning
+ * LOOKED like the cause (77% of the budget) only because the budget was
+ * too small for the checkpoint to get going; with room, reasoning is a
+ * fifth and the checkpoint itself is the size. A rule scaled from the
+ * covered estimate (a twelfth: 8,391, doubling to 16,782 on retry) was
+ * built first and failed BOTH attempts on this data — it was a guess, and
+ * the measurement is what falsified it.
+ *
+ * So the budget is not scaled; it is a generous flat CAP, because a cap
+ * is not a charge — the model is billed for what it writes, and a higher
+ * limit costs nothing unless the output would have run away anyway. The
+ * one thing a lower first budget buys is a failed call before the one
+ * that works. 32,000 holds the measured 18,837 with room, and bounds what
+ * a genuinely runaway summary can cost: a checkpoint larger than this has
+ * stopped being a summary.
+ *
+ * MANUAL ONLY, and that is the patch boundary. The auto policy's
+ * `POLICY_RESERVE` assumes `SUMMARY_MAX_OUTPUT`; giving the policy a larger
+ * budget without moving its reserve would let a fire leave less room than
+ * the reserve promised, and moving the reserve moves every session's
+ * compaction trigger — BM-1 §3's compaction tier, where the paired bench
+ * blocks. That belongs to A1b, and the measurement above is its input.
+ */
+export const MANUAL_SUMMARY_BUDGET = 32_000;
+
+/** Thrown by an attempt that stopped on `max_tokens`, and it NAMES the
+ *  budget: "not a complete turn" alone told the person nothing about what
+ *  ran out. Still an `Error`, and still carries the `max_tokens … not a
+ *  complete turn` wording the CX-1 F3 gate matches. */
+class SummaryBudgetExhausted extends Error {
+	constructor(readonly budget: number | undefined) {
+		super(
+			budget === undefined
+				? "the summary turn ended with max_tokens — not a complete turn"
+				: `the summary turn ended with max_tokens — it needed more than its ${budget}-token output budget, not a complete turn`,
+		);
+	}
+}
 
 /** The reference context-window scale (the flash-family window); the
  *  env overrides. The default arming point is 120,000 − 32,000 =
@@ -231,6 +287,10 @@ export interface SummarizeConversationOptions {
 	readonly signal?: AbortSignalLike;
 	/** E6 (g): the summary call's explicit output budget (adapter maxTokens). */
 	readonly maxOutputTokens?: number;
+	/** 0.39.2: the RESOLVED reasoning for the summary call — native wire
+	 *  values from `resolveReasoning`, never a raw field. Absent sends
+	 *  nothing, and the provider's default applies. */
+	readonly reasoning?: { readonly thinking?: "adaptive" | "enabled" | "disabled"; readonly effort?: string };
 }
 
 /** The summary call's result — the text PLUS the provider-reported usage
@@ -286,6 +346,11 @@ export async function summarizeConversation(options: SummarizeConversationOption
 	// the narrowing from the first read would otherwise be carried across
 	// the await — where the whole point is that it can have changed.
 	const aborted = (): boolean => options.signal?.aborted === true;
+	// A `max_tokens` stop is NOT retried here. A retry at the same budget
+	// buys the same truncation, and a retry at a larger one is only worth
+	// having if the first budget was chosen small — which is why the manual
+	// gesture now asks for the whole measured budget up front instead
+	// (see `MANUAL_SUMMARY_BUDGET`).
 	try {
 		return await summaryAttempt(options);
 	} catch (err) {
@@ -323,6 +388,7 @@ async function summaryAttempt(options: SummarizeConversationOptions): Promise<Su
 		systemPrompt: SUMMARY_PROMPT,
 		...(options.signal !== undefined ? { signal: options.signal } : {}),
 		...(options.maxOutputTokens !== undefined ? { maxTokens: options.maxOutputTokens } : {}),
+		...(options.reasoning !== undefined ? { reasoning: options.reasoning } : {}),
 	})) {
 		if (stops > 0 && ev.type !== "usage" && ev.type !== "stop" && afterStop === undefined) afterStop = ev.type;
 		if (ev.type === "text_delta") text += ev.text;
@@ -351,6 +417,8 @@ async function summaryAttempt(options: SummarizeConversationOptions): Promise<Su
 	if (stops === 0) throw new Error("the summary turn never stopped — not a complete turn");
 	if (stops > 1) throw new Error(`the summary turn stopped ${stops} times — not a complete turn`);
 	if (toolCalls > 0) throw new Error("the summary turn called a tool — a summary is text, never a tool call");
+	// The one stop a larger budget can cure, told apart from the rest.
+	if (stopReason === "max_tokens") throw new SummaryBudgetExhausted(options.maxOutputTokens);
 	if (stopReason !== "end_turn") throw new Error(`the summary turn ended with ${String(stopReason)} — not a complete turn`);
 	if (afterStop !== undefined) throw new Error(`the summary turn produced ${afterStop} after its stop — not a complete turn`);
 	const trimmed = text.trim();

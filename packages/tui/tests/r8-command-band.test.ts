@@ -81,8 +81,18 @@ describe("R8 — the band is a window", () => {
 	});
 
 	it("a list that FITS carries no counter — over rows you can all see, it says nothing", () => {
-		const rows = band("/re"); // resume, rewrap
-		expect(rows.length).toBe(3); // header + two
+		// DERIVED from the menu, not counted by hand: this was a literal 3
+		// ("resume, rewrap") and went red when 0.39.2 gave `/reload` its
+		// missing menu row, which also starts with `/re`. The claim here was
+		// never "exactly two commands start with /re"; it is that a list
+		// which fits the window draws no counter. So the count follows the
+		// menu, and the premise that makes the case meaningful — it fits —
+		// is asserted instead of assumed.
+		const matches = MENU_ITEMS.filter((m) => m.name.startsWith("/re")).length;
+		expect(matches, "the fixture's premise: the filtered list must fit the window").toBeLessThanOrEqual(5);
+		expect(matches, "the premise needs more than one row to be about a list").toBeGreaterThan(1);
+		const rows = band("/re");
+		expect(rows.length).toBe(1 + matches); // the header, then every match
 		expect(rows.join("\n")).not.toMatch(/\(\d+\/\d+\)/);
 	});
 
