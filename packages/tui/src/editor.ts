@@ -853,7 +853,15 @@ export class Editor {
 	}
 
 	#refreshMenu(): void {
-		if (this.#panelInput.up()) return; // W21: the menu never opens while the panel owns the keys
+		if (this.#panelInput.up()) {
+			// W21: the menu never opens while the panel owns the keys — but
+			// the key that got here still changed the line, and insert and
+			// delete render only through this method (item 6: returning
+			// before the render left a panel's typed text to ride the next
+			// spinner tick, 0–150 ms late, or no tick at all).
+			this.#onRender();
+			return;
+		}
 		const f = this.#menuFiltered();
 		this.#menuOpen = f.length > 0;
 		if (this.#menuSel >= f.length) this.#menuSel = 0;
