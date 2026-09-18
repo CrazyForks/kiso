@@ -38,6 +38,8 @@ import {
 	type Message,
 	type PermissionDecision,
 	type Tool,
+	type ToolSpec,
+	type EventInput,
 } from "@vincemakes/kiso-core";
 import { executionLedger } from "./ledger.js";
 import { assessTasks, type TaskAssessment } from "./task-assessment.js";
@@ -49,7 +51,7 @@ const DEFAULT_EVIDENCE_TOOLS: ReadonlySet<string> = new Set(["shell"]);
 import { denialResult, type ContinuationScope } from "@vincemakes/kiso-core";
 import { buildProfile, readProfile, writeProfile, writeSummary } from "./profile.js";
 import { summarizeEvents } from "./session-summary.js";
-import { resolveReasoning, type ReasoningSetting } from "./provider/metadata.js";
+import { lookupModelMetadata, resolveReasoning, type ReasoningSetting } from "./provider/metadata.js";
 import {
 	DROP_PLACEHOLDER,
 	estimateSummarySavings,
@@ -70,7 +72,9 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { estimateTokens } from "@vincemakes/kiso-core";
 import { StaleWriterError, type SessionStore } from "./store.js";
-import { composeHooks } from "./compose.js";
+import { composeHooks, microcompactFor } from "./compose.js";
+import { checkpointBoundarySeq } from "./checkpoint.js";
+import { breakEvenFactor, guardedPruneSeq, KEEP_COMPACTABLE_RESULTS, microcompactBoundarySeq, phaseEnd, runsACheck, tiersFor } from "./compaction-policy.js";
 import { Run } from "./run.js";
 // TUI2-R3v2 ③ — the side query rides the SAME tracer the runs ride; that
 // sameness is the whole point (one ledger, one shape, no second path).
@@ -223,6 +227,9 @@ export class AgentSession {
 	#summaryFailures = 0;
 	/** 0.40.0: usage at or before this seq was billed under another model — never an anchor. */
 	#anchorFloorSeq = -1;
+	/** A1b: the window the tiers are drawn from — the live binding's, once a
+	 *  switch states one (CTX-1: the threshold travels with the model). */
+	#tiersWindow: number | undefined;
 	#lastUsageAt: number | undefined;
 
 	/** 0.40.0: when the provider last billed this session (epoch ms) — the
@@ -348,6 +355,108 @@ export class AgentSession {
 	}
 
 	/**
+	 * ADR-0055 Amendment 1 (A1b) — the kernel's compaction point for ONE run,
+	 * or undefined when nothing in-run is armed (the kernel then never asks).
+	 *
+	 * With `contextPolicy.tiers`: the §1a figure against the tiers — soft
+	 * waits for a phase end (A3), hard and emergency fire now, an overflow
+	 * fires once. The summary is in-band (A2) with ONE fallback to the
+	 * serialised form; if both fail, an emergency or an overflow may prune
+	 * once (A4b), and otherwise nothing happens and the run goes on.
+	 *
+	 * Without tiers, an EXPLICITLY configured `microcompact` keeps its old
+	 * standing prune here, for SDK callers — the kernel no longer has one.
+	 */
+	compactionPoint(run: {
+		readonly systemPrompt?: string;
+		readonly tools: () => readonly ToolSpec[];
+		readonly reasoning?: { readonly thinking?: "adaptive" | "enabled" | "disabled"; readonly effort?: string };
+		readonly signal?: AbortSignalLike;
+		readonly maxRetries?: number;
+	}): ((events: readonly Event[], messages: readonly Message[], why: "request" | "overflow") => Promise<readonly EventInput[]>) | undefined {
+		const tiersPolicy = this.#config.contextPolicy?.tiers;
+		const legacy = tiersPolicy === undefined ? microcompactFor(this.#effectiveConfig(), this.log.all) : undefined;
+		if (tiersPolicy === undefined && legacy === undefined) return undefined;
+		return async (events, messages, why) => {
+			const used = this.contextAnchor(events) ?? estimateTokens(messages);
+			if (tiersPolicy === undefined) {
+				if (legacy === undefined || used <= legacy.thresholdTokens) return [];
+				const beforeSeq = microcompactBoundarySeq(events, legacy.keepResults ?? KEEP_COMPACTABLE_RESULTS);
+				return beforeSeq === undefined ? [] : [{ type: "microcompacted", beforeSeq }];
+			}
+			const window = this.#tiersWindow ?? tiersPolicy.windowTokens;
+			const maxOutput = this.#config.maxTokens ?? lookupModelMetadata(this.#model, this.#baseUrl)?.capabilities.maxOutputTokens ?? 0;
+			const t = tiersFor(window, Math.max(maxOutput, MANUAL_SUMMARY_BUDGET));
+			const isCheck = tiersPolicy.isCheck ?? ((command: string) => runsACheck(command));
+			const reason =
+				why === "overflow" ? "overflow" : used > t.emergency ? "emergency" : used > t.hard ? "hard" : used > t.soft ? phaseEnd(events, lastSummaryPoint(events), isCheck) : null;
+			if (reason === null) return [];
+			const urgent = reason === "overflow" || reason === "emergency";
+			if (!urgent && this.#summaryFailures >= (tiersPolicy.maxFailures ?? MAX_SUMMARY_FAILURES)) return [];
+			const summarized = await this.#summarizeInRun(events, messages, t.tail, reason, run);
+			if (summarized !== null) return [summarized];
+			if (!urgent) return [];
+			const pricing = lookupModelMetadata(this.#model, this.#baseUrl)?.pricing ?? null;
+			const beforeSeq = guardedPruneSeq(events, breakEvenFactor(pricing?.inputPerM, pricing?.cacheReadPerM));
+			return beforeSeq === undefined ? [] : [{ type: "microcompacted", beforeSeq }];
+		};
+	}
+
+	/** A2 — one in-run summary: in-band first, the serialised form once on
+	 *  a rejection; null when neither produced a valid checkpoint. The
+	 *  summary call's usage and path ride the trace ledger, as /compact's do. */
+	async #summarizeInRun(
+		events: readonly Event[],
+		messages: readonly Message[],
+		tail: number,
+		reason: string,
+		run: Parameters<AgentSession["compactionPoint"]>[0],
+	): Promise<EventInput | null> {
+		const boundary = checkpointBoundarySeq(events, { keepTokens: tail });
+		if (boundary === undefined) return null;
+		const common = {
+			adapter: this.#adapter,
+			model: this.#model,
+			maxOutputTokens: MANUAL_SUMMARY_BUDGET,
+			...(run.signal !== undefined ? { signal: run.signal } : {}),
+			...(run.maxRetries !== undefined ? { maxRetries: run.maxRetries } : {}),
+		};
+		let path = "in-band";
+		let result: Awaited<ReturnType<typeof summarizeConversation>>;
+		try {
+			result = await summarizeConversation({
+				...common,
+				messages,
+				inBand: { ...(run.systemPrompt !== undefined ? { systemPrompt: run.systemPrompt } : {}), tools: run.tools() },
+				...(run.reasoning !== undefined ? { reasoning: run.reasoning } : {}),
+			});
+		} catch {
+			if (run.signal?.aborted === true) return null;
+			path = "serialized";
+			try {
+				const serialized = serializeCovered({ events, prevPoint: lastSummaryPoint(events), boundary });
+				result = await summarizeConversation({ ...common, messages: [{ role: "user", content: serialized }], ...summaryReasoning(this.#model, this.#baseUrl) });
+			} catch {
+				this.#summaryFailures += 1;
+				return null;
+			}
+		}
+		this.#summaryFailures = 0;
+		// Every in-run fire is recorded — its reason and path are what the
+		// measurement counts — and its usage when the provider reported one.
+		{
+			try {
+				const canonical = result.usage === null ? null : canonicalizeUsageForModel(this.#model, this.#baseUrl, this.#provider ?? "adapter", result.usage);
+				mkdirSync(join(this.#store.root, "traces"), { recursive: true, mode: 0o700 });
+				appendFileSync(join(this.#store.root, "traces", `${this.id}.jsonl`), `${JSON.stringify({ kind: "summary", canonical, reason, path })}\n`, { mode: 0o600 });
+			} catch (err) {
+				console.error(`[kiso] summary usage ledger degraded (${err instanceof Error ? err.message : String(err)}); the summary call's cost is not recorded`);
+			}
+		}
+		return { type: "summarized", coversToSeq: boundary, summary: result.text };
+	}
+
+	/**
 	 * merge round B (/model): replace the adapter for SUBSEQUENT runs. The
 	 * kernel reads the adapter through the loop-config closure at each
 	 * turn, so the swap takes effect at the next turn — a run already in
@@ -390,6 +499,9 @@ export class AgentSession {
 		 *  Absent KEEPS the current one — a caller that does not know the new
 		 *  model's window must not silently reset the policy to nothing. */
 		readonly microcompact?: { readonly thresholdTokens: number };
+		/** A1b: the new model's window, for the in-run tiers. Absent keeps the
+		 *  current one, as `microcompact` does. */
+		readonly contextWindow?: number;
 	}): void {
 		// 0.40.0: another model counts tokens differently — the last bill
 		// stops describing the context until the new model sends one.
@@ -404,6 +516,7 @@ export class AgentSession {
 		this.#reasoning = binding.reasoning ?? { thinking: "default", effort: "default" };
 		this.#profileName = binding.profileName ?? null;
 		if (binding.microcompact !== undefined) this.#microcompact = binding.microcompact;
+		if (binding.contextWindow !== undefined) this.#tiersWindow = binding.contextWindow;
 		// XP-1: an explicit selection is DURABLE — the setting survives
 		// /resume because a revision records it now, not at some later flush.
 		this.#recordProfile();
@@ -427,6 +540,12 @@ export class AgentSession {
 	 */
 	setMicrocompactThreshold(thresholdTokens: number): void {
 		this.#microcompact = { thresholdTokens };
+	}
+
+	/** A1b: the window the in-run tiers are drawn from, for a restored or
+	 *  re-bound session (the CLI's one binding step calls both). */
+	setContextWindow(windowTokens: number): void {
+		this.#tiersWindow = windowTokens;
 	}
 
 	/** E2: the adapter identity (anthropic / openai-compat / openai-responses) — the route
@@ -771,6 +890,9 @@ export class AgentSession {
 	async maybeApplyContextPolicy(signal?: AbortSignalLike): Promise<void> {
 		const policy = this.#config.contextPolicy;
 		if (policy === undefined) return;
+		// A1b: with the in-run tiers armed, the kernel's compaction point
+		// decides before every request, the first one included.
+		if (policy.tiers !== undefined) return;
 		const mode = policy.drop ?? policy.summary;
 		if (mode === undefined) return;
 		// E6 (g): the trigger is exactly one of triggerTokens (absolute)
@@ -1116,6 +1238,15 @@ export interface ContextPolicy {
 	 * — a short task never pays a break it cannot amortize.
 	 */
 	readonly microcompact?: { readonly thresholdTokens: number; readonly keepResults?: number; readonly minTurns?: number };
+	/**
+	 * ADR-0055 Amendment 1 (A1b) — the IN-RUN tiers, drawn from the window:
+	 * soft `min(0.5·w, 400K)` waits for a phase end, hard `min(0.8·w, 700K)`
+	 * and emergency `w − reserve` fire at the next request, an overflow once.
+	 * Present, the kernel asks before every request; the run-start summary
+	 * and the standing microcompact above do not apply. `isCheck` is the
+	 * phase detector's rule 1 (default: the runner table).
+	 */
+	readonly tiers?: { readonly windowTokens: number; readonly isCheck?: (command: string) => boolean; readonly maxFailures?: number };
 }
 
 export interface SessionConfig {
