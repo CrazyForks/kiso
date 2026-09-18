@@ -275,6 +275,11 @@ export interface RecapStats {
 	 *  passed only when above the noise floor — the re-sent-uncached
 	 *  prefix. Absent → the recap bytes stay the historical form. */
 	readonly missed?: number;
+	/** 0.40.0 (the owner): the turn's first request came this many minutes
+	 *  after the session's last bill, and the prompt cache had gone cold —
+	 *  the recap says so instead of a bare `fresh 730k · cache 0%`, which
+	 *  is true and reads like a fault. Absent → the historical form. */
+	readonly coldAfterMinutes?: number;
 	readonly ctxLeftPct: number | null; // 0..100, null when unknowable
 	/** R3g — the terminal's width. The recap is the ONE row on the screen
 	 *  that was never measured: it is written raw, so a line longer than
@@ -335,7 +340,14 @@ export function renderRecap(s: RecapStats): string {
 				? [`${s.tools} tool${s.tools === 1 ? "" : "s"}${edits > 0 ? ` (${edits} edit${edits === 1 ? "" : "s"})` : ""}`]
 				: [];
 	const parts = [`took ${elapsedLabel(s.seconds)}`, ...work];
-	if (s.usage.known) {
+	// The cold turn: the gap and the re-read are the FACTS and come first,
+	// so a cut from the end never reaches them; "cache cold after" is the
+	// label, and it is the first thing shortened when the row is narrow.
+	const cold = s.coldAfterMinutes !== undefined && s.usage.known && s.usage.in !== null;
+	if (cold) {
+		parts.push(`cache cold after ${s.coldAfterMinutes} min`, `re-read ${kUnit(s.missed ?? s.usage.in ?? 0)}`);
+		if (s.usage.out !== null) parts.push(`out ${kUnit(s.usage.out)}`);
+	} else if (s.usage.known) {
 		const seg = `${s.usage.in !== null ? `fresh ${kUnit(s.usage.in)}` : ""}${s.usage.in !== null && s.usage.out !== null ? " " : ""}${s.usage.out !== null ? `out ${kUnit(s.usage.out)}` : ""}`;
 		if (seg !== "") parts.push(seg);
 		if (s.usage.cache !== null && s.usage.in !== null && (s.usage.in > 0 || s.usage.cache > 0)) {
@@ -352,7 +364,13 @@ export function renderRecap(s: RecapStats): string {
 	// R3g: ONE physical row, at any width — the same rule every other row
 	// in the product obeys. The cut is the honest "…": the recap said
 	// more than fits, and says so.
-	const line = parts.join(" · ");
+	let line = parts.join(" · ");
+	// A cold turn that does not fit sheds its LABEL first, then the cut
+	// below takes the tail — the gap and the re-read stand in front of it.
+	if (cold && s.width !== undefined && s.width >= 20 && visibleWidth(`✦ ${line}`) > s.width) {
+		parts[parts.indexOf(`cache cold after ${s.coldAfterMinutes} min`)] = `cold ${s.coldAfterMinutes} min`;
+		line = parts.join(" · ");
+	}
 	// R3g: the floor is the renderer's own guard against a caller that
 	// hands it a degenerate width (a PTY with no winsize reports 0). A
 	// recap cut to one character is worse than one that wraps.

@@ -207,6 +207,15 @@ export function displayCtxRatio(session: AgentSession): number {
  *  minutes); Anthropic's default is 5 minutes. */
 export const COLD_AFTER_MS = 5 * 60_000;
 
+/** 0.40.0 (the owner): the recap's cold-cache wording — only when the turn
+ *  began at least COLD_AFTER_MS after the last bill AND the cache really
+ *  missed (a surfaced miss, or under half the prompt from cache). */
+export function coldAfter(idleMs: number | undefined, missed: number | null, usage: RunUsage): { coldAfterMinutes?: number } {
+	if (idleMs === undefined || idleMs < COLD_AFTER_MS) return {};
+	const hit = cacheHitPct(usage);
+	return missed !== null || (hit !== null && hit < 50) ? { coldAfterMinutes: Math.round(idleMs / 60_000) } : {};
+}
+
 /**
  * 0.40.0 item 9 — the cold resume. When the last BILL put the context over
  * the microcompact threshold and that bill is older than COLD_AFTER_MS, the
@@ -843,6 +852,9 @@ export async function consumeRun(
 	// seconds, usage, ctx left. The turn's WORK is the fold line's, said
 	// once, where the work happened.
 	const turnStart = Date.now();
+	// 0.40.0 (the owner): how long the session had been idle when this turn
+	// began — the recap names a cold cache instead of a bare fresh figure.
+	const idleMs = session.lastUsageAt === undefined ? undefined : turnStart - session.lastUsageAt;
 	// W14: the thinking event carries NO timestamp — the CLI wall-clocks
 	// the thinking window: it opens at the first thinking event and closes
 	// at the first non-thinking event (the fold needs the seconds).
@@ -1167,6 +1179,10 @@ export async function consumeRun(
 						// R-C item 4: only an above-floor miss is surfaced —
 						// the recap gains "· miss N" on the cache segment.
 						...(missed !== null ? { missed } : {}),
+						// Cold: idle past the cache's assumed life (the #77
+						// constant, provisional) AND the turn did re-send a
+						// prefix uncached — the time alone is not evidence.
+						...(coldAfter(idleMs, missed, turnUsage() ?? UNKNOWN_USAGE)),
 						ctxLeftPct: Number.isFinite(ratio) ? (1 - ratio) * 100 : null,
 						// W19: under plan the recap becomes the way-forward row
 						// (the /mode hints are the mode's exits).
