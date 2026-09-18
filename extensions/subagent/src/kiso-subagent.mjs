@@ -149,14 +149,10 @@ export default async function createSubagentExtension() {
 					// Partial success is not overall failure — only ALL failed
 					// makes the whole result an error.
 					// W12: the blob opens with a machine-readable summary line —
-					// the ONE-LINE shape the TUI's settled row renders (└ N
-					// tool calls · R roles · F failed · /last for the report).
+					// the ONE-LINE shape the TUI's settled row renders verbatim.
 					// The per-section text below is unchanged — the model's
 					// view is preserved, the summary is additive.
-					const toolCalls = sections.reduce((n, s) => n + (s.toolCalls ?? 0), 0);
-					const roles = new Set(tasks.map((t) => t.role)).size;
-					const failed = sections.filter((s) => s.failed).length;
-					const summary = `summary: ${toolCalls} tool calls · ${roles} role${roles === 1 ? "" : "s"} · ${failed} failed`;
+					const summary = delegateSummary(sections, new Set(tasks.map((t) => t.role)).size);
 					return { content: `${summary}\n${sections.map((s) => s.text).join("\n")}`, isError: sections.every((s) => s.failed) };
 				},
 			},
@@ -347,11 +343,41 @@ async function runChild({ childId, role, task, scope, acceptance, model, after, 
 				text += `\n  FAILED: collecting the worktree's changes: ${collection.reason}${collection.partialPath !== undefined ? ` (partial patch at ${collection.partialPath})` : ""}\n  worktree kept at: ${worktree}`;
 			}
 		}
-		return { failed, text, toolCalls: extraction.toolCalls };
+		return { failed, ...(failed ? { failKind: failKindOf(status, verification) } : {}), text, toolCalls: extraction.toolCalls };
 	} finally {
 		rmSync(policyDir, { recursive: true, force: true });
 		if (worktree !== null && ownsWorktree && !keepWorktree) removeWorktree(parentCwd, worktree);
 	}
+}
+
+/** 0.40.0 — why a child failed, in the three words a person acts on: its
+ *  clock ran out (`timeout`: raise it, or split the task), the parent's
+ *  acceptance check RAN and failed (`acceptance`: the work is wrong), or
+ *  anything else (`error`: a crash, an abort, a missing or ambiguous
+ *  result, a spawn or collection failure — read the report). */
+export function failKindOf(status, verification) {
+	if (status === "timeout") return "timeout";
+	if (verification !== null && verification !== undefined && verification.passed === false) return "acceptance";
+	return "error";
+}
+
+const FAIL_KIND_ORDER = ["timeout", "acceptance", "error"];
+
+/** 0.40.0 — the settled row's marker: how many tasks ran, and — when any
+ *  failed — how many of each kind, in a fixed order with zero counts
+ *  omitted. A failed section without a kind counts as an error: a failure
+ *  is never silently left out of the count. */
+export function delegateSummary(sections, roles) {
+	const n = sections.length;
+	const toolCalls = sections.reduce((sum, s) => sum + (s.toolCalls ?? 0), 0);
+	const failedSections = sections.filter((s) => s.failed);
+	const counts = new Map(FAIL_KIND_ORDER.map((k) => [k, 0]));
+	for (const s of failedSections) {
+		const k = FAIL_KIND_ORDER.includes(s.failKind) ? s.failKind : "error";
+		counts.set(k, counts.get(k) + 1);
+	}
+	const kinds = FAIL_KIND_ORDER.filter((k) => counts.get(k) > 0).map((k) => `${counts.get(k)} ${k}`);
+	return `summary: ${n} task${n === 1 ? "" : "s"} · ${toolCalls} tool calls · ${roles} role${roles === 1 ? "" : "s"} · ${failedSections.length} failed${kinds.length > 0 ? ` (${kinds.join(", ")})` : ""}`;
 }
 
 /** DT-1a: the fixed trailer every task file ends with — the parser reads the section back. */
@@ -848,7 +874,7 @@ function removeWorktree(parentCwd, worktree) {
 }
 
 function failSection(childId, role, task, reason) {
-	return { failed: true, text: `[subagent] ${role}: ${task}\n  FAILED: ${reason}`, toolCalls: 0 };
+	return { failed: true, failKind: "error", text: `[subagent] ${role}: ${task}\n  FAILED: ${reason}`, toolCalls: 0 };
 }
 
 const msg = (err) => (err instanceof Error ? err.message : String(err));
