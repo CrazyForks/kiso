@@ -125,7 +125,7 @@ tier that decided, exactly like it names the extension.
 
 | tier | semantics |
 |---|---|
-| `default` | reads allow; write/edit/shell ask the human; extension tools are the extensions' business (the tier stays out of it) |
+| `default` | reads allow, and shell commands proven read-only (`ls`, `cat`, `git status`/`log`/`diff`); write/edit/other shell ask the human; extension tools are the extensions' business (the tier stays out of it) |
 | `manual` | EVERY tool asks the human |
 | `accept-edits` | `default` + write_file/edit_file allow |
 | `plan` | read/list/search/read_skill allow; everything else denied with `plan mode: read-only` (the deny reason guides the model to output a plan; the startup prompt adds a plan directive) |

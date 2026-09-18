@@ -27,8 +27,8 @@ const TIERS = ["manual", "default", "accept-edits", "plan", "bypass"] as const;
  *  whose row this file measures. */
 const NOTES: Readonly<Record<(typeof TIERS)[number], string>> = {
 	manual: "asks for every tool — a saved allow still allows",
-	default: "reads run; writes, edits and shell ask — a saved allow still allows",
-	"accept-edits": "reads, writes and edits run; shell asks — a saved allow still allows",
+	default: "reads and read-only shell run; the rest asks — a saved allow still allows",
+	"accept-edits": "edits and read-only shell run; other shell asks — a saved allow still allows",
 	plan: "reads run; everything else is denied — read-only, and a deny wins",
 	bypass: "everything runs, nothing asks — a user deny still wins",
 };

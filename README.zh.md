@@ -110,9 +110,9 @@ kiso sessions                  列出持久会话及其状态
 
 | 档位 | 这一档的贡献 |
 |---|---|
-| `default` | 读放行;write/edit/shell 问人;扩展工具归扩展自己管 |
+| `default` | 读放行,能证明只读的 shell 命令(`ls`、`cat`、`git status`/`log`/`diff`)也放行;write/edit/其余 shell 问人;扩展工具归扩展自己管 |
 | `manual` | 每个工具都问——已保存的放行规则照样放行 |
-| `accept-edits` | `default` 加上 write_file/edit_file 放行;shell 问人——已保存的放行规则照样放行 |
+| `accept-edits` | `default` 加上 write_file/edit_file 放行;shell 除非能证明只读,否则问人——已保存的放行规则照样放行 |
 | `plan` | read/list/search/read_skill 放行;其余一律以 `plan mode: read-only` **拒绝**——而拒绝是谁也压不过的 |
 | `bypass` | 全部放行——但用户扩展的 `deny` 依然胜出 |
 

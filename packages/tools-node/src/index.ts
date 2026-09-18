@@ -1193,6 +1193,10 @@ export function editFileTool(opts: WorkspaceToolsOptions): Tool<{ path: string; 
 // with a hand-kept copy over there; the copy never learned the
 // declared names, which is how MCP children kept leaking.
 export { SHELL_STRIP_EXACT, strippedShellEnv } from "./secret-env.js";
+/** The search corpus's credential rule, by name — exported so the CLI's
+ *  read-only shell allow holds a shell read to the same definition rather
+ *  than a copy of it. */
+export { isCredentialName } from "./corpus.js";
 
 export function shellTool(opts: WorkspaceToolsOptions): Tool<{ command: string; timeoutMs?: number }> {
 	return defineTool<{ command: string; timeoutMs?: number }>({

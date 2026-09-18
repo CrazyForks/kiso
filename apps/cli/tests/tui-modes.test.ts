@@ -342,6 +342,45 @@ describe("Modes (real PTY, 24×80) — plan mode, /mode switching, the audit tra
 		});
 	}, 90_000);
 
+	it("0.40.0: a provably read-only shell call runs unasked (decidedBy: read-only-shell); any other shell call still asks", () => {
+		const { env } = isolatedEnv();
+		const dir = mkdtempSync(join(tmpdir(), "kiso-modes-"));
+		const workdir = join(dir, "work");
+		mkdirSync(workdir, { recursive: true });
+		writeFileSync(join(workdir, "notes.txt"), "alpha\nbeta\n", "utf8");
+		const script = join(dir, "faux.json");
+		writeFileSync(
+			script,
+			JSON.stringify([
+				{ events: [{ type: "tool_call_end", callId: "s1", name: "shell", input: { command: "cat notes.txt | wc -l" } }, { type: "stop", reason: "tool_use" }] },
+				{ events: [{ type: "tool_call_end", callId: "s2", name: "shell", input: { command: "touch made.txt" } }, { type: "stop", reason: "tool_use" }] },
+				{ events: [{ type: "text_delta", text: "ro done" }, { type: "stop", reason: "end_turn" }] },
+			]),
+			"utf8",
+		);
+		// ONE approval is fed. If the read had asked, it would take the
+		// `y`, and the write's panel would wait out the timeout unanswered.
+		ptyRun(
+			{ ...env, KISO_FAUX_SCRIPT: script },
+			[
+				["▌ ", "go\r"],
+				["don't ask again", "y\r"],
+				["ro done", "exit\r"],
+			],
+			workdir,
+			{ modeFlag: "default", session: "modes-ro" },
+		);
+		const events = new SessionStore(join(env.KISO_HOME!, "sessions")).load("modes-ro").map((r) => r.event);
+		const asked = events.filter((e) => e.type === "permission_requested").map((e) => (e as { callId: string }).callId);
+		expect(asked, "only the write was put to the human").toEqual(["s2"]);
+		const decided = decidedEvents(env, "modes-ro");
+		expect(decided.find((e) => e.callId === "s1")).toMatchObject({ decision: "approved", decidedBy: "read-only-shell" });
+		expect(decided.find((e) => e.callId === "s2")?.decidedBy, "the human, not a policy").toBeUndefined();
+		// and the read really ran
+		const result = events.find((e) => e.type === "tool_result" && (e as { callId: string }).callId === "s1") as { content: string } | undefined;
+		expect(result?.content).toContain("2");
+	}, 90_000);
+
 	it("KISO_MODE=plan in a PIPE: same enforcement, byte-plain, no human pause", () => {
 		const { env, dirs } = isolatedEnv();
 		const dir = mkdtempSync(join(tmpdir(), "kiso-modes-"));

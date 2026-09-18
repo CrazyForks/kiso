@@ -32,8 +32,8 @@ export const MODES: readonly Mode[] = ["manual", "default", "accept-edits", "pla
  *  qualification because it DENIES, and a deny is what nothing overrides. */
 export const MODE_NOTE: Readonly<Record<Mode, string>> = {
 	manual: "asks for every tool — a saved allow still allows",
-	default: "reads run; writes, edits and shell ask — a saved allow still allows",
-	"accept-edits": "reads, writes and edits run; shell asks — a saved allow still allows",
+	default: "reads and read-only shell run; the rest asks — a saved allow still allows",
+	"accept-edits": "edits and read-only shell run; other shell asks — a saved allow still allows",
 	plan: "reads run; everything else is denied — read-only, and a deny wins",
 	bypass: "everything runs, nothing asks — a user deny still wins",
 };

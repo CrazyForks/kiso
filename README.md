@@ -179,9 +179,9 @@ rules you already granted.
 
 | tier | its contribution |
 |---|---|
-| `default` | reads allow; write/edit/shell ask the human; extension tools are the extensions' business |
+| `default` | reads allow, and shell commands proven read-only (`ls`, `cat`, `git status`/`log`/`diff`); write/edit/other shell ask the human; extension tools are the extensions' business |
 | `manual` | every tool asks — a saved allow still allows |
-| `accept-edits` | `default` + write_file/edit_file allow; shell asks — a saved allow still allows |
+| `accept-edits` | `default` + write_file/edit_file allow; shell asks unless proven read-only — a saved allow still allows |
 | `plan` | read/list/search/read_skill allow; everything else **denied** with `plan mode: read-only` — and a deny is what nothing overrides |
 | `bypass` | everything allows — but a user extension's `deny` still wins |
 
