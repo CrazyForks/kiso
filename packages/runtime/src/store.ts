@@ -49,6 +49,7 @@ import {
 	existsSync,
 	fsyncSync,
 	fstatSync,
+	statSync,
 	ftruncateSync,
 	mkdirSync,
 	openSync,
@@ -428,6 +429,27 @@ export class SessionStore {
 
 	has(sessionId: string): boolean {
 		return existsSync(this.pathFor(sessionId));
+	}
+
+	/**
+	 * 0.40.0 dogfood (the owner: /resume still waited seconds): the session
+	 * ids, from the directory alone — no log is opened. `list()` reads every
+	 * log whole to title it (one owner session is 83 MB); a caller that
+	 * needs only the ids must never pay that. An empty log is skipped, as
+	 * list() skips it.
+	 */
+	ids(): string[] {
+		const out: string[] = [];
+		for (const entry of readdirSync(this.root)) {
+			if (!entry.endsWith(".jsonl")) continue;
+			try {
+				if (statSync(join(this.root, entry)).size === 0) continue;
+			} catch {
+				continue;
+			}
+			out.push(entry.slice(0, -".jsonl".length));
+		}
+		return out.sort();
 	}
 
 	list(): SessionMeta[] {

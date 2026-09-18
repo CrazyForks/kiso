@@ -578,6 +578,13 @@ export class AgentSession {
 		this.#microcompact = { thresholdTokens };
 	}
 
+	/** The raw tail a manual cut at a settled round keeps: the tiers' tail
+	 *  when a window is known, else the policy's keep floor. */
+	#manualTailTokens(): number {
+		const window = this.#tiersWindow ?? this.#config.contextPolicy?.tiers?.windowTokens;
+		return window === undefined ? KEEP_TOKENS_DEFAULT : tiersFor(window, MANUAL_SUMMARY_BUDGET).tail;
+	}
+
 	/** A1b: the window the in-run tiers are drawn from, for a restored or
 	 *  re-bound session (the CLI's one binding step calls both). */
 	setContextWindow(windowTokens: number): void {
@@ -812,7 +819,15 @@ export class AgentSession {
 		const cancelled = (): Error => new Error("the compaction was cancelled");
 		if (options.signal !== undefined && options.signal.aborted) throw cancelled();
 		const events = this.log.all;
-		const boundary = summaryBoundarySeq(events, keepRounds, options.keepTokens);
+		// ADR-0055 (the owner's dogfood): a long autonomous session has few
+		// user turns and many tool rounds, and the user-turn cut found nothing
+		// in it ("fewer than 5 rounds") while the context was hundreds of
+		// thousands of tokens. When there is no user-turn cut, the manual
+		// gesture cuts where the in-run tiers do: at a settled round, the raw
+		// tail kept by tokens (the tiers' `min(0.1·window, 100K)` when the
+		// window is known, else the policy floor).
+		const tailTokens = Math.max(options.keepTokens ?? 0, this.#manualTailTokens());
+		const boundary = summaryBoundarySeq(events, keepRounds, options.keepTokens) ?? (options.manualBudget === true ? checkpointBoundarySeq(events, { keepTokens: tailTokens }) : undefined);
 		if (boundary === undefined) return null;
 		const prevPoint = lastSummaryPoint(events);
 		// E6 (a): the summarizer's input is the covered range SERIALIZED to
