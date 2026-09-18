@@ -5,7 +5,8 @@
  * sends ONE text delta and then never writes again — the hung socket. With
  * KISO_STREAM_IDLE_MS=1500 the watchdog trips 1.5 s after that delta; the
  * kernel voids the draft (the abandoned notice), retries with backoff, and
- * when the budget is spent the run ends in the error terminal OR-5 prints.
+ * when the budget (pinned here at 2) is spent the run ends in the error
+ * terminal OR-5 prints.
  * The session survives: the next turn is a normal one.
  *
  * The stub runs OUT OF PROCESS (ptyRun is spawnSync — see registry-stub).
@@ -75,6 +76,11 @@ describe("LT-1 — the stream watchdog on a real PTY", () => {
 		const stub = startStall();
 		const { env, dirs } = isolatedEnv({
 			KISO_STREAM_IDLE_MS: "1500",
+			// 0.40.0: the budget is PINNED at the old default. ADR-0005
+			// Amendment 2 made the default ten retries on a curve that
+			// reaches 32 s; this gate is about the watchdog, and three
+			// attempts are enough to see each one voided.
+			KISO_MAX_RETRIES: "2",
 			STALL_KEY: "sk-stall", // a non-top-level env var: the session is a real profile, not faux
 		});
 		writeFileSync(join(dirs.home, "config.json"), `${JSON.stringify({ models: { stall: { kind: "openai-compat", model: "stall-model", baseUrl: stub.url, apiKeyEnv: "STALL_KEY" } }, model: "stall" })}\n`);
@@ -97,7 +103,7 @@ describe("LT-1 — the stream watchdog on a real PTY", () => {
 		// the terminal names the stall, in the watchdog's own words
 		// `run failed — network (retryable): stream stalled: no event for 2s (2s into the request)`
 		expect(text, "the error line never named the stall").toMatch(/run failed — network.*stream stalled: no event for 2s/);
-		// three attempts (the first plus the default two retries), each voided visibly
+		// three attempts (the first plus the two pinned retries), each voided visibly
 		expect(rows.filter((r) => r.includes("stream interrupted")).length, "one abandoned notice per attempt").toBe(3);
 		// the budget was spent honestly: the first attempt plus the retries all reached the stub
 		expect(stub.hits(), "the kernel did not retry the stalled request").toBeGreaterThanOrEqual(3);

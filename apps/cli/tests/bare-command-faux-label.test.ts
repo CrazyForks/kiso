@@ -38,6 +38,10 @@ describe("E4-1: the bare-command faux mislabel", () => {
 				OPENAI_BASE_URL: "http://127.0.0.1:1",
 				OPENAI_API_KEY: "sk-e4-1-test",
 				OPENAI_MODEL: "deepseek-v4-flash",
+				// 0.40.0: a refused connection is retryable, and ADR-0005
+				// Amendment 2's default budget waits minutes on it. This gate
+				// is about the LABEL, so the budget is zero: fail at once.
+				KISO_MAX_RETRIES: "0",
 			});
 			const workdir = mkdtempSync(join(tmpdir(), "kiso-e41-"));
 			const r = runCli(["e4-1-bare"], env.env, {
