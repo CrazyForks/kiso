@@ -172,7 +172,12 @@ const REFUSED: readonly (readonly [string, string | RegExp])[] = [
 	["rm -rf .git", "the workspace's .git"],
 	["rm -rf .git/objects", "the workspace's .git"],
 	// R8: system roots and what is inside them; mount and home roots
-	["rm -rf /usr/local/lib", "inside a system root (/usr)"],
+	["rm -rf /usr/lib/x", "inside a system root (/usr)"],
+	["rm -rf /opt/x", "inside a system root (/opt)"],
+	// R8, second pass: a software prefix itself — not what is inside it
+	["rm -rf /usr/local", "a software prefix (/usr/local)"],
+	["rm -rf /opt/homebrew", "a software prefix (/opt/homebrew)"],
+	["rm -rf /home/linuxbrew/.linuxbrew", "a software prefix"],
 	["rm -rf /etc/hosts", "system root"],
 	["rm -rf /Users/someoneelse", "a mount or home root"],
 	["rm -rf /Volumes/Data", "a mount or home root"],
@@ -229,6 +234,10 @@ const RUNS: readonly string[] = [
 	"rm -rf /private/tmp/x",
 	"rm -rf /Volumes/Data/proj/node_modules",
 	"rm -rf /Users/someoneelse/proj/build",
+	// R8, second pass: inside a reinstallable software prefix
+	"rm -rf /usr/local/lib/node_modules/x",
+	"rm -rf /opt/homebrew/Cellar/foo",
+	"rm -rf /home/linuxbrew/.linuxbrew/Cellar/x",
 	"git checkout -- src/a.ts",
 	"ls -la / ~ ~/.ssh",
 	"cat ~/.ssh/config",

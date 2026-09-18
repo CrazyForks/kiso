@@ -15,9 +15,10 @@
  *  - `/`, the home directory, the workspace root or any directory above it;
  *  - the workspace's `.git` (R7);
  *  - `~/.ssh`, `~/.config`, `~/.kiso`, `~/.gnupg`, `~/.aws`, or inside one;
- *  - a system root and what is inside it — except the temp family, where
- *    only the root itself is, and /Volumes /Users /home /mnt /media, where
- *    the root and its direct children are (R8). Inside the workspace or the
+ *  - a system root and what is inside it — except the temp family and the
+ *    software prefixes (/opt/homebrew, /usr/local, linuxbrew), where only
+ *    the root itself is, and /Volumes /Users /home /mnt /media, where the
+ *    root and its direct children are (R8). Inside the workspace or the
  *    home directory is never a system root's;
  *  - a wildcard over any of those (`~/*`, `/*`, `*` at the workspace root —
  *    a component of nothing but globs; `*.log` ranges over SOME entries);
@@ -60,6 +61,10 @@ const SYSTEM_ROOTS = [
 const MOUNT_ROOTS = ["/Volumes", "/Users", "/home", "/mnt", "/media"];
 /** R8: the temp family — only the root itself; what is inside runs. */
 const TEMP_ROOTS = ["/tmp", "/private/tmp", "/var/tmp", "/private/var/tmp", "/var/folders", "/private/var/folders"];
+/** R8 (the lead's ruling, second pass): reinstallable software prefixes —
+ *  only the prefix itself; what is inside runs (`brew` put it there and can
+ *  again). */
+const SOFTWARE_PREFIXES = ["/opt/homebrew", "/usr/local", "/home/linuxbrew/.linuxbrew"];
 
 interface Named {
 	readonly name: string;
@@ -77,6 +82,7 @@ interface Where {
 	readonly sys: readonly Named[];
 	readonly mounts: readonly Named[];
 	readonly temps: readonly string[];
+	readonly prefixes: readonly Named[];
 	readonly subtrees: readonly Named[];
 }
 
@@ -100,6 +106,7 @@ function where(root: string, home: string): Where {
 		sys: named(SYSTEM_ROOTS),
 		mounts: named(MOUNT_ROOTS),
 		temps: [...new Set([...TEMP_ROOTS, tmpdir()].map(real))],
+		prefixes: named(SOFTWARE_PREFIXES),
 		subtrees: HOME_SUBTREES.map((name) => ({ name, real: real(join(home, name)) })),
 	};
 	WHERE.set(key, w);
@@ -143,6 +150,10 @@ function unrecoverable(w: Where, p: string, over: boolean): string | null {
 	for (const t of w.temps) {
 		if (p === t) return what(`a temp root (${t})`);
 		if (within(t, p)) return null;
+	}
+	for (const x of w.prefixes) {
+		if (p === x.real) return what(`a software prefix (${x.name})`);
+		if (within(x.real, p)) return null;
 	}
 	for (const m of w.mounts) {
 		if (p === m.real) return what(`a system root (${m.name})`);
