@@ -14,7 +14,7 @@
  *    be added without saying what it must refuse.
  */
 
-import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -23,6 +23,15 @@ import { classifyReadOnly, READ_ONLY_COMMANDS, readOnlyShellExtension } from "..
 import { parseShell, realCase, resolveShellPath } from "../src/shell-words.js";
 
 let root = "";
+
+/** Is this file system case-insensitive (macOS, by default)? The disk-case
+ *  cases below only mean something where `.ENV` and `.env` are one file;
+ *  on Linux (CI) they are two, and `KHOME/` simply does not exist. */
+const CASE_INSENSITIVE = ((): boolean => {
+	const d = mkdtempSync(join(tmpdir(), "kiso-case-"));
+	writeFileSync(join(d, "probe"), "");
+	return existsSync(join(d, "PROBE"));
+})();
 
 beforeAll(() => {
 	const base = realpathSync(mkdtempSync(join(tmpdir(), "kiso-ros-")));
@@ -421,7 +430,7 @@ describe("the shared resolver — real components, in the disk's case (review B1
 		expect(r.inside).toBe(false);
 	});
 
-	it("an existing name comes back in the case the disk holds it", () => {
+	it.skipIf(!CASE_INSENSITIVE)("an existing name comes back in the case the disk holds it", () => {
 		expect(resolveShellPath(root, root, ".ENV").canonical).toBe(join(realCase(root), ".env"));
 		expect(resolveShellPath(root, root, "SRC/A.TS").canonical).toBe(join(realCase(root), "src", "a.ts"));
 	});
@@ -432,7 +441,8 @@ describe("the shared resolver — real components, in the disk's case (review B1
 	});
 
 	it("a protected root is matched in the disk's case, and LISTING under it asks too (B4)", () => {
-		for (const cmd of ["cat KHOME/auth.json", "ls khome", "ls -la KHOME", "file khome/auth.json"]) {
+		const cmds = ["ls khome", "file khome/auth.json", ...(CASE_INSENSITIVE ? ["cat KHOME/auth.json", "ls -la KHOME"] : [])];
+		for (const cmd of cmds) {
 			const v = classifyReadOnly(cmd, root, [join(root, "khome")]);
 			expect(v.allow, cmd).toBe(false);
 			expect(v.allow === false ? v.why : "", cmd).toContain("protected directory");
