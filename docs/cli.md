@@ -30,17 +30,17 @@ kiso help                      this help
 
 - **Navigation (0.10.0).** `kiso resume` with no id opens a PICKER: one row
   per session, `↑↓` to walk, type to filter, `⏎` to continue, `esc` to
-  leave. Each row wears a **durability badge** — the state kiso will
-  actually resume into, read from the session's own durable log and
-  nothing else:
+  leave. Each row SAYS the state kiso will actually resume into, in words
+  (never a glyph), read from the session's own durable log and nothing
+  else:
 
-  | badge | means | what `kiso resume` will do |
+  | the row's note | means | what `kiso resume` will do |
   |---|---|---|
-  | `✓` | the run ended cleanly | continue from a settled session |
-  | `✗` | the run ended some other way (error, aborted, max turns) | continue from where it stopped |
-  | `▌` | **no terminal event — interrupted mid-run** | resume the trajectory exactly, from its durable prefix |
-  | `?` | the uncertain ledger is not empty | ask you to rule on the interrupted side effect first |
-  | `◌` | a permission request nobody answered | put the question back in front of you |
+  | `completed clean` | the run ended cleanly | continue from a settled session |
+  | `failed`, or the outcome (`aborted`, `max turns`) | the run ended some other way | continue from where it stopped |
+  | `interrupted mid-run — resumes exactly` | **no terminal event** | resume the trajectory exactly, from its durable prefix |
+  | `N uncertain — needs your verdict` | the uncertain ledger is not empty | ask you to rule on the interrupted side effect first |
+  | `N asks pending` | a permission request nobody answered | put the question back in front of you |
 
   `kiso sessions` prints the same rows on a terminal (its PIPED output is
   unchanged — that is a machine interface). `/model` with no argument

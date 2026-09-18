@@ -148,16 +148,16 @@ kiso sessions [--all|--current]  list durable sessions, with their state
 type to filter, enter to continue. It opens on the sessions that started in
 this directory — only those; tab shows every session, each tagged with where it
 started. Sessions from before 0.40.0 recorded no workspace (no event in their
-log names one); they are counted in one line and listed under tab. Each row wears a **durability badge** — the
-state kiso will resume into, read from the session's own durable log:
+log names one); they are counted in one line and listed under tab. Each row
+SAYS the state kiso will resume into, in words:
 
-| badge | means | what `kiso resume` will do |
+| the row's note | means | what `kiso resume` will do |
 |---|---|---|
-| `✓` | the run ended cleanly | continue from a settled session |
-| `✗` | the run ended some other way (error, aborted, max turns) | continue from where it stopped |
-| `▌` | **no terminal event — interrupted mid-run** | resume the trajectory exactly, from its durable prefix |
-| `?` | the uncertain ledger is not empty | ask you to rule on the interrupted side effect first |
-| `◌` | a permission request nobody answered | put the question back in front of you |
+| `completed clean` | the run ended cleanly | continue from a settled session |
+| `failed`, or the outcome (`aborted`, `max turns`) | the run ended some other way | continue from where it stopped |
+| `interrupted mid-run — resumes exactly` | **no terminal event** | resume the trajectory exactly, from its durable prefix |
+| `N uncertain — needs your verdict` | the uncertain ledger is not empty | ask you to rule on the interrupted side effect first |
+| `N asks pending` | a permission request nobody answered | put the question back in front of you |
 
 **Context relief is on by default.** Past half the model window, one
 `microcompacted` boundary event is appended and the projection derives the
