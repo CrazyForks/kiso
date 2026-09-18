@@ -98,7 +98,7 @@ export const MANUAL_SUMMARY_BUDGET = 32_000;
  *  budget: "not a complete turn" alone told the person nothing about what
  *  ran out. Still an `Error`, and still carries the `max_tokens … not a
  *  complete turn` wording the CX-1 F3 gate matches. */
-class SummaryBudgetExhausted extends Error {
+export class SummaryBudgetExhausted extends Error {
 	constructor(readonly budget: number | undefined) {
 		super(
 			budget === undefined
@@ -295,7 +295,7 @@ export interface SummarizeConversationOptions {
 	 *  system prompt and tool table, with SUMMARY_IN_BAND appended — the
 	 *  cache-hot form. Absent: `messages` is the serialized covered range
 	 *  under SUMMARY_PROMPT, the cold form. */
-	readonly inBand?: { readonly systemPrompt?: string; readonly tools: readonly ToolSpec[] };
+	readonly inBand?: { readonly systemPrompt?: string; readonly tools: readonly ToolSpec[]; readonly focus?: string };
 	/** The covered conversation — the ONLY material the summary is about. */
 	readonly messages: readonly Message[];
 	readonly signal?: AbortSignalLike;
@@ -477,7 +477,7 @@ async function summaryAttempt(options: SummarizeConversationOptions): Promise<Su
 		...(inBand === undefined
 			? { messages, systemPrompt: SUMMARY_PROMPT }
 			: {
-					messages: [...messages, { role: "user" as const, content: SUMMARY_IN_BAND }],
+					messages: [...messages, { role: "user" as const, content: inBand.focus === undefined ? SUMMARY_IN_BAND : `${SUMMARY_IN_BAND}\n\nFocus the summary on: ${inBand.focus}` }],
 					...(inBand.systemPrompt !== undefined ? { systemPrompt: inBand.systemPrompt } : {}),
 					tools: inBand.tools,
 				}),

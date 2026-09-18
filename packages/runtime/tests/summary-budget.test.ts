@@ -102,11 +102,13 @@ describe("an UNREGISTERED model — where the owner's failure was", () => {
 });
 
 describe("a REGISTERED model — the optimisation", () => {
-	it("thinking goes OFF, as the native value the registry states", async () => {
-		const { adapter, requests } = recording([COMPLETE]);
+	it("the in-band call carries the SESSION's reasoning (A2: the prefix a run sends); the serialised fallback turns thinking OFF", async () => {
+		const REJECTED = [{ type: "tool_call_end", callId: "x", name: "read_file", input: {}, seq: 0 }, stop("tool_use")] as unknown as readonly AdapterEvent[];
+		const { adapter, requests } = recording([REJECTED, COMPLETE]);
 		const { session } = await longSession("deepseek-flash", adapter);
 		await session.summarize({ manualBudget: true });
-		expect(requests[0]!.reasoning).toEqual({ thinking: "disabled" });
+		expect(requests[0]!.reasoning).toBeUndefined(); // the session's default, as a run sends it
+		expect(requests[1]!.reasoning).toEqual({ thinking: "disabled" }); // 0.39.2's optimisation, on the cold path
 	});
 });
 
