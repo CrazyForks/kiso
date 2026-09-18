@@ -44,7 +44,7 @@ kiso sessions                list durable sessions
 kiso help                    usage + configuration reference
 ```
 
-Sessions live under `~/.kiso/sessions`; kill the process — `kill -9`
+Sessions live under `~/.kiso/projects/<project>/`, one folder per project; kill the process — `kill -9`
 included — and `kiso resume` continues exactly where the log ends.
 
 **Platforms:** macOS / Linux (Node ≥ 22). Windows is unsupported.

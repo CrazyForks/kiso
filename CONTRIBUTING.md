@@ -9,7 +9,7 @@ that way. They apply to every change, including the maintainer's.
   claim, so it carries what someone else needs to check it: the version
   (`kiso --version`), the OS and the terminal, what you ran and what happened in that
   order, and the smallest reproduction you have. A screenshot of the terminal or the
-  durable session log (`~/.kiso/sessions/<id>.jsonl`) is worth more than a description —
+  durable session log (`~/.kiso/projects/<project>/<id>.jsonl`) is worth more than a description —
   read the log before you paste it, it holds your prompts and the files the model read.
 - **Read the ADR** that governs the area (`docs/adrs/`). Every design decision ships with
   one that says why it was made and when to overturn it. A change that contradicts an ADR
