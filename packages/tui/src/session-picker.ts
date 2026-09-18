@@ -29,8 +29,9 @@ export interface SessionCardView {
 	 *  a caller that has not got one still renders — the row simply
 	 *  carries no title, which is where this picker started. */
 	readonly title?: string;
-	readonly badge: "uncertain" | "ask" | "interrupted" | "completed" | "failed";
-	readonly turns: number;
+	readonly badge: "uncertain" | "ask" | "interrupted" | "completed" | "failed" | "unknown";
+	/** null when unknown — the row then says nothing about turns */
+	readonly turns: number | null;
 	readonly updatedAt: number;
 	readonly uncertain: number;
 	readonly asks: number;
@@ -125,6 +126,10 @@ export function sessionNote(card: SessionCardView): string {
 			return "interrupted mid-run — resumes exactly";
 		case "completed":
 			return "completed clean";
+		case "unknown":
+			// 0.40.0 dogfood: no summary, or a log that could not be read —
+			// said, never guessed
+			return card.outcome ?? "no summary";
 		default:
 			return card.outcome === null || card.outcome === "error" ? "failed" : card.outcome.replaceAll("_", " ");
 	}
@@ -254,7 +259,7 @@ function rowSpans(card: SessionCardView, budget: number, now: number, idCol: num
 		const cut = widthCut(escapeTerminal(title), room);
 		if (cut !== "") put(cut, `${p.bold}${cut}${p.reset}`);
 	}
-	const meta = `  ${sessionAge(card.updatedAt, now)} · ${card.turns} turn${card.turns === 1 ? "" : "s"}`;
+	const meta = `  ${sessionAge(card.updatedAt, now)}${card.turns === null ? "" : ` · ${card.turns} turn${card.turns === 1 ? "" : "s"}`}`;
 	put(meta, `${p.dim}${meta}${p.reset}`);
 	// 0.40.0: the tags are their OWN span, after the meta and before the
 	// note, and they give way first — a long workspace path must never take

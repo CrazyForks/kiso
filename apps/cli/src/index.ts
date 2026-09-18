@@ -41,7 +41,7 @@ import {
 	type AgentDefinition,
 	type ContextPolicy,
 } from "@vincemakes/kiso-runtime";
-import { readProfile } from "@vincemakes/kiso-runtime/internal";
+import { listSessionSidecars, migrateSummaries, readProfile, summaryMigrationPending } from "@vincemakes/kiso-runtime/internal";
 import { createFauxProvider } from "@vincemakes/kiso-evals";
 import { createCodingTools } from "@vincemakes/kiso-tools-node";
 import { MODES, OFFERED_MODES, getMode, modeExtensions, modeFromEnv, modeSystemPrompt, setMode } from "./mode.js";
@@ -67,7 +67,7 @@ import { resumeTail } from "./resume-tail.js";
 import { armByteTrace } from "./byte-trace.js";
 import { tmpdir, homedir } from "node:os";
 import { clipboardImage } from "./clipboard.js";
-import { collectSessionCards, projectSessionCard } from "./session-cards.js";
+import { cardsFromListings } from "./session-cards.js";
 
 // The moved exports stay reachable from this entry — the test imports
 // (project-trust, coding-agent) never change (B4: zero assertion changes).
@@ -913,15 +913,20 @@ const PICKER_HINT = "↑↓ pick · ⏎ resumes · type filters · esc";
  * runtime's own accessors (see session-cards.ts); this is only the
  * plumbing that hands it the store's read side.
  */
-async function sessionCards(agent: Awaited<ReturnType<typeof makeAgent>>): Promise<SessionCardView[]> {
+async function sessionCards(_agent: Awaited<ReturnType<typeof makeAgent>>, announce: (line: string) => void = (l) => bodyLog(l)): Promise<SessionCardView[]> {
 	const store = sessionStoreRef;
 	if (store === null) return []; // unreachable: makeAgent builds the store first
-	// 0.40.0: the recorded workspace and profile name ride each card, read
-	// from the profile sidecar — a listing reads, it never writes
-	return collectSessionCards(agent, (id) => store.load(id), (id) => {
-		const r = readProfile(sessionsDir(), id);
-		return r.kind === "ok" ? { workspace: r.profile.workspace, profileName: r.profile.profileName } : { workspace: null, profileName: null };
-	});
+	const root = sessionsDir();
+	// 0.40.0 dogfood (item 2, lead's ruling A): the ONE-TIME migration — the
+	// first list after the upgrade reads each legacy log exactly once and
+	// writes its summary into the sidecar; announced with its count
+	if (summaryMigrationPending(root)) {
+		const pending = listSessionSidecars(root).filter((l) => l.summary === null).length;
+		if (pending > 0) announce(`recording summaries for ${pending} older session${pending === 1 ? "" : "s"} — once`);
+		migrateSummaries(root, (id) => store.load(id));
+	}
+	// …and from then on, the SIDECARS only: no log is opened to draw a row
+	return cardsFromListings(listSessionSidecars(root));
 }
 
 /**
@@ -1627,7 +1632,7 @@ async function main(): Promise<void> {
 				// under them. An explicit --all or --current applies to both.
 				const here = workspaceRoot();
 				if (process.stdout.isTTY) {
-					const every = await sessionCards(agent);
+					const every = await sessionCards(agent, (l) => console.log(l));
 					const all = (listScope ?? "current") === "all";
 					const inHere = every.filter((c) => c.workspace === here);
 					const cards = all ? every : inHere;

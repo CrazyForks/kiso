@@ -297,6 +297,9 @@ export class Run implements AsyncIterable<Event> {
 			//    stream.
 			const inputEvent = log.append({ type: "user_input", content: this.#input!, ...(this.#source !== undefined ? { source: this.#source } : {}), ...(this.#via !== undefined ? { via: this.#via } : {}) });
 			await this.#session.persist(this.runId, inputEvent);
+			// 0.40.0 dogfood: the list's row says "open" from here — a run
+			// killed mid-way reads as interrupted, which is the truth
+			this.#session.recordSummary(true);
 			yield inputEvent;
 
 			// 2. The loop projects from the session log — multi-turn context
@@ -313,6 +316,9 @@ export class Run implements AsyncIterable<Event> {
 				// the flush itself failed (poisoned session) — the error
 				// already poisoned everything; nothing more can be done.
 			}
+			// 0.40.0 dogfood: the row at the run's end — its terminal, or the
+			// pause it stopped at (pending asks counted); best-effort
+			this.#session.recordSummary(this.#session.log.all.at(-1)?.type !== "terminal");
 			// The run is over (or abandoned): its unanswered approvals must
 			// fall back to the direct-persist path, so a late approve() is
 			// still durable.

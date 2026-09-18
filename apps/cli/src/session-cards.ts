@@ -29,10 +29,10 @@
  * FACTS.
  */
 
-import { executionLedger, openRunId, sessionTitle, type StoreRecord } from "@vincemakes/kiso-runtime/internal";
+import { executionLedger, openRunId, sessionTitle, type SessionListing, type StoreRecord } from "@vincemakes/kiso-runtime/internal";
 
 /** The five durable states, in the order the projection resolves them. */
-export type SessionBadge = "uncertain" | "ask" | "interrupted" | "completed" | "failed";
+export type SessionBadge = "uncertain" | "ask" | "interrupted" | "completed" | "failed" | "unknown";
 
 export interface SessionCard {
 	readonly id: string;
@@ -46,7 +46,7 @@ export interface SessionCard {
 	 *  counts runIds, which a resume increments without the human having
 	 *  said anything — that is a different number and not the one a
 	 *  picker row means.) */
-	readonly turns: number;
+	readonly turns: number | null;
 	/** The last record's own stamp — the store's `updatedAt`, never a
 	 *  file mtime (a copied home would lie about every age). */
 	readonly updatedAt: number;
@@ -171,3 +171,36 @@ export async function collectSessionCards(
 	}
 	return cards;
 }
+
+/**
+ * The 0.40.0 dogfood (item 2) — a card from the SIDECAR alone: the summary
+ * tenant the runtime writes at each run's start and end (or the one-time
+ * migration wrote), plus the profile's workspace and name. No log is read.
+ * A session with no summary says so ("no summary"); one whose log could not
+ * be read when it was summarised says that ("log unreadable") — never a
+ * guess, and never a read of the log to find out.
+ */
+export function cardFromListing(l: SessionListing): SessionCard {
+	const s = l.summary;
+	const base = { id: l.id, workspace: l.workspace, profileName: l.profileName };
+	if (s === null) return { ...base, title: l.id, badge: "unknown", turns: null, updatedAt: l.mtime, uncertain: 0, asks: 0, outcome: "no summary" };
+	const badge: SessionBadge =
+		s.uncertain > 0 ? "uncertain" : s.asks > 0 ? "ask" : s.state === "open" ? "interrupted" : s.state === "completed" ? "completed" : s.state === null ? "unknown" : "failed";
+	return {
+		...base,
+		title: s.title ?? l.id,
+		badge,
+		turns: s.turns,
+		updatedAt: s.updatedAt,
+		uncertain: s.uncertain,
+		asks: s.asks,
+		outcome: badge === "unknown" ? (s.turns === null ? "log unreadable" : "no run recorded") : s.state === "open" ? null : s.state,
+	};
+}
+
+/** Every card from the sidecars, newest first (the order the picker and
+ *  `kiso sessions` both want). */
+export function cardsFromListings(listings: readonly SessionListing[]): SessionCard[] {
+	return listings.map(cardFromListing).sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
