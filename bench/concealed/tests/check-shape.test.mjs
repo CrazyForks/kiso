@@ -4,7 +4,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checkSeeds, checkShape } from "../check-shape.mjs";
+import { checkSeed, checkSeeds, checkShape } from "../check-shape.mjs";
 import { generateAll } from "../generate.mjs";
 
 const inst = (family, lines) => ({ family, required: lines.map((n) => ({ path: "x.js", lines: n })), estRequests: 5 });
@@ -48,3 +48,10 @@ test("the rules are computed from GENERATED instances — a real draw's counts m
 	for (const i of all) counts[i.family] = (counts[i.family] ?? 0) + 1;
 	assert.deepEqual(counts, { A: 6, BD: 6, C: 6, E: 6, F: 6 });
 });
+
+test("one seed out of band is SAID out of band — the drawn seed is checked, not assumed (G6)", () => {
+	const r = checkSeed("s", () => [...Array.from({ length: 30 }, (_, i) => inst(["A", "BD", "C", "E", "F"][i % 5], [900, 1500, 3000]))]);
+	assert.equal(r.inBand, false);
+	assert.equal(checkSeed("s", () => set({ A: 6, BD: 6, C: 6, E: 6, F: 6 })).inBand, true);
+});
+

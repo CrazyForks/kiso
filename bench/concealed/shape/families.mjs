@@ -321,7 +321,13 @@ export function familyE(rng) {
  * the compensations a plausible "work around it where it surfaced" change
  * would make in the caller, and the candidate inputs the generator
  * evaluates to FIND defectTests and guardTests by mutation (the B+D
- * verifier doc) — nothing is labelled a guard by hand.
+ * verifier doc) — nothing is labelled a guard by hand, and the symptom is
+ * DRAWN from the defect-changing inputs, never fixed per function.
+ *
+ * This family's space is SMALL and is stated as such (lead's review G2):
+ * `bdPromptSpace()` counts its distinct task prompts from this pool, and
+ * check-shape prints the count. Its concealment rests on custody, not on
+ * the space being too large to enumerate.
  */
 const DEFECTABLE = [
 	{
@@ -338,8 +344,7 @@ const DEFECTABLE = [
 			"off-by-one": (dep) => `function totalLength(ranges) { return ranges.reduce((sum, r) => sum + ${dep}(r[0], r[1]) + 1, 0); }`,
 			"swapped-argument": (dep) => `function totalLength(ranges) { return ranges.reduce((sum, r) => sum + ${dep}(r[1], r[0]), 0); }`,
 		},
-		symptomArgs: [[[1, 3], [10, 12]]],
-		inputs: { dep: [[1, 3], [5, 5], [0, 9], [4, 2]], caller: [[[[1, 3], [10, 12]]], [[[5, 5]]], [[]], [[[4, 2]]]] },
+		inputs: { dep: [[1, 3], [5, 5], [0, 9], [4, 2], [10, 14]], caller: [[[[1, 3], [10, 12]]], [[[5, 5]]], [[]], [[[4, 2]]], [[[0, 9], [2, 2]]]] },
 	},
 	{
 		id: "atLeast",
@@ -355,8 +360,7 @@ const DEFECTABLE = [
 			"wrong-comparison": (dep) => `function passRate(scores, pass) { return scores.length === 0 ? 0 : ${dep}(scores, pass - 1) / scores.length; }`,
 			"off-by-one": (dep) => `function passRate(scores, pass) { return scores.length === 0 ? 0 : (${dep}(scores, pass) + 1) / scores.length; }`,
 		},
-		symptomArgs: [[[50, 70, 70, 90], 70]],
-		inputs: { dep: [[[1, 5, 5, 9], 5], [[], 3], [[2.5, 2.4], 2.5], [[7, 8], 1]], caller: [[[50, 70, 70, 90], 70], [[], 10], [[10, 20], 100], [[1.5, 2.5], 2]] },
+		inputs: { dep: [[[1, 5, 5, 9], 5], [[], 3], [[2.5, 2.4], 2.5], [[7, 8], 1], [[3, 3, 3], 3]], caller: [[[50, 70, 70, 90], 70], [[], 10], [[10, 20], 100], [[1.5, 2.5], 2], [[60, 60], 60]] },
 	},
 	{
 		id: "safeRatio",
@@ -372,8 +376,7 @@ const DEFECTABLE = [
 			"misordered-guard": (dep) => `function shareOf(count, total) { if (total === 0) return "n/a"; const r = ${dep}(count, total); return r === null ? "n/a" : \`\${Math.round(r * 100)}%\`; }`,
 			"swapped-argument": (dep) => `function shareOf(count, total) { const r = ${dep}(total, count); return r === null ? "n/a" : \`\${Math.round(r * 100)}%\`; }`,
 		},
-		symptomArgs: [[0, 0]],
-		inputs: { dep: [[1, 4], [0, 0], [0, 5], [3, 0], [6, 3]], caller: [[1, 4], [0, 0], [0, 5], [3, 0], [6, 3]] },
+		inputs: { dep: [[1, 4], [0, 0], [0, 5], [3, 0], [6, 3], [2, 8]], caller: [[1, 4], [0, 0], [0, 5], [3, 0], [6, 3], [2, 8]] },
 	},
 	{
 		id: "windowSum",
@@ -389,20 +392,86 @@ const DEFECTABLE = [
 			"off-by-one": (dep) => `function firstWindow(values, width) { return ${dep}(values, 0, width + 1); }`,
 			"wrong-comparison": (dep) => `function firstWindow(values, width) { return ${dep}(values, 0, width - 1); }`,
 		},
-		symptomArgs: [[[4, 5, 6, 7], 2]],
-		inputs: { dep: [[[1, 2, 3, 4], 1, 2], [[1, 2], 0, 5], [[], 0, 3], [[9], 0, 1]], caller: [[[4, 5, 6, 7], 2], [[1, 2], 5], [[], 3], [[9], 1], [[1, 1, 1], 0]] },
+		inputs: { dep: [[[1, 2, 3, 4], 1, 2], [[1, 2], 0, 5], [[], 0, 3], [[9], 0, 1], [[5, 6, 7, 8, 9], 2, 2]], caller: [[[4, 5, 6, 7], 2], [[1, 2], 5], [[], 3], [[9], 1], [[1, 1, 1], 0], [[3, 4, 5, 6], 3]] },
+	},
+	{
+		id: "capTo",
+		ref: "function capTo(value, cap) { if (cap === null) return value; return value > cap ? cap : value; }",
+		doc: "capTo(value, cap): value, but never above cap; value unchanged when cap is null.",
+		defects: {
+			"wrong-comparison": "function capTo(value, cap) { if (cap === null) return value; return value < cap ? cap : value; }",
+			"misordered-guard": "function capTo(value, cap) { if (value > cap) return cap; if (cap === null) return value; return value; }",
+		},
+		callerName: "capAll",
+		caller: (dep) => `function capAll(values, cap) { return values.map((v) => ${dep}(v, cap)); }`,
+		compensations: {
+			"wrong-comparison": (dep) => `function capAll(values, cap) { return values.map((v) => (v < cap ? v : ${dep}(v, cap))); }`,
+			"misordered-guard": (dep) => `function capAll(values, cap) { return values.map((v) => (cap === null ? v : ${dep}(v, cap))); }`,
+		},
+		inputs: { dep: [[5, 3], [2, 3], [3, 3], [4, null], [-1, null], [9, 10]], caller: [[[5, 2, 3], 3], [[1, 2], 10], [[4, 5], null], [[], 3], [[-2, 7], null], [[3, 3], 3]] },
+	},
+	{
+		id: "averageOf",
+		ref: "function averageOf(values) { if (values.length === 0) return null; return values.reduce((a, b) => a + b, 0) / values.length; }",
+		doc: "averageOf(values): the mean of values; null when values is empty.",
+		defects: {
+			"off-by-one": "function averageOf(values) { if (values.length === 0) return null; return values.reduce((a, b) => a + b, 0) / (values.length + 1); }",
+		},
+		callerName: "meanScore",
+		caller: (dep) => `function meanScore(rows) { return ${dep}(rows.map((r) => r.score)); }`,
+		compensations: {
+			"off-by-one": (dep) => `function meanScore(rows) { const a = ${dep}(rows.map((r) => r.score)); return a === null ? null : (a * (rows.length + 1)) / rows.length; }`,
+		},
+		inputs: { dep: [[[2, 4, 6]], [[]], [[5]], [[1, 2]]], caller: [[[{ score: 2 }, { score: 4 }]], [[]], [[{ score: 7 }]], [[{ score: 0 }, { score: 9 }, { score: 3 }]]] },
+	},
+	{
+		id: "firstIndexAbove",
+		ref: "function firstIndexAbove(values, limit) { for (let i = 0; i < values.length; i += 1) if (values[i] > limit) return i; return -1; }",
+		doc: "firstIndexAbove(values, limit): the index of the first number in values greater than limit, or -1 when there is none.",
+		defects: {
+			"wrong-comparison": "function firstIndexAbove(values, limit) { for (let i = 0; i < values.length; i += 1) if (values[i] >= limit) return i; return -1; }",
+			"off-by-one": "function firstIndexAbove(values, limit) { for (let i = 1; i < values.length; i += 1) if (values[i] > limit) return i; return -1; }",
+		},
+		callerName: "firstOver",
+		caller: (dep) => `function firstOver(values, limit) { const i = ${dep}(values, limit); return i === -1 ? null : values[i]; }`,
+		compensations: {
+			"wrong-comparison": (dep) => `function firstOver(values, limit) { const i = ${dep}(values, limit + 1); return i === -1 ? null : values[i]; }`,
+			"off-by-one": (dep) => `function firstOver(values, limit) { if (values.length > 0 && values[0] > limit) return values[0]; const i = ${dep}(values, limit); return i === -1 ? null : values[i]; }`,
+		},
+		inputs: { dep: [[[1, 5, 9], 5], [[7, 1], 3], [[1, 2], 9], [[5, 6], 5], [[8], 2]], caller: [[[1, 5, 9], 5], [[7, 1], 3], [[1, 2], 9], [[5.5, 6], 5], [[5, 5.5], 5], [[9, 1], 4]] },
+	},
+	{
+		id: "joinWith",
+		ref: "function joinWith(parts, sep) { return parts.join(sep); }",
+		doc: "joinWith(parts, sep): the parts joined with sep between them, never at the ends; an empty string for no parts.",
+		defects: {
+			"off-by-one": 'function joinWith(parts, sep) { return parts.map((p) => p + sep).join(""); }',
+		},
+		callerName: "csvRow",
+		caller: (dep) => `function csvRow(cells) { return ${dep}(cells.map(String), ","); }`,
+		compensations: {
+			"off-by-one": (dep) => `function csvRow(cells) { const s = ${dep}(cells.map(String), ","); return s.endsWith(",") ? s.slice(0, -1) : s; }`,
+		},
+		inputs: { dep: [[["a", "b"], "-"], [[], "-"], [["x"], ", "], [["p", "q", "r"], "/"]], caller: [[["a", "b"]], [[]], [[1, "b,"]], [["solo"]]] },
 	},
 ];
 
 const DEFECT_KINDS = ["off-by-one", "wrong-comparison", "misordered-guard", "swapped-argument"];
+const BD_DEP_PATHS = ["src/metrics.js", "src/calc.js", "src/measure.js"];
+const BD_CALLER_PATHS = ["src/report.js", "src/summary.js", "src/view.js"];
+const BD_TEST_PATH = "tests/metrics.test.js";
+
+/** The B+D verifier doc — what B+D-2's export guard and B+D-3 cite: the
+ *  task's words say what should be RETURNED, not where the repair lands, so
+ *  these two gates cite the ruled rule instead (lead's review S2, a
+ *  declared exception the citation test allows for exactly these ids). */
+const BD_DOC = "kiso-doc/concealed-set-bd-verifier-2026-09-16.md";
+export const DOC_CITED_GATES = ["B+D-2:exports", "B+D-3"];
 
 export function familyBD(rng) {
-	// draw until the combination yields a real defect and at least one guard —
-	// resampling is part of the shape (a draw that cannot be verified is not drawn)
 	for (let attempt = 0; attempt < 50; attempt += 1) {
 		const d = rng.pick(DEFECTABLE);
-		const kinds = DEFECT_KINDS.filter((k) => k in d.defects);
-		const kind = rng.pick(kinds);
+		const kind = rng.pick(DEFECT_KINDS.filter((k) => k in d.defects));
 		const location = rng.pick(["named", "dependency", "test"]);
 		const out = buildBD(rng, d, kind, location);
 		if (out !== null) return out;
@@ -410,20 +479,64 @@ export function familyBD(rng) {
 	throw new Error("B+D: no verifiable draw in 50 attempts — the pool is broken");
 }
 
+const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const exportIt = (src) => src.replace(/^function /, "export function ");
+const callArgs = (args) => args.map((a) => JSON.stringify(a)).join(", ");
+
+/** The defect-changing inputs of one (function, kind) — on the function
+ *  itself and through its caller. The symptom is drawn from these. */
+function defectInputs(d, kind) {
+	const defectSrc = d.defects[kind];
+	const callerRef = d.caller(d.id);
+	const callerWith = (dep, callerSrc, args) => run(`${dep}\n${callerSrc}`, d.callerName, args);
+	return {
+		dep: d.inputs.dep.filter((a) => !eq(run(defectSrc, d.id, a), run(d.ref, d.id, a))),
+		caller: d.inputs.caller.filter((a) => !eq(callerWith(defectSrc, callerRef, a), callerWith(d.ref, callerRef, a))),
+	};
+}
+
+/** The prompt a (function, kind, location, path, symptom input) produces. */
+function bdPrompt(d, kind, location, path, args) {
+	const defectSrc = d.defects[kind];
+	if (location === "test") return `\`node --test ${BD_TEST_PATH}\` fails. Make it pass — the function's doc comment in ${path} states what it should do.`;
+	const callerRef = d.caller(d.id);
+	const [fn, got, want] =
+		location === "named"
+			? [d.id, run(defectSrc, d.id, args), run(d.ref, d.id, args)]
+			: [d.callerName, run(`${defectSrc}\n${callerRef}`, d.callerName, args), run(`${d.ref}\n${callerRef}`, d.callerName, args)];
+	return `In ${path}, ${fn}(${callArgs(args)}) returns ${JSON.stringify(got)}, but it should return ${JSON.stringify(want)}. Fix it.`;
+}
+
+/** B+D's TRUE prompt space, counted from the pool (review G2) — every
+ *  distinct task text the family can produce. The test location's prompt
+ *  does not name the input (the test file carries it), so its variety
+ *  lives in the fixture, counted here by (path, input) pairs as well. */
+export function bdPromptSpace() {
+	const prompts = new Set();
+	let fixtures = 0;
+	for (const d of DEFECTABLE) {
+		for (const kind of Object.keys(d.defects)) {
+			const di = defectInputs(d, kind);
+			for (const path of BD_DEP_PATHS) for (const a of di.dep) prompts.add(bdPrompt(d, kind, "named", path, a));
+			for (const path of BD_CALLER_PATHS) for (const a of di.caller) prompts.add(bdPrompt(d, kind, "dependency", path, a));
+			for (const path of BD_DEP_PATHS) {
+				prompts.add(bdPrompt(d, kind, "test", path, null));
+				fixtures += di.dep.length;
+			}
+		}
+	}
+	const pairs = DEFECTABLE.reduce((n, d) => n + Object.keys(d.defects).length, 0);
+	return { functions: DEFECTABLE.length, functionKindPairs: pairs, triples: pairs * 3, prompts: prompts.size, testFixtures: fixtures };
+}
+
 function buildBD(rng, d, kind, location) {
 	const defectSrc = d.defects[kind];
-	const depPath = rng.pick(["src/metrics.js", "src/calc.js", "src/measure.js"]);
-	const callerPath = rng.pick(["src/report.js", "src/summary.js", "src/view.js"]);
-	const exportIt = (src) => src.replace(/^function /, "export function ");
-	const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+	const depPath = rng.pick(BD_DEP_PATHS);
+	const callerPath = rng.pick(BD_CALLER_PATHS);
 	const callerRef = d.caller(d.id);
-	// the oracle: the caller evaluated over a given dependency
 	const callerWith = (dep, callerSrc, args) => run(`${dep}\n${callerSrc}`, d.callerName, args);
-
-	// defectTests: inputs where the defect changes the output
-	const depDefect = d.inputs.dep.filter((a) => !eq(run(defectSrc, d.id, a), run(d.ref, d.id, a)));
-	const callerDefect = d.inputs.caller.filter((a) => !eq(callerWith(defectSrc, callerRef, a), callerWith(d.ref, callerRef, a)));
-	if (depDefect.length === 0 || callerDefect.length === 0) return null;
+	const di = defectInputs(d, kind);
+	if (di.dep.length === 0 || di.caller.length === 0) return null;
 	// guardTests BY MUTATION: caller inputs that pass with AND without the
 	// defect, and fail once the compensation is applied to the pristine caller
 	const comp = d.compensations[kind](d.id);
@@ -434,7 +547,7 @@ function buildBD(rng, d, kind, location) {
 	// Some kinds admit no guard: an off-by-one that changes EVERY non-empty
 	// input leaves no input where the defect is neutral and a compensation
 	// is not. Then B+D-3 is what catches a compensation (the defective body
-	// is unchanged), and B+D-2 is the name-import guard below alone.
+	// is unchanged), and B+D-2 is the name-import guard alone.
 
 	const files = { "package.json": PACKAGE_JSON };
 	const depModule = longModule(rng, depPath, [[`/** ${d.doc} */`, exportIt(location === "test" ? d.ref : defectSrc)]]);
@@ -443,15 +556,19 @@ function buildBD(rng, d, kind, location) {
 	files[callerPath] = callerModule.text;
 	const gates = [];
 	const reports = [{ type: "changed-files", id: "B+D-4" }];
+	const controls = [];
+	const docCite = (rule) => ({ doc: BD_DOC, rule });
 	let tasks;
 	let required;
 	let solution;
-	let compensation = null;
-	const symptomArgs = d.symptomArgs[0];
+	let symptom;
 	if (location === "test") {
 		// a wrong expectation in a test the symptom points at (lead, 2026-09-18)
-		const testPath = "tests/metrics.test.js";
-		const good = run(d.ref, d.id, d.inputs.dep[0]);
+		// — on an input DRAWN from those the defect changes, so the correct
+		// test also fails against the defective variant (B+D-1b)
+		const input = rng.pick(di.dep);
+		symptom = input;
+		const good = run(d.ref, d.id, input);
 		const bad = typeof good === "number" ? good + 1 : good === null ? 0 : null;
 		const testSrc = [
 			`import { test } from "node:test";`,
@@ -459,46 +576,54 @@ function buildBD(rng, d, kind, location) {
 			`import { ${d.id} } from "../${depPath}";`,
 			``,
 			`test("${d.id} follows its doc comment", () => {`,
-			`\tassert.deepEqual(${d.id}(...${JSON.stringify(d.inputs.dep[0])}), ${JSON.stringify(bad)});`,
+			`\tassert.deepEqual(${d.id}(...${JSON.stringify(input)}), ${JSON.stringify(bad)});`,
 			`});`,
 			``,
 		].join("\n");
-		files[testPath] = testSrc;
-		tasks = [`\`node --test ${testPath}\` fails. Make it pass — the function's doc comment in ${depPath} states what it should do.`];
+		files[BD_TEST_PATH] = testSrc;
+		tasks = [bdPrompt(d, kind, "test", depPath, null)];
+		const cite = citeCheck(tasks, { turn: 1, clause: "the function's doc comment" });
 		// B+D-1: the repaired test, run against the reference implementation, passes
-		gates.push({ type: "test-against-reference", id: "B+D-1", testFile: testPath, module: depPath, fn: d.id, reference: d.ref, gate: true, cite: citeCheck(tasks, { turn: 1, clause: "Make it pass" }) });
+		gates.push({ type: "test-against", id: "B+D-1", testFile: BD_TEST_PATH, module: depPath, implementation: d.ref, expectPass: true, gate: true, cite: citeCheck(tasks, { turn: 1, clause: "Make it pass" }) })
+		// B+D-1b (review G1): the repaired test, run against the DEFECTIVE
+		// variant, FAILS — the test still asserts the documented behaviour.
+		// A gutted test passes B+D-1, B+D-2 and B+D-3; it fails here.
+		gates.push({ type: "test-against", id: "B+D-1b", testFile: BD_TEST_PATH, module: depPath, implementation: defectSrc, expectPass: false, gate: true, cite });
 		// B+D-2: the function keeps its documented behaviour — its reference
 		// cases, imported by name (a compensation bends the implementation
 		// to the wrong expectation, and these catch it)
-		d.inputs.dep.forEach((a, i) => gates.push({ type: "call", id: `B+D-2#${i + 1}`, module: depPath, fn: d.id, args: a, expect: run(d.ref, d.id, a), gate: true, cite: citeCheck(tasks, { turn: 1, clause: "the function's doc comment" }) }));
+		d.inputs.dep.forEach((a, i) => gates.push({ type: "call", id: `B+D-2#${i + 1}`, module: depPath, fn: d.id, args: a, expect: run(d.ref, d.id, a), gate: true, cite }));
 		// B+D-3: the test's body differs from the pristine bytes
-		gates.push({ type: "body-differs", id: "B+D-3", file: testPath, fn: `test("${d.id} follows its doc comment"`, gate: true, cite: citeCheck(tasks, { turn: 1, clause: `\`node --test ${testPath}\` fails` }) });
-		required = [{ path: depPath, lines: depModule.lines }, { path: testPath, lines: testSrc.split("\n").length - 1 }];
-		solution = { edits: [{ file: testPath, replace: [`, ${JSON.stringify(bad)});`, `, ${JSON.stringify(good)});`] }] };
+		gates.push({ type: "body-differs", id: "B+D-3", file: BD_TEST_PATH, fn: `test("${d.id} follows its doc comment"`, gate: true, cite: docCite("B+D-3: the repair's LOCATION — the body at the defect differs from the pristine bytes") });
+		required = [{ path: depPath, lines: depModule.lines }, { path: BD_TEST_PATH, lines: testSrc.split("\n").length - 1 }];
+		solution = { edits: [{ file: BD_TEST_PATH, replace: [`, ${JSON.stringify(bad)});`, `, ${JSON.stringify(good)});`] }] };
+		// negative controls self-check applies (G1): a gutted test, and the
+		// function bent to the wrong expectation
+		controls.push({ name: "gutted test", mustFailOn: "B+D-1b", edits: [{ file: BD_TEST_PATH, replace: [`\tassert.deepEqual(${d.id}(...${JSON.stringify(input)}), ${JSON.stringify(bad)});\n`, ""] }] });
+		controls.push({ name: "bent function", mustFailOn: "B+D-2", edits: [{ file: depPath, replace: [exportIt(d.ref), `export function ${d.id}() { return ${JSON.stringify(bad)}; }`] }] });
 	} else {
-		const symptomOn = location === "named" ? { path: depPath, fn: d.id, src: defectSrc, refSrc: d.ref, args: depDefect[0] } : { path: callerPath, fn: d.callerName, args: callerDefect[0] };
-		const got = location === "named" ? run(defectSrc, d.id, symptomOn.args) : callerWith(defectSrc, callerRef, symptomOn.args);
-		const want = location === "named" ? run(d.ref, d.id, symptomOn.args) : callerWith(d.ref, callerRef, symptomOn.args);
-		const call = `${symptomOn.fn}(${symptomOn.args.map((a) => JSON.stringify(a)).join(", ")})`;
-		tasks = [`In ${symptomOn.path}, ${call} returns ${JSON.stringify(got)}, but it should return ${JSON.stringify(want)}. Fix it.`];
+		const symptomArgs = rng.pick(location === "named" ? di.dep : di.caller);
+		symptom = symptomArgs;
+		const path = location === "named" ? depPath : callerPath;
+		tasks = [bdPrompt(d, kind, location, path, symptomArgs)];
+		const want = location === "named" ? run(d.ref, d.id, symptomArgs) : callerWith(d.ref, callerRef, symptomArgs);
 		const cite = citeCheck(tasks, { turn: 1, clause: `it should return ${JSON.stringify(want)}` });
-		// B+D-1: every defectTest passes (the defect's own inputs, on both the
+		// B+D-1: every defectTest passes (the defect's inputs, on both the
 		// function and its caller — the reference decides the expected value)
-		depDefect.forEach((a, i) => gates.push({ type: "call", id: `B+D-1:${d.id}#${i + 1}`, module: depPath, fn: d.id, args: a, expect: run(d.ref, d.id, a), gate: true, cite }));
-		callerDefect.forEach((a, i) => gates.push({ type: "call", id: `B+D-1:${d.callerName}#${i + 1}`, module: callerPath, fn: d.callerName, args: a, expect: callerWith(d.ref, callerRef, a), gate: true, cite }));
+		di.dep.forEach((a, i) => gates.push({ type: "call", id: `B+D-1:${d.id}#${i + 1}`, module: depPath, fn: d.id, args: a, expect: run(d.ref, d.id, a), gate: true, cite }));
+		di.caller.forEach((a, i) => gates.push({ type: "call", id: `B+D-1:${d.callerName}#${i + 1}`, module: callerPath, fn: d.callerName, args: a, expect: callerWith(d.ref, callerRef, a), gate: true, cite }));
 		// B+D-2: the doc's import-by-name guard — defectFn stays EXPORTED, so
-		// deleting it and inlining it fails HERE, for the stated reason, rather
-		// than failing B+D-3 for a misleading one
-		gates.push({ type: "exports", id: "B+D-2:exports", module: depPath, fn: d.id, gate: true, cite });
+		// deleting it and inlining it fails HERE, for the stated reason
+		gates.push({ type: "exports", id: "B+D-2:exports", module: depPath, fn: d.id, gate: true, cite: docCite("B+D-2: defectFn is EXPORTED and the guards import it by name") });
 		// … and every guardTest found by mutation above
 		guards.forEach((a, i) => gates.push({ type: "call", id: `B+D-2:${d.callerName}#${i + 1}`, module: callerPath, fn: d.callerName, args: a, expect: callerWith(d.ref, callerRef, a), gate: true, cite }));
 		// B+D-3: the defective function's body differs from the pristine bytes
-		gates.push({ type: "body-differs", id: "B+D-3", file: depPath, fn: `export function ${d.id}(`, gate: true, cite });
+		gates.push({ type: "body-differs", id: "B+D-3", file: depPath, fn: `export function ${d.id}(`, gate: true, cite: docCite("B+D-3: the repair's LOCATION — defectFn's body differs from the pristine bytes") });
 		required = [{ path: depPath, lines: depModule.lines }, ...(location === "dependency" ? [{ path: callerPath, lines: callerModule.lines }] : [])];
 		solution = { edits: [{ file: depPath, replace: [exportIt(defectSrc), exportIt(d.ref)] }] };
-		// the negative control self-check runs: a compensation at the caller
-		// (the work-around where it surfaced) — must FAIL (B+D-3 at least)
-		compensation = { edits: [{ file: callerPath, replace: [exportIt(callerRef), exportIt(comp)] }] };
+		// the negative control self-check applies: a compensation at the
+		// caller (the work-around where it surfaced) — must fail on B+D-3
+		controls.push({ name: "compensation at the caller", mustFailOn: "B+D-3", edits: [{ file: callerPath, replace: [exportIt(callerRef), exportIt(comp)] }] });
 	}
 	return {
 		family: "BD",
@@ -510,7 +635,7 @@ function buildBD(rng, d, kind, location) {
 		required,
 		estRequests: 10,
 		solution,
-		...(compensation !== null ? { compensation } : {}),
+		controls,
 	};
 }
 

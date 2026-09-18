@@ -8,8 +8,9 @@
  *     pristine/             the fixture as generated, for the byte
  *                           comparisons and the changed-file report
  *     solution.json         the reference solution (self-check's positive)
- *     compensation.json     B+D only: a work-around at the caller
- *                           (self-check's negative control)
+ *     controls.json         negative controls, each with the gate it must
+ *                           fail on (B+D: a compensation at the caller, a
+ *                           gutted test, a bent function)
  *   DIR/instance.json     id, family, the favours label, params, the shape
  *                         hash, the request estimate, and F's kill spec
  *
@@ -35,16 +36,17 @@ export function materialize(instance, dir) {
 	writeTree(join(dir, "verifier", "pristine"), instance.files);
 	writeFileSync(join(dir, "tasks.json"), `${JSON.stringify(instance.tasks, null, 2)}\n`, "utf8");
 	writeFileSync(join(dir, "verifier", "spec.json"), `${JSON.stringify(instance.spec, null, 2)}\n`, "utf8");
-	// held out with the verifier: the reference solution and (B+D) the
-	// compensating change, which self-check applies to prove the verifier
-	// passes a correct workspace and fails a work-around
+	// held out with the verifier: the reference solution and the negative
+	// controls self-check applies to prove the verifier passes a correct
+	// workspace and fails each named wrong one on the gate it names
 	writeFileSync(join(dir, "verifier", "solution.json"), `${JSON.stringify(instance.solution, null, 2)}\n`, "utf8");
-	if (instance.compensation !== undefined) writeFileSync(join(dir, "verifier", "compensation.json"), `${JSON.stringify(instance.compensation, null, 2)}\n`, "utf8");
+	writeFileSync(join(dir, "verifier", "controls.json"), `${JSON.stringify(instance.controls ?? [], null, 2)}\n`, "utf8");
 	const meta = {
 		id: instance.id,
 		family: instance.family,
 		favours: instance.favours,
 		shapeHash: instance.shapeHash,
+		apparatusHash: instance.apparatusHash,
 		params: instance.params,
 		turns: instance.tasks.length,
 		estRequests: instance.estRequests,

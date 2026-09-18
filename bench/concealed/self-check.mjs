@@ -1,16 +1,19 @@
 /**
  * Prove each instance's verifier before any scored leg depends on it.
  *
- * For one materialised instance, three workspaces:
+ * For one materialised instance:
  *   the untouched fixture           → must FAIL (a task already done is no task)
  *   the reference solution applied  → must PASS (a verifier that fails the
  *                                     right answer is measuring itself)
- *   B+D's compensation applied      → must FAIL, and on B+D-3 — the work-
- *                                     around where the failure surfaced
+ *   each negative control           → must FAIL, on the gate it names
+ *                                     (B+D: a compensation at the caller on
+ *                                     B+D-3; a gutted test on B+D-1b; a
+ *                                     bent function on B+D-2)
  *
- * The runner can run this at materialisation, inside the ceremony, on the
- * real seed — it reads nothing the tuning side is not allowed to see,
- * because it prints verdicts and assertion ids, never instance content.
+ * The ceremony runs this on the REAL seed, so what it returns for a person
+ * to read is instance-free: problems are described by gate TYPE and COUNT
+ * (review G5). Gate ids — which carry drawn names — are returned only when
+ * the caller asks for them (`verbose`), which the ceremony never does.
  */
 
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -27,7 +30,7 @@ function applyEdits(ws, edits) {
 		if (e.append !== undefined) after = before + e.append;
 		else {
 			const [from, to] = e.replace;
-			if (!before.includes(from)) throw new Error(`self-check: the edit's anchor is not in ${e.file}`);
+			if (!before.includes(from)) throw new Error("self-check: an edit's anchor is missing from its file");
 			after = before.replace(from, to);
 		}
 		writeFileSync(p, after, "utf8");
@@ -40,20 +43,31 @@ function workspaceFrom(instanceDir) {
 	return ws;
 }
 
-export function selfCheck(instanceDir) {
+/** "call ×3, line-once ×1" — types and counts, never ids. */
+function byType(gates) {
+	const n = new Map();
+	for (const g of gates) n.set(g.type, (n.get(g.type) ?? 0) + 1);
+	return [...n].map(([t, k]) => `${t} ×${k}`).join(", ");
+}
+
+export function selfCheck(instanceDir, { verbose = false } = {}) {
 	const meta = JSON.parse(readFileSync(join(instanceDir, "instance.json"), "utf8"));
 	const solution = JSON.parse(readFileSync(join(instanceDir, "verifier", "solution.json"), "utf8"));
-	const scratch = mkdtempSync(join(tmpdir(), "kiso-concealed-self-"));
+	const controls = JSON.parse(readFileSync(join(instanceDir, "verifier", "controls.json"), "utf8"));
+	const cleanup = [];
 	const problems = [];
-	const cleanup = [scratch];
+	const detail = [];
+	const failedGates = (r) => r.gates.filter((g) => g.class === "GATE" && !g.pass);
 	try {
+		const scratch = mkdtempSync(join(tmpdir(), "kiso-concealed-self-"));
+		cleanup.push(scratch);
+		const emptyAnswer = join(scratch, "empty-answer.txt");
+		writeFileSync(emptyAnswer, "\n");
 		// 1. the untouched fixture
 		const pristine = workspaceFrom(instanceDir);
 		cleanup.push(pristine);
-		const emptyAnswer = join(scratch, "empty-answer.txt");
-		writeFileSync(emptyAnswer, "\n");
 		const p = verify({ instanceDir, workspace: pristine, answerFile: emptyAnswer });
-		if (p.verdict !== "fail") problems.push("the untouched fixture PASSES — the task is already done");
+		if (p.verdict !== "fail") problems.push("the untouched fixture passes");
 		// 2. the reference solution
 		const solved = workspaceFrom(instanceDir);
 		cleanup.push(solved);
@@ -62,25 +76,22 @@ export function selfCheck(instanceDir) {
 		const text = solution.answer === undefined ? "" : solution.answer.text ?? `The answer is ${execFileSync(solution.answer.command[0], solution.answer.command.slice(1), { encoding: "utf8" }).trim()}.`;
 		writeFileSync(answer, `${text}\n`);
 		const s = verify({ instanceDir, workspace: solved, answerFile: answer });
-		if (s.verdict !== "pass") problems.push(`the reference solution FAILS: ${s.gates.filter((g) => g.class === "GATE" && !g.pass).map((g) => g.id).join(", ")}`);
-		// 3. B+D's compensation
-		let compensation = null;
-		try {
-			compensation = JSON.parse(readFileSync(join(instanceDir, "verifier", "compensation.json"), "utf8"));
-		} catch {
-			// no compensation for this family or location
+		if (s.verdict !== "pass") {
+			problems.push(`the reference solution fails (${byType(failedGates(s))})`);
+			if (verbose) detail.push(...failedGates(s).map((g) => g.id));
 		}
-		if (compensation !== null) {
-			const comp = workspaceFrom(instanceDir);
-			cleanup.push(comp);
-			applyEdits(comp, compensation.edits);
-			const c = verify({ instanceDir, workspace: comp, answerFile: answer });
-			const b3 = c.gates.find((g) => g.id === "B+D-3");
-			if (c.verdict !== "fail") problems.push("the compensating change PASSES");
-			else if (b3 === undefined || b3.pass) problems.push("the compensating change fails, but not on B+D-3");
-		}
+		// 3. the negative controls
+		controls.forEach((c, i) => {
+			const ws = workspaceFrom(instanceDir);
+			cleanup.push(ws);
+			applyEdits(ws, c.edits);
+			const r = verify({ instanceDir, workspace: ws, answerFile: answer });
+			const on = failedGates(r).filter((g) => g.id === c.mustFailOn || g.id.startsWith(`${c.mustFailOn}:`) || g.id.startsWith(`${c.mustFailOn}#`));
+			if (r.verdict !== "fail") problems.push(`negative control ${i + 1} (${c.name}) passes`);
+			else if (on.length === 0) problems.push(`negative control ${i + 1} (${c.name}) fails, but not on the gate it names`);
+		});
 	} finally {
 		for (const d of cleanup) rmSync(d, { recursive: true, force: true });
 	}
-	return { id: meta.id, family: meta.family, ok: problems.length === 0, problems };
+	return { id: meta.id, family: meta.family, ok: problems.length === 0, problems, ...(verbose ? { detail } : {}) };
 }

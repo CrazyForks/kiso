@@ -15,7 +15,8 @@
  * number (lead, 2026-09-18); the cap is the owner's.
  */
 
-import { generateAll, shapeHash } from "./generate.mjs";
+import { apparatusHash, generateAll, shapeHash } from "./generate.mjs";
+import { bdPromptSpace } from "./shape/families.mjs";
 
 export const READ_WINDOW = 200;
 export const TRUNCATION_MEASURED = 0.426;
@@ -59,6 +60,8 @@ export function checkShape(seeds, instancesFor = generateAll) {
 
 	return {
 		shapeHash: shapeHash(),
+		apparatusHash: apparatusHash(),
+		bd: bdPromptSpace(),
 		seeds: seeds.length,
 		instancesPerArm: total,
 		counts,
@@ -72,6 +75,36 @@ export function checkShape(seeds, instancesFor = generateAll) {
 		requestsPerArmPerPass: perArm,
 		requestsPerPassBothArms: perArm * 2,
 		violations,
+	};
+}
+
+/**
+ * ONE seed's figures (review G6). The band is a property of the SHAPE and
+ * is gated in aggregate; but the owner draws ONE seed, and about a third of
+ * single seeds fall outside the band on their own. The pre-registered rule
+ * (kiso-doc ceremony): at the freeze the max worker runs
+ * `check-shape --seed <drawn>` with the owner present; out of band → one
+ * redraw; both draws are written into the report.
+ *
+ * It prints counts and length figures — never an instance's content.
+ */
+export function checkSeed(seed, instancesFor = generateAll) {
+	const set = instancesFor(seed);
+	const lengths = set.flatMap((i) => i.required.map((r) => r.lines)).sort((a, b) => a - b);
+	const share = lengths.length === 0 ? 0 : lengths.filter((n) => n > READ_WINDOW).length / lengths.length;
+	const counts = {};
+	for (const inst of set) counts[inst.family] = (counts[inst.family] ?? 0) + 1;
+	const inBand = share >= TRUNCATION_BAND[0] && share <= TRUNCATION_BAND[1];
+	return {
+		shapeHash: shapeHash(),
+		apparatusHash: apparatusHash(),
+		counts,
+		requiredFiles: lengths.length,
+		truncationShare: share,
+		median: quantile(lengths, 0.5),
+		p90: quantile(lengths, 0.9),
+		requestsPerArm: set.reduce((n, i) => n + i.estRequests, 0),
+		inBand,
 	};
 }
 

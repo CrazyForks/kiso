@@ -14,7 +14,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { generateAll, generateInstance } from "../generate.mjs";
 import { materialize } from "../materialize.mjs";
-import { verify } from "../verify.mjs";
+import { answerHas, verify } from "../verify.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI = join(HERE, "..", "cli.mjs");
@@ -70,7 +70,8 @@ test("A: the untouched fixture fails with named, cited assertions; the reference
 
 test("B+D-3 is RED on a compensating change — the byte comparison, not a judgement", () => {
 	const { dir } = materialized("throwaway-bd", "BD", (i) => i.params.location !== "test");
-	const comp = JSON.parse(readFileSync(join(dir, "verifier", "compensation.json"), "utf8"));
+	const controls = JSON.parse(readFileSync(join(dir, "verifier", "controls.json"), "utf8"));
+	const comp = controls.find((c) => c.mustFailOn === "B+D-3");
 	const r = verify({ instanceDir: dir, workspace: workspace(dir, comp.edits) });
 	assert.equal(r.verdict, "fail");
 	const b3 = r.gates.find((g) => g.id === "B+D-3");
@@ -104,6 +105,14 @@ test("B+D location=test: the fixed expectation passes against the reference; ben
 	assert.equal(good.verdict, "pass", JSON.stringify(good.gates.filter((x) => !x.pass)));
 	const untouched = verify({ instanceDir: dir, workspace: workspace(dir) });
 	assert.equal(untouched.gates.find((g) => g.id === "B+D-3").pass, false, "an unchanged test is not a repair");
+	// G1: a GUTTED test passes B+D-1, B+D-2 and B+D-3 — and fails B+D-1b
+	const gut = JSON.parse(readFileSync(join(dir, "verifier", "controls.json"), "utf8")).find((c) => c.mustFailOn === "B+D-1b");
+	const gutted = verify({ instanceDir: dir, workspace: workspace(dir, gut.edits) });
+	assert.equal(gutted.verdict, "fail");
+	const b1b = gutted.gates.find((g) => g.id === "B+D-1b");
+	assert.equal(b1b.pass, false);
+	assert.match(b1b.detail, /DEFECTIVE variant/);
+	for (const id of ["B+D-1", "B+D-3"]) assert.equal(gutted.gates.find((g) => g.id === id).pass, true, `${id} alone would have accepted the gutted test`);
 	// bending the FUNCTION to the wrong expectation (the compensation for this
 	// location) breaks its reference cases — B+D-2, imported by name
 	const ws = workspace(dir);
@@ -158,6 +167,35 @@ test("E: correctness is a TOKEN of the answer; requests and tool calls are repor
 	}
 });
 
+test("F: a list-writing arm's bulleted ledger counts; a doubled bullet is still doubled (review G7)", () => {
+	const { dir } = materialized("throwaway-f", "F");
+	const edits = solution(dir).edits.map((e) => (e.file === "CHANGES.md" ? { ...e, append: `- ${e.append}` } : e));
+	const bulleted = verify({ instanceDir: dir, workspace: workspace(dir, edits) });
+	assert.equal(bulleted.verdict, "pass", JSON.stringify(bulleted.gates.filter((x) => !x.pass)));
+	const firstLedger = edits.find((e) => e.file === "CHANGES.md");
+	const doubled = verify({ instanceDir: dir, workspace: workspace(dir, [...edits, { file: "CHANGES.md", append: `* ${firstLedger.append.slice(2)}` }]) });
+	assert.ok(doubled.gates.some((g) => g.type === "line-once" && !g.pass && /2 occurrence/.test(g.detail)));
+});
+
+test("E: the answer boundary — each case the review found, pinned (G3)", () => {
+	const cases = [
+		["It is 4.", "4", true],
+		["4.5", "4", false],
+		["-4", "4", false],
+		["5-8", "5", false],
+		["5-8", "8", false],
+		["1.28.4.1", "1.28.4", false],
+		["v1.28.4", "1.28.4", true],
+		["It is 4 or 5.", "4", false],
+		["Either 1.28.4 or 1.28.5.", "1.28.4", false],
+		["120", "12", false],
+		["./src/order.js", "src/order.js", true],
+	];
+	for (const [text, expect, want] of cases) assert.equal(answerHas(text, expect), want, `${JSON.stringify(text)} for ${expect}`);
+	// echoing a number the question itself contains is not a hedge
+	assert.equal(answerHas("The comment MARK-4821 is on line 57.", "57", "On which line of src/x.js is the comment MARK-4821?"), true);
+});
+
 test("C: touching the decoy is reported, never a failure", () => {
 	const { inst, dir } = materialized("throwaway-c", "C");
 	const decoy = inst.params.decoyPath;
@@ -177,6 +215,34 @@ test("verify's CLI prints ONE word and writes verify.json with the citations", (
 	assert.equal(body.verdict, "pass");
 	assert.ok(body.gates.every((g) => g.cite && g.cite.clause));
 	assert.equal(body.favours, "ours by tuning");
+});
+
+test("a hanging function fails only its own module's gates (review S1)", () => {
+	const { inst, dir } = materialized("throwaway-a", "A", (i) => i.params.modules.length >= 2);
+	const edits = solution(dir).edits;
+	const [hangMod] = inst.params.modules;
+	const ws = workspace(dir, edits);
+	writeFileSync(join(ws, hangMod), `${readFileSync(join(ws, hangMod), "utf8")}\nwhile (true) {}\n`);
+	const r = verify({ instanceDir: dir, workspace: ws });
+	const callGates = r.gates.filter((g) => g.type === "call");
+	assert.ok(callGates.some((g) => g.pass), "a hang in one module failed every call gate");
+	assert.ok(callGates.some((g) => !g.pass));
+});
+
+test("the CLI refuses unknown flags and check-shape --seed reports one seed (review S3, G6)", () => {
+	assert.throws(() => execFileSync(process.execPath, [CLI, "check-shape", "--sed", "x"], { encoding: "utf8", stdio: "pipe" }), /unknown flag --sed/);
+	let out = "";
+	let code = 0;
+	try {
+		out = execFileSync(process.execPath, [CLI, "check-shape", "--seed", "throwaway-one"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+	} catch (err) {
+		out = err.stdout;
+		code = err.status;
+	}
+	assert.match(out, /this seed: A 6, BD 6, C 6, E 6, F 6/);
+	assert.match(out, /over 200 lines: \d+\.\d%/);
+	assert.ok(/IN BAND/.test(out) ? code === 0 : code === 1, "out of band exits non-zero");
+	assert.doesNotMatch(out, /function|export|src\//, "a seed report carries no instance content");
 });
 
 test("materialize refuses a non-empty directory", () => {

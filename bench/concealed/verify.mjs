@@ -38,8 +38,22 @@ function listFiles(root) {
 	return out;
 }
 
-/** Run every call gate in ONE child: import from the workspace, call, report. */
+/** Run the call gates ONE CHILD PER MODULE (review S1): a function that
+ *  hangs fails the gates of its own module, never every call gate. */
 function runCalls(workspace, calls) {
+	const out = new Array(calls.length);
+	const byModule = new Map();
+	calls.forEach((c, i) => byModule.set(c.module, [...(byModule.get(c.module) ?? []), i]));
+	for (const idx of byModule.values()) {
+		const res = runModuleCalls(workspace, idx.map((i) => calls[i]));
+		idx.forEach((i, k) => {
+			out[i] = res[k];
+		});
+	}
+	return out;
+}
+
+function runModuleCalls(workspace, calls) {
 	if (calls.length === 0) return [];
 	const script = `
 import { pathToFileURL } from "node:url";
@@ -99,13 +113,36 @@ function readOr(path) {
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-/** The expected value as a TOKEN of the answer, never a substring of a larger number. */
-function answerHas(answer, expect) {
+/** The numbers an answer states: integers, decimals and dotted versions,
+ *  signed only where the sign is not glued to a word ("MARK-4821" is a
+ *  marker, not minus 4821). */
+function numbersIn(text) {
+	return [...text.matchAll(/(?<![\w.])(?:v(?=\d))?-?\d+(?:\.\d+)*(?![\w])/g)].map((m) => m[0].replace(/\.$/, "").replace(/^v/, ""));
+}
+
+/**
+ * The expected value as a TOKEN of the answer (review G3). Neither side of
+ * the token may continue it: not a word character, a dot followed by a
+ * digit, or a dash — so "4" is not in "4.5", "-4" or "5-8", and "1.28.4" is
+ * not in "1.28.4.1". A sentence's own full stop still ends a token.
+ *
+ * When a NUMBER is expected, an answer stating more than one distinct
+ * number fails: a hedge is not a verified answer. Numbers the question
+ * itself contains (a marker, a key) are not counted — echoing the question
+ * is not hedging.
+ */
+export function answerHas(answer, expect, question = "") {
 	const e = String(expect);
 	const variants = [e];
 	if (/^[\w./-]+\.js$/.test(e)) variants.push(`./${e}`);
-	if (/^v?\d+\.\d+\.\d+$/.test(e)) variants.push(e.replace(/^v/, ""), `v${e.replace(/^v/, "")}`);
-	return variants.some((v) => new RegExp(`(^|[^\\w.])${escapeRe(v)}($|[^\\w]|\\.(?!\\d))`).test(answer));
+	const version = /^v?\d+(\.\d+)*$/.test(e);
+	if (version) variants.push(e.replace(/^v/, ""), `v${e.replace(/^v/, "")}`);
+	const found = variants.some((v) => new RegExp(`(^|[^\\w.-])${escapeRe(v)}($|[^\\w.-]|\\.(?!\\d))`).test(answer));
+	if (!found) return false;
+	if (!version) return true;
+	const asked = new Set(numbersIn(question));
+	const stated = new Set(numbersIn(answer).filter((n) => !asked.has(n)).map((n) => n.replace(/^v/, "")));
+	return stated.size <= 1;
 }
 
 export function verify({ instanceDir, workspace, answerFile, outDir }) {
@@ -127,6 +164,7 @@ export function verify({ instanceDir, workspace, answerFile, outDir }) {
 	});
 
 	const answer = answerFile !== undefined ? readOr(answerFile) : null;
+	const tasks = JSON.parse(readFileSync(join(instanceDir, "tasks.json"), "utf8"));
 	for (const g of spec.gates) {
 		switch (g.type) {
 			case "call":
@@ -142,7 +180,10 @@ export function verify({ instanceDir, workspace, answerFile, outDir }) {
 			}
 			case "line-once": {
 				const text = readOr(join(workspace, g.file)) ?? "";
-				const n = text.split("\n").filter((l) => l.trim() === g.line).length;
+				// review G7: a list-writing arm writes "- added X" — the line is the
+				// same fact with a bullet; a doubled bullet is still doubled
+				const re = new RegExp(`^\\s*(?:[-*]\\s+)?${escapeRe(g.line)}\\s*$`);
+				const n = text.split("\n").filter((l) => re.test(l)).length;
 				add(g, n === 1, `${n} occurrence(s)`);
 				break;
 			}
@@ -152,7 +193,7 @@ export function verify({ instanceDir, workspace, answerFile, outDir }) {
 				add(g, n === 1, `${n} definition(s)`);
 				break;
 			}
-			case "test-against-reference": {
+			case "test-against": {
 				const test = readOr(join(workspace, g.testFile));
 				if (test === null) {
 					add(g, false, `${g.testFile} is missing`);
@@ -163,10 +204,19 @@ export function verify({ instanceDir, workspace, answerFile, outDir }) {
 					mkdirSync(join(dir, "src"), { recursive: true });
 					mkdirSync(join(dir, "tests"), { recursive: true });
 					writeFileSync(join(dir, "package.json"), '{"type":"module"}\n');
-					writeFileSync(join(dir, g.module), `export ${g.reference}\n`);
+					writeFileSync(join(dir, g.module), `export ${g.implementation}\n`);
 					writeFileSync(join(dir, g.testFile), test);
-					const r = spawnSync(process.execPath, ["--test", g.testFile], { cwd: dir, encoding: "utf8", timeout: CALL_TIMEOUT_MS });
-					add(g, r.status === 0, r.status === 0 ? "the repaired test passes against the reference implementation" : `node --test exited ${r.status}`);
+					// A `node --test` run INSIDE another test runner inherits its
+					// NODE_TEST_CONTEXT and then reports to the parent instead of
+					// setting its own exit code — a failing test would read as a
+					// pass. The verdict must not depend on who called verify.
+					const { NODE_TEST_CONTEXT: _parent, ...env } = process.env;
+					const r = spawnSync(process.execPath, ["--test", g.testFile], { cwd: dir, encoding: "utf8", timeout: CALL_TIMEOUT_MS, env });
+					const passed = r.status === 0;
+					// B+D-1: passes against the reference; B+D-1b: FAILS against the
+					// defective variant — a test that no longer asserts anything
+					// passes both implementations and fails here
+					add(g, passed === g.expectPass, g.expectPass ? (passed ? "the repaired test passes against the reference implementation" : `the repaired test fails against the reference (exit ${r.status})`) : passed ? "the test passes against the DEFECTIVE variant — it no longer asserts the documented behaviour" : "the test still catches the defective variant");
 				} finally {
 					rmSync(dir, { recursive: true, force: true });
 				}
@@ -174,13 +224,13 @@ export function verify({ instanceDir, workspace, answerFile, outDir }) {
 			}
 			case "answer": {
 				if (answer === null) add(g, false, "no answer file was supplied");
-				else add(g, answerHas(answer, g.expect), `expected ${JSON.stringify(g.expect)} in the answer`);
+				else add(g, answerHas(answer, g.expect, tasks[0] ?? ""), `expected ${JSON.stringify(g.expect)} as the answer's one stated value`);
 				break;
 			}
 			case "answer-machine": {
 				const truth = execFileSync(g.command[0], g.command.slice(1), { encoding: "utf8" }).trim();
 				if (answer === null) add(g, false, "no answer file was supplied");
-				else add(g, answerHas(answer, truth), `expected ${JSON.stringify(truth)} (measured now, on this machine) in the answer`);
+				else add(g, answerHas(answer, truth, tasks[0] ?? ""), `expected ${JSON.stringify(truth)} (measured now, on this machine) as the answer's one stated value`);
 				break;
 			}
 			default:
