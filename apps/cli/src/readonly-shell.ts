@@ -386,7 +386,7 @@ function find(args: readonly string[], ctx: Ctx): string | null {
 		if (s !== null) return s;
 		i += 1;
 	}
-	const noArg = new Set(["-print", "-print0", "-prune", "-empty", "-not", "!", "-o", "-a", "-and", "-or", "(", ")", "-ls", "-depth", "-true", "-false", "-readable", "-writable", "-executable", "-nouser", "-nogroup", "-xdev", "-mount", "-quit"]);
+	const noArg = new Set(["-print", "-print0", "-prune", "-empty", "-not", "!", "-o", "-a", "-and", "-or", "(", ")", "-ls", "-depth", "-d", "-true", "-false", "-readable", "-writable", "-executable", "-nouser", "-nogroup", "-xdev", "-mount", "-quit"]);
 	const oneArg = new Set(["-name", "-iname", "-path", "-ipath", "-wholename", "-iwholename", "-type", "-maxdepth", "-mindepth", "-size", "-mtime", "-mmin", "-atime", "-amin", "-ctime", "-cmin", "-regex", "-iregex", "-perm", "-user", "-group", "-links", "-printf"]);
 	const fileArg = new Set(["-newer", "-samefile"]);
 	while (i < args.length) {

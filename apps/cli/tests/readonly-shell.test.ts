@@ -132,6 +132,7 @@ const ALLOW: readonly (readonly [string, string])[] = [
 	["git log @{u}..HEAD --oneline", "git"],
 	["du -sP src", "du"],
 	["find -d src -name a.ts", "find"],
+	["find . -d -name a.ts", "find"], // BSD -d after the path is -depth
 	// the redirections that write nothing
 	["ls missing 2>/dev/null", "ls"],
 	["git log -1 2>&1", "git"],
