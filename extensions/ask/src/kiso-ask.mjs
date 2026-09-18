@@ -69,13 +69,25 @@ const ASK_PARAMETERS = {
 	additionalProperties: false,
 };
 
+// The owner's dogfood (0.40.0): a session asked "push?" after every batch,
+// though delivery had been authorized once. The old text said only when to
+// ask; it never said what to do INSTEAD, never named "may I proceed" or an
+// authorization already given, and gave no shape for a good question. Each
+// sentence below closes one of those.
 const DESCRIPTION = [
 	"Ask the human a question and wait for the answer.",
-	"1-4 questions per call; each has 2-4 options with optional one-line descriptions.",
-	"Set multiSelect for questions where several options can be picked together.",
-	"The human may also type a free-form answer, or decline: the result then names",
-	"the questions that went unanswered. Use it when a choice is the human's to make",
-	"(a direction, a trade-off, a preference) — never to confirm work you can verify.",
+	"Use it only when you are blocked on a choice that is the human's to make",
+	"(a direction, a trade-off, a preference) and the answer changes what you do next.",
+	"Do not ask to confirm work you can verify, whether to proceed, for permission",
+	"the human already gave (an authorization stands for the rest of the session",
+	"unless its scope changes), or before an action the approval panel already gates.",
+	"When a sensible default exists, take it, say which in your reply, and go on.",
+	"Put every question in one call: 1-4 questions, each specific and ending in \"?\";",
+	"2-4 mutually exclusive options, each a short label and a one-line trade-off;",
+	"the option you recommend goes first, with \"(recommended)\" in its label.",
+	"Set multiSelect when several options can be picked together.",
+	"The human can always type their own answer or decline (the result then names",
+	"the questions that went unanswered), so never add an \"Other\" option.",
 ].join(" ");
 
 /** The result the model reads — the answers, or the honest decline. The
@@ -124,8 +136,8 @@ export default async function createAskExtension(ui) {
 				idempotent: true,
 				promptSnippet: "ask_user — put a real choice to the human (1-4 questions, 2-4 options each)",
 				promptGuidelines: [
-					"ask when the decision is the human's to make; do not ask what you can check",
-					"one call carries every question you need — not four calls in a row",
+					"ask only when the human's answer changes what you do next; never ask what you can check, whether to proceed, or for permission already given",
+					"with a sensible default, take it and say so; one call carries every question, the recommended option first",
 				],
 				execute: async (input, ctx) => {
 					const questions = (input ?? {}).questions ?? [];
