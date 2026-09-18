@@ -108,3 +108,32 @@ describe("/compact asks in-band, on the prefix a run sends", () => {
 		expect(ledger()).toEqual([expect.objectContaining({ path: "serialized" })]);
 	});
 });
+
+describe("the owner's dogfood — /compact on a long autonomous session", () => {
+	it("few user turns, many tool rounds: /compact cuts at a settled round instead of saying 'fewer than 5 rounds'", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "kiso-compact-long-"));
+		const store = new SessionStore(dir);
+		let seq = 0;
+		const big = "a long line of source text\n".repeat(400); // ~2.7k tokens a result
+		for (let turn = 0; turn < 2; turn++) {
+			await store.append("s", `r${turn}`, { seq: seq++, type: "user_input", content: `task ${turn}` });
+			for (let i = 0; i < 12; i++) {
+				const id = `c${turn}-${i}`;
+				await store.append("s", `r${turn}`, { seq: seq++, type: "tool_call_end", callId: id, name: "read_file", input: { path: `${id}.ts` } });
+				await store.append("s", `r${turn}`, { seq: seq++, type: "stop", reason: "tool_use" });
+				await store.append("s", `r${turn}`, { seq: seq++, type: "tool_result", callId: id, content: big, isError: false });
+			}
+			await store.append("s", `r${turn}`, { seq: seq++, type: "text_delta", text: `done ${turn}` });
+			await store.append("s", `r${turn}`, { seq: seq++, type: "stop", reason: "end_turn" });
+			await store.append("s", `r${turn}`, { seq: seq++, type: "terminal", outcome: { kind: "completed" } });
+		}
+		const agent = createAgent({ model: "faux", store, tools: [readFile], adapter: createFauxProvider([say(VALID_SUMMARY)]), systemPrompt: "p" });
+		const session = await agent.session({ id: "s" });
+		const result = await session.summarize({ manualBudget: true });
+		expect(result).not.toBeNull();
+		// the cut is a settled round INSIDE the second turn, not a user-turn edge
+		const cut = session.log.all.find((e) => e.seq === result!.coversToSeq)!;
+		expect(["stop", "tool_result"]).toContain(cut.type);
+		expect(store.load("s").filter((r) => r.event.type === "summarized")).toHaveLength(1);
+	});
+});
