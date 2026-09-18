@@ -22,7 +22,7 @@ import type { Adapter, StreamOptions } from "@vincemakes/kiso-core";
 import type { AdapterEvent, Event, StopReason } from "@vincemakes/kiso-core";
 import type { AssistantBlock, ContentBlock, Message } from "@vincemakes/kiso-core";
 import type { ToolSpec } from "@vincemakes/kiso-core";
-import { mapApiError, parseRetryAfter, streamFailure } from "@vincemakes/kiso-core";
+import { connectionFailure, mapApiError, parseRetryAfter, streamFailure } from "@vincemakes/kiso-core";
 
 interface PendingToolCall {
 	readonly index: number;
@@ -612,7 +612,7 @@ function toOpenAIError(err: unknown, model: string): unknown {
 		return { code: "timeout", retryable: true, message: label + err.message };
 	}
 	if (err instanceof OpenAI.APIConnectionError) {
-		return { code: "network", retryable: true, message: label + err.message };
+		return connectionFailure(err, label + err.message);
 	}
 	if (err instanceof OpenAI.APIError) {
 		// CX-1 F8: the kernel owns retries — Retry-After travels with the error
@@ -625,9 +625,8 @@ function toOpenAIError(err: unknown, model: string): unknown {
 	// non-retryable: an error terminal where the mid-stream retry belongs.
 	// The name is fetch's, not the vendor's, so it is a transport failure by
 	// construction — the same class as APIConnectionError above.
-	if (err instanceof TypeError && (err.message === "terminated" || err.message === "fetch failed")) {
-		return streamFailure(label + err.message);
-	}
+	if (err instanceof TypeError && err.message === "terminated") return streamFailure(label + err.message);
+	if (err instanceof TypeError && err.message === "fetch failed") return connectionFailure(err, label + err.message);
 	return err;
 }
 

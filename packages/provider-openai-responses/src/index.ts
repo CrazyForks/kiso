@@ -31,7 +31,7 @@
 import type { Adapter, StreamOptions } from "@vincemakes/kiso-core";
 import type { AdapterEvent, ContinuationEntry, StopReason } from "@vincemakes/kiso-core";
 import type { AssistantBlock, ContentBlock, Message, ToolSpec } from "@vincemakes/kiso-core";
-import { mapApiError, parseRetryAfter, streamFailure } from "@vincemakes/kiso-core";
+import { connectionFailure, mapApiError, parseRetryAfter, streamFailure } from "@vincemakes/kiso-core";
 
 /** The ChatGPT backend's own token, resolved fresh for each request. */
 export interface ResponsesOAuthToken {
@@ -725,5 +725,5 @@ function toTransportError(err: unknown, providerId: string): unknown {
 	// turn the caller stopped run again.
 	if (isAbort(err)) return err;
 	const message = err instanceof Error ? err.message : String(err);
-	return streamFailure(`[${providerId}] request failed: ${message}`);
+	return connectionFailure(err, `[${providerId}] request failed: ${message}`);
 }

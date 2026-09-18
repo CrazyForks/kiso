@@ -69,8 +69,8 @@ export function mapApiError(status: number | undefined, message: string, retryAf
  * run on a verdict nobody issued.
  *
  * Deliberately broader than what can be proven transient: a permanent
- * fault misclassified here costs `maxRetries` extra requests (2 by
- * default) and then ends in the same terminal it would have anyway,
+ * fault misclassified here costs the retry budget in extra requests and
+ * then ends in the same terminal it would have anyway,
  * while a transient one misclassified the other way costs the whole
  * session. The asymmetry is the argument.
  *
@@ -78,5 +78,25 @@ export function mapApiError(status: number | undefined, message: string, retryAf
  * mapping — `mapApiError` is untouched and stays the authority there.
  */
 export function streamFailure(message: string): StructuredError {
+	return { code: "network", retryable: true, message };
+}
+
+/**
+ * A connection that failed BEFORE a response. Retryable — a refused or
+ * reset connection is what a restarting gateway looks like — with one
+ * exception: a host name that does not EXIST (ENOTFOUND, anywhere on the
+ * cause chain). That is a misconfigured baseUrl, not a provider's
+ * health, and the retry budget would spend minutes confirming a typo. It
+ * fails at once, saying so. The code stays `network`: the
+ * error codes are a persisted, closed set, and the difference is the
+ * retry decision, which is what `retryable` is.
+ */
+export function connectionFailure(err: unknown, message: string): StructuredError {
+	for (let e: unknown = err, depth = 0; e !== null && typeof e === "object" && depth < 5; e = (e as { cause?: unknown }).cause, depth += 1) {
+		const code = (e as { code?: unknown }).code;
+		// EAI_AGAIN is not here: "temporary failure in name resolution" is a
+		// DNS server's blip by definition, and keeps the budget.
+		if (code === "ENOTFOUND") return { code: "network", retryable: false, message: `${message} (the host name did not resolve — check the baseUrl)` };
+	}
 	return { code: "network", retryable: true, message };
 }
