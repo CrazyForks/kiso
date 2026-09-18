@@ -94,7 +94,8 @@ kiso help                      this help
   prompt guides batching independent calls in one round (the parallel
   execution makes it fast), locating before reading, and never re-reading
   unchanged files.
-- Sessions are append-only JSONL under `$KISO_HOME/sessions` — exit, restart,
+- Sessions are append-only JSONL, one folder per project under
+  `$KISO_HOME/projects` — exit, restart,
   `kiso resume <id>`, and the conversation continues with a contiguous seq.
 - Keyless faux mode out of the box — a SCRIPTED four-round demo. When
   the script runs out (about two user turns) the session exits non-zero

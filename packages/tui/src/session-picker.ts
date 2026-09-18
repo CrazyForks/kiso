@@ -41,6 +41,9 @@ export interface SessionCardView {
 	readonly workspace?: string | null;
 	/** 0.40.0: the config profile its latest revision names, for a dim tag. */
 	readonly profileName?: string | null;
+	/** 0.40.0: its project was inferred by the one-time migration, never
+	 *  recorded — the row says so. */
+	readonly inferred?: boolean;
 }
 
 /** 0.40.0 — which sessions the picker shows. `here` is the running
@@ -89,7 +92,8 @@ function tildePath(path: string): string {
  *
  *  Fitted to `room`, degrading by the DC-2 rule (drop or shorten a whole
  *  part, never cut one mid-word): the full path, then `…/<last dir>`, then
- *  the path alone without the profile, then nothing. */
+ *  the path alone without the profile, then nothing. An inferred row keeps
+ *  its "inferred" mark longest. */
 function fitTags(card: SessionCardView, here: string | null, room: number): string {
 	const profile = typeof card.profileName === "string" && card.profileName !== "" ? card.profileName : null;
 	const foreign = here !== null && card.workspace !== undefined && card.workspace !== here;
@@ -99,7 +103,10 @@ function fitTags(card: SessionCardView, here: string | null, room: number): stri
 		const kept = parts.filter((x): x is string => x !== null);
 		return kept.length === 0 ? "" : ` \u00b7 ${kept.join(" \u00b7 ")}`;
 	};
-	for (const candidate of [join([profile, where]), join([profile, short]), join([short]), join([profile])]) {
+	// 0.40.0: an inferred project is a guess, and the row never presents a
+	// guess as a record; the mark outlives the profile when room is short
+	const mark = card.inferred === true ? "inferred" : null;
+	for (const candidate of [join([profile, where, mark]), join([profile, short, mark]), join([short, mark]), join([profile, mark]), join([mark]), join([profile])]) {
 		if (candidate !== "" && visibleWidth(candidate) <= room) return candidate;
 	}
 	return "";

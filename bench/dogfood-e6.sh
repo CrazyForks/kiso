@@ -35,7 +35,7 @@ S=$(date +%s)
     while [ "$i" -le "$E" ]; do TURN $i; i=$((i + 1)); done \
       | env OPENAI_BASE_URL="https://api.deepseek.com" \
           OPENAI_API_KEY="$DEEPSEEK_API_KEY" OPENAI_MODEL="deepseek-v4-flash" \
-          KISO_EXTENSIONS_DIR="$OUT/$SID/ext" KISO_HOME="$OUT/$SID/kiso-home" \
+          KISO_EXTENSIONS_DIR="$OUT/$SID/ext" KISO_HOME="$OUT/$SID/kiso-home" KISO_SESSIONS_DIR="$OUT/$SID/kiso-home/sessions" \
           $POL $BIN --mode bypass "$SID" > "$OUT/$SID/stdout-$P.log" 2>&1 || true
   done
 )
@@ -51,7 +51,7 @@ S=$(date +%s)
 ( cd "$OUT/$SID2/repo"
   printf '%s\nexit\n' "$PROMPT" | env OPENAI_BASE_URL="https://api.deepseek.com" \
       OPENAI_API_KEY="$DEEPSEEK_API_KEY" OPENAI_MODEL="deepseek-v4-flash" \
-      KISO_EXTENSIONS_DIR="$OUT/$SID2/ext" KISO_HOME="$OUT/$SID2/kiso-home" \
+      KISO_EXTENSIONS_DIR="$OUT/$SID2/ext" KISO_HOME="$OUT/$SID2/kiso-home" KISO_SESSIONS_DIR="$OUT/$SID2/kiso-home/sessions" \
       $POL $BIN --mode bypass "$SID2" > "$OUT/$SID2/stdout.log" 2>&1 || true
   node tests/range.test.js >/dev/null 2>&1 \
     && [ "$(node src/cli.js --min '1-2,9-10' 2>/dev/null | tail -1)" = "1" ] \

@@ -98,7 +98,10 @@ export default async function createSubagentExtension() {
 				execute: async (input, ctx) => {
 					const tasks = ((input ?? {}).tasks ?? []).slice(0, 8);
 					if (tasks.length === 0) return { content: "delegate: no tasks", isError: true, errorKind: "precondition" };
-					const sessionsDir = join(process.env.KISO_HOME ?? join(homedir(), ".kiso"), "sessions");
+					// 0.40.0: the parent's own folder (one per project), handed over
+					// by the CLI; a pinned KISO_SESSIONS_DIR, or the legacy folder,
+					// when no CLI said (a direct load)
+					const sessionsDir = delegationConfig().sessionsDir ?? (process.env.KISO_SESSIONS_DIR || join(process.env.KISO_HOME ?? join(homedir(), ".kiso"), "sessions"));
 					// P3: the loop now threads the session id through
 					// ToolContext.sessionId — the discovery heuristic below is
 					// kept ONLY as a fallback for direct tool use / tests.
@@ -249,7 +252,7 @@ async function runChild({ childId, role, task, scope, acceptance, model, after, 
 		// the fixed UNRESOLVED instruction the result parser reads back.
 		const taskPath = join(manifestDir ?? policyDir, `${childId}.task`);
 		writeFileSync(taskPath, `${task}\n\n${UNRESOLVED_INSTRUCTION}\n`, "utf8");
-		const { code, stdout, killed } = await runProcess(childId, bin, childCwd, policyDir, taskPath, timeout, signal, model);
+		const { code, stdout, killed } = await runProcess(childId, bin, childCwd, policyDir, taskPath, timeout, signal, model, sessionsDir);
 		const extraction = await extractChildResult(sessionsDir, childId, `exit ${code}\n${stdout}`);
 		const status = killed === "timeout" ? "timeout" : killed === "abort" ? "killed" : code !== 0 && extraction.outcome === "missing" ? "spawn-failed" : extraction.outcome;
 		let failed = code !== 0 || killed !== null || extraction.failed;
@@ -389,9 +392,9 @@ function delegationConfig() {
 	try {
 		const raw = process.env.KISO_DELEGATION_CONFIG_JSON;
 		const parsed = raw === undefined ? {} : JSON.parse(raw);
-		return { checks: parsed.checks ?? {}, profiles: parsed.profiles ?? [] };
+		return { checks: parsed.checks ?? {}, profiles: parsed.profiles ?? [], sessionsDir: typeof parsed.sessionsDir === "string" && parsed.sessionsDir !== "" ? parsed.sessionsDir : undefined };
 	} catch {
-		return { checks: {}, profiles: [] };
+		return { checks: {}, profiles: [], sessionsDir: undefined };
 	}
 }
 
@@ -616,7 +619,7 @@ export function childArgs(bin, childId, taskPath, model) {
 	return [bin, ...(model !== undefined ? ["--model", model] : []), "chat", childId, "--task-file", taskPath];
 }
 
-function runProcess(childId, bin, cwd, policyDir, taskPath, timeout, signal, model) {
+function runProcess(childId, bin, cwd, policyDir, taskPath, timeout, signal, model, sessionsDir) {
 	const depth = Number.parseInt(process.env.KISO_SUBAGENT_DEPTH ?? "0", 10) || 0;
 	const child = spawn(process.execPath, childArgs(bin, childId, taskPath, model), {
 		cwd,
@@ -624,6 +627,9 @@ function runProcess(childId, bin, cwd, policyDir, taskPath, timeout, signal, mod
 			...process.env,
 			KISO_SUBAGENT_DEPTH: String(depth + 1),
 			KISO_EXTENSIONS_DIR: policyDir,
+			// 0.40.0: the child writes its log beside its parent's — the
+			// parent reads it back from there — whatever cwd it runs in
+			KISO_SESSIONS_DIR: sessionsDir,
 			// Modes: a headless child has no human — the mode tiers'
 			// ask would stall it. Bypass is the neutral tier here; the
 			// role policy dir (allow/deny only — a child must never

@@ -131,8 +131,10 @@ trust gate — is [docs/configuration.md](docs/configuration.md).
 
 ## Sessions
 
-Sessions are append-only JSONL under `$KISO_HOME/sessions`. Exit, restart, and
-`kiso resume <id>` continues the conversation with a contiguous seq. Since
+Sessions are append-only JSONL, one folder per project under
+`$KISO_HOME/projects`, and a session resumes only in its own project. Exit,
+restart, and `kiso resume <id>` continues the conversation with a contiguous
+seq. Since
 0.32.2 the store is private by default — the directory `0700`, the log and the
 history `0600` — so a transcript is not readable by every account on a shared
 machine. Files that already existed are left as their owner set them.

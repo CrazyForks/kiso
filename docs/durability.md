@@ -16,7 +16,7 @@ Kiso's whole design is the third option: the trajectory itself is the
 durable artifact, so a killed process costs you nothing but the process.
 
 - **Event-sourced sessions.** Every run is an append-only JSONL stream of
-  `seq`-numbered events under `$KISO_HOME/sessions`. The messages a model
+  `seq`-numbered events under `$KISO_HOME/projects/<project>`. The messages a model
   sees are a pure function of the log (ADR-0002) — a session is a file you
   can read, replay, and audit, not runtime state that dies with the
   process. `kiso resume <id>` continues the interrupted trajectory in a

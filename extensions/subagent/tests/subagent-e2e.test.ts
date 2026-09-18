@@ -34,6 +34,7 @@ def driver(cli, home, workdir, ext_dir, script_path, session_id):
     pid, fd = pty.fork()
     if pid == 0:
         os.environ["KISO_HOME"] = home
+        os.environ["KISO_SESSIONS_DIR"] = os.path.join(home, "sessions")  # 0.40.0: the pin follows the home
         os.environ["KISO_EXTENSIONS_DIR"] = ext_dir
         os.environ["KISO_FAUX_SCRIPT"] = script_path
         os.chdir(workdir)
@@ -157,6 +158,7 @@ driver(${JSON.stringify(CLI)}, ${JSON.stringify(home)}, ${JSON.stringify(workdir
 			env: {
 				...isolatedEnv().env, // P2: the full isolation set — the host ~/.kiso never leaks
 				KISO_HOME: home,
+				KISO_SESSIONS_DIR: join(home, "sessions"), // 0.40.0: the pin follows the home
 				KISO_SUBAGENT_DEPTH: "1",
 				KISO_EXTENSIONS_DIR: extdir,
 				KISO_FAUX_SCRIPT: script,

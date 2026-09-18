@@ -35,6 +35,7 @@ def driver(cli, home, cwd, rows, cols):
     if pid == 0:
         os.environ["HOME"] = home
         os.environ["KISO_HOME"] = os.path.join(home, ".kiso")
+        os.environ["KISO_SESSIONS_DIR"] = os.path.join(home, ".kiso", "sessions")  # 0.40.0: the pin follows the home
         os.environ["KISO_MODE"] = "bypass"
         os.chdir(cwd)
         os.execvp("node", ["node", cli, "chat", "dc49-banner"])

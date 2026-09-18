@@ -137,6 +137,7 @@ import pty, os, sys, time, select
 pid, fd = pty.fork()
 if pid == 0:
     os.environ["KISO_HOME"] = ${JSON.stringify(home)}
+    os.environ["KISO_SESSIONS_DIR"] = os.path.join(${JSON.stringify(home)}, "sessions")  # 0.40.0: the pin follows the home
     os.execvp("node", ["node", ${JSON.stringify(CLI)}, "chat", "prep"])
 out = b""
 def read_until(needle, timeout):

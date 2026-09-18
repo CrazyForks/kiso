@@ -79,7 +79,7 @@ Profile 存在 `~/.kiso/config.json`(ADR-0045)。**凭据永远不在里面**—
 
 ## 会话
 
-会话是 `$KISO_HOME/sessions` 下的追加式 JSONL。退出、重启、`kiso resume <id>`,对话以连续的 seq 续上。
+会话是追加式 JSONL,按项目分文件夹放在 `$KISO_HOME/projects` 下,只在所属项目里续上。退出、重启、`kiso resume <id>`,对话以连续的 seq 续上。
 
 ```
 kiso [sessionId]               交互会话(默认命令;`kiso chat` 等同)

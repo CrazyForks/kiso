@@ -48,6 +48,7 @@ for P in 1 2 3 4; do
         OPENAI_MODEL="deepseek-v4-flash" \
         KISO_EXTENSIONS_DIR="$EXTDIR" \
         KISO_HOME="$WORK/kiso-home" \
+        KISO_SESSIONS_DIR="$WORK/kiso-home/sessions" \
         $POL \
         $KISO_BIN --mode bypass "$SID" > "$WORK/stdout-$P.log" 2>&1 || true
 done

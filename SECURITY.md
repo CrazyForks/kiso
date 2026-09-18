@@ -20,7 +20,7 @@ Please do **not** open a public issue for a vulnerability.
   details, and the maintainer will provide a private channel.
 
 Include the version (`kiso --version`), the platform, what you did, what you observed,
-and — where possible — the durable session log (`~/.kiso/sessions/<id>.jsonl`) with any
+and — where possible — the durable session log (`~/.kiso/projects/<project>/<id>.jsonl`) with any
 secrets removed. A minimal reproduction is the most useful thing you can send.
 
 You will get an acknowledgement within a few days and a fix or a reasoned response as

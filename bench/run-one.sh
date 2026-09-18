@@ -47,6 +47,7 @@ case "$TOOL" in
       OPENAI_MODEL="deepseek-v4-flash" \
       KISO_EXTENSIONS_DIR="$EXTDIR" \
       KISO_HOME="$WORK/kiso-home" \
+      KISO_SESSIONS_DIR="$WORK/kiso-home/sessions" \
       $SKILLS_ENV \
       $KISO_BIN --mode bypass "bench-$TOOL-$TASK-$RUN" > "$WORK/stdout.log" 2>&1 || true
     node -e "

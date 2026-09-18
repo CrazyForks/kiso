@@ -50,6 +50,7 @@ def driver(cli, home, script_path, session_id, workdir, mode):
     pid, fd = pty.fork()
     if pid == 0:
         os.environ["KISO_HOME"] = home
+        os.environ["KISO_SESSIONS_DIR"] = os.path.join(home, "sessions")  # 0.40.0: the one folder read back
         os.environ["KISO_FAUX_SCRIPT"] = script_path
         # Hermetic: the real ~/.kiso must never leak in (kill9 rule).
         ext_dir = os.path.join(home, "ext")

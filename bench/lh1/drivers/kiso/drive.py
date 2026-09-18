@@ -645,6 +645,7 @@ def main():
         "HOME": agent_home,
         "TERM": "dumb",
         "KISO_HOME": home,
+        "KISO_SESSIONS_DIR": os.path.join(home, "sessions"),
         "KISO_MODE": policy["realization"]["KISO_MODE"],
         "KISO_NO_UPDATE_CHECK": "1",
     }

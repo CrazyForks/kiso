@@ -31,7 +31,7 @@ BUCKET() { # $1=1..4 — the turn range's start and end
 }
 EXTDIR="$WORK/ext"; mkdir -p "$EXTDIR"; cp "$B/bench-allow.mjs" "$EXTDIR/"
 WIN=${KISO_CONTEXT_WINDOW:-200000}
-KENV="OPENAI_BASE_URL=https://api.deepseek.com OPENAI_API_KEY=$DEEPSEEK_API_KEY OPENAI_MODEL=deepseek-v4-flash KISO_EXTENSIONS_DIR=$EXTDIR KISO_HOME=$WORK/kiso-home KISO_CONTEXT_WINDOW=$WIN"
+KENV="OPENAI_BASE_URL=https://api.deepseek.com OPENAI_API_KEY=$DEEPSEEK_API_KEY OPENAI_MODEL=deepseek-v4-flash KISO_EXTENSIONS_DIR=$EXTDIR KISO_HOME=$WORK/kiso-home KISO_SESSIONS_DIR=$WORK/kiso-home/sessions KISO_CONTEXT_WINDOW=$WIN"
 for P in 1 2 3 4; do
   S=$(date +%s)
   BUCKET $P | env $KENV $KISO_BIN --mode bypass "bench-t6c-$ROUND-$SEQ" > "$WORK/stdout-$P.log" 2>&1 || true

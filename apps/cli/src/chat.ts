@@ -5,6 +5,7 @@
  * estimates. All bodies moved verbatim from index.ts.
  */
 
+import type { SessionRoute } from "./projects.js";
 import { readFileSync, statSync } from "node:fs";
 import {
 	escapeTerminal,
@@ -1238,6 +1239,8 @@ export type ChatEnd =
  *  ids, and (when a dock is up) the existing picker. */
 export interface ChatNav {
 	readonly sessions: () => readonly string[];
+	/** 0.40.0: an id outside this project's folder — refused, or opened where it is */
+	readonly route?: (id: string) => SessionRoute | null;
 	readonly pick?: () => Promise<string | null>;
 }
 
@@ -1647,6 +1650,7 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 			resolveEnd();
 		},
 		sessions: () => nav?.sessions() ?? [],
+		...(nav?.route !== undefined ? { route: nav.route } : {}),
 		...(nav?.pick !== undefined ? { pickSession: nav.pick } : {}),
 	};
 	// the ergonomics batch C8: the auto-compact check — the /compact FULL path via the

@@ -30,6 +30,7 @@ def run(cli, cwd, script):
     if pid == 0:
         os.environ.pop("NO_COLOR", None)
         os.environ["KISO_HOME"] = cwd
+        os.environ["KISO_SESSIONS_DIR"] = os.path.join(cwd, "sessions")  # 0.40.0: the pin follows the home
         os.environ["HOME"] = cwd
         os.environ["TERM"] = "xterm-256color"
         os.environ["KISO_FAUX_SCRIPT"] = script

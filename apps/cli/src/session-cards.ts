@@ -63,6 +63,9 @@ export interface SessionCard {
 	readonly workspace: string | null;
 	/** 0.40.0: the config profile its latest revision names. */
 	readonly profileName: string | null;
+	/** 0.40.0: in a project folder by the migration's inference, never by
+	 *  a recorded workspace — the listing marks it. */
+	readonly inferred?: boolean;
 }
 
 /**
@@ -180,9 +183,9 @@ export async function collectSessionCards(
  * be read when it was summarised says that ("log unreadable") — never a
  * guess, and never a read of the log to find out.
  */
-export function cardFromListing(l: SessionListing): SessionCard {
+export function cardFromListing(l: SessionListing & { readonly inferred?: boolean }): SessionCard {
 	const s = l.summary;
-	const base = { id: l.id, workspace: l.workspace, profileName: l.profileName };
+	const base = { id: l.id, workspace: l.workspace, profileName: l.profileName, ...(l.inferred === true ? { inferred: true } : {}) };
 	if (s === null) return { ...base, title: l.id, badge: "unknown", turns: null, updatedAt: l.mtime, uncertain: 0, asks: 0, outcome: "no summary" };
 	const badge: SessionBadge =
 		s.uncertain > 0 ? "uncertain" : s.asks > 0 ? "ask" : s.state === "open" ? "interrupted" : s.state === "completed" ? "completed" : s.state === null ? "unknown" : "failed";
@@ -200,6 +203,6 @@ export function cardFromListing(l: SessionListing): SessionCard {
 
 /** Every card from the sidecars, newest first (the order the picker and
  *  `kiso sessions` both want). */
-export function cardsFromListings(listings: readonly SessionListing[]): SessionCard[] {
+export function cardsFromListings(listings: readonly (SessionListing & { readonly inferred?: boolean })[]): SessionCard[] {
 	return listings.map(cardFromListing).sort((a, b) => b.updatedAt - a.updatedAt);
 }

@@ -45,6 +45,7 @@ for TASK in T2 T3; do
       OPENAI_MODEL="deepseek-v4-flash" \
       KISO_EXTENSIONS_DIR="$EXTDIR" \
       KISO_HOME="$WORK/kiso-home" \
+      KISO_SESSIONS_DIR="$WORK/kiso-home/sessions" \
       $KISO_BIN --mode bypass "bench-planning-$ARM-$SEQ-$TASK" > "$WORK/stdout-$TASK.log" 2>&1 || true
   )
   E=$(date +%s); TOT=$((TOT + E - S))

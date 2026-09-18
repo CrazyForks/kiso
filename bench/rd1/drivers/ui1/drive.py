@@ -246,6 +246,7 @@ def run(out, cli, cols, rows):
     env = {
         "HOME": home,
         "KISO_HOME": home,
+        "KISO_SESSIONS_DIR": os.path.join(home, "sessions"),
         "PATH": os.environ.get("PATH", ""),
         "TERM": "xterm-256color",
         "LANG": "en_US.UTF-8",
@@ -391,6 +392,7 @@ def run_approval(out, cli, cols, rows):
     env = {
         "HOME": home,
         "KISO_HOME": home,
+        "KISO_SESSIONS_DIR": os.path.join(home, "sessions"),
         "PATH": os.environ.get("PATH", ""),
         "TERM": "xterm-256color",
         "LANG": "en_US.UTF-8",

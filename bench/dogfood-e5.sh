@@ -32,7 +32,7 @@ run_leg() { # run_leg <sid> <extdir>
       OPENAI_API_KEY="$DEEPSEEK_API_KEY" \
       OPENAI_MODEL="deepseek-v4-flash" \
       KISO_EXTENSIONS_DIR="$EXTDIR" \
-      KISO_HOME="$OUT/$SID/kiso-home" \
+      KISO_HOME="$OUT/$SID/kiso-home" KISO_SESSIONS_DIR="$OUT/$SID/kiso-home/sessions" \
       $BIN --mode bypass "$SID" > "$OUT/$SID/stdout.log" 2>&1 || true
     node tests/range.test.js >/dev/null 2>&1 \
       && [ "$(node src/cli.js --min '1-2,9-10' 2>/dev/null | tail -1)" = "1" ] \

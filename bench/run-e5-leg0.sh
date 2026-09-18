@@ -36,6 +36,7 @@ case "$TASK" in
         OPENAI_MODEL="deepseek-v4-flash" \
         KISO_EXTENSIONS_DIR="$EXTDIR" \
         KISO_HOME="$WORK/kiso-home" \
+        KISO_SESSIONS_DIR="$WORK/kiso-home/sessions" \
         $KISO_BIN --mode bypass "bench-e5-leg0-$TASK-$SEQ" > "$WORK/stdout.log" 2>&1 || true
     )
     ( cd "$WORK/repo"
@@ -57,6 +58,7 @@ case "$TASK" in
             OPENAI_MODEL="deepseek-v4-flash" \
             KISO_EXTENSIONS_DIR="$EXTDIR" \
             KISO_HOME="$WORK/kiso-home" \
+            KISO_SESSIONS_DIR="$WORK/kiso-home/sessions" \
             $KISO_BIN --mode bypass "bench-e5-leg0-$TASK-$SEQ" > "$WORK/stdout-$P.log" 2>&1 || true
     done
     "$B/t6-verify.sh" "$WORK/repo" > "$WORK/verify"
