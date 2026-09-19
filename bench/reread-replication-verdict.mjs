@@ -22,7 +22,7 @@ import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readbackRate, callStream } from "./readback-rate.mjs";
-import { rng } from "./concealed/rng.mjs";
+import { rng } from "./rng.mjs";
 
 const B = dirname(fileURLToPath(import.meta.url));
 const ROUND = process.argv[2] ?? "reread-replication";
