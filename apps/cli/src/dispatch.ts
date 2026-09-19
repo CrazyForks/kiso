@@ -5,7 +5,7 @@
  */
 
 import type { SessionRoute } from "./projects.js";
-import { contextRows, contextUnavailableRows, displayVerb, escapeTerminal, helpRows, kUnit, modePickView, modelPickView, compactingStatus, type CompactingProgress, palette, renderEvent, settledLabel, slashCommandNames, type PickOption, type PickResult } from "@vincemakes/kiso-tui";
+import { STATUS_GLYPHS, contextRows, contextUnavailableRows, displayVerb, escapeTerminal, helpRows, kUnit, modePickView, modelPickView, compactingStatus, type CompactingProgress, palette, renderEvent, settledLabel, slashCommandNames, type PickOption, type PickResult } from "@vincemakes/kiso-tui";
 import { newSessionId } from "./session-id.js";
 import { buildAdapter, lookupModelMetadata, resolveContinuationScope, resolveReasoning } from "@vincemakes/kiso-runtime/internal";
 import type { AgentSession } from "@vincemakes/kiso-runtime";
@@ -13,7 +13,7 @@ import { MODES, MODE_NOTE, OFFERED_MODES, getMode, setMode } from "./mode.js";
 import { clipboardWrite, lastAnswer } from "./clipboard.js";
 import { agentModel, body, bodyLog, codingToolOptions, kisoHome, configModels, dock, lastBinding, loadedSkillsCatalog, mergedConfig, readContextLedger, retryOnRow, sessionsDir, setAgentModel, setConfiguredWindow, setCurrentModelName, setModelChoice, setRetryShown, type LineInput , setLastBinding } from "./state.js";
 import { adapterOptionsFor } from "./auth/adapter-options.js";
-import { contextWindowTokens, microcompactThresholdFor } from "./chat.js";
+import { contextWindowTokens, microcompactThresholdFor, startStatusSpinner } from "./chat.js";
 import { authForProfile, directWriteProfile, profileAvailable, resolveContextWindow, unavailableReason, type ModelProfile } from "./config.js";
 import { shellTool } from "@vincemakes/kiso-tools-node";
 import { dirname, join } from "node:path";
@@ -796,7 +796,11 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 			ctx.input.onEscape(onEscape);
 			let compactStart = 0;
 			let repaintCompacting: () => void = () => {};
-			let compactTimer: ReturnType<typeof setInterval> | null = null;
+			// 0.40.0 (the owner's dogfood): the row walks the WORKING twinkle,
+			// the same spinner as a running turn — a static glyph repainted
+			// once a second read as a stalled screen while the model thought
+			let glyph: string = STATUS_GLYPHS[0]!;
+			let stopSpinner = null as (() => void) | null;
 			// the `as` on the initializer keeps the flow type the full union —
 			// onStart fills this during the call, but a closure assignment
 			// never re-narrows the outer scope (it would read `never`)
@@ -812,14 +816,15 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 			const compacting = (info: { rounds: number; tokens: number }): void => {
 				// 0.40.0: composed by the row seam, not a template here — the row
 				// is where the launch build's progress segment plugs in.
-				const text = (elapsed: number): string => compactingStatus("▘", info.rounds, info.tokens, elapsed, undefined, retryOnRow(), progress);
+				const text = (elapsed: number): string => compactingStatus(glyph, info.rounds, info.tokens, elapsed, undefined, retryOnRow(), progress);
 				repaintCompacting = () => dock.setStatus(text(Math.round((Date.now() - compactStart) / 1000)), "esc to cancel");
 				compactStart = Date.now();
 				ctxBefore = ctxPercent(ctx.estimateCtx());
 				dock.setStatus(text(0), "esc to cancel");
-				compactTimer = setInterval(() => {
-					dock.setStatus(text(Math.round((Date.now() - compactStart) / 1000)), "esc to cancel");
-				}, 1000);
+				stopSpinner = startStatusSpinner((next) => {
+					glyph = next;
+					repaintCompacting();
+				});
 			};
 			try {
 				// R3a: /compact <focus> — the words after the command steer
@@ -905,7 +910,7 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 					body.notice(`[/compact] failed: ${escapeTerminal(detail)}${again}`);
 				}
 			} finally {
-				if (compactTimer !== null) clearInterval(compactTimer);
+				stopSpinner?.();
 				// ADR-0005 Amendment 2: a retry belongs to the call that
 				// announced it — none may outlive the compaction into the idle row.
 				setRetryShown(null);

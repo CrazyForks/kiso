@@ -93,6 +93,36 @@ function seed(home: string, id: string, minutesAgo: number): void {
 	writeFileSync(join(home, "sessions", `${id}.jsonl`), `${lines.join("\n")}\n`);
 }
 
+/** The owner's dogfood shape: five finished rounds, then a sixth whose run
+ *  was CUT after a tool result — billed at 150k, no terminal. Opening it
+ *  resumes that run at once. */
+function seedInterrupted(home: string, id: string, minutesAgo: number): void {
+	const ts = Date.now() - minutesAgo * 60_000;
+	const lines: string[] = [];
+	let seq = 0;
+	const rec = (runId: string, event: Record<string, unknown>): number => {
+		const s = seq++;
+		lines.push(JSON.stringify({ runId, ts, event: { ...event, seq: s } }));
+		return s;
+	};
+	for (let i = 0; i < 5; i++) {
+		rec(`run-${i}`, { type: "user_input", content: `round ${i}: ${"words ".repeat(40)}` });
+		rec(`run-${i}`, { type: "text_delta", text: `answer ${i}` });
+		rec(`run-${i}`, { type: "stop", reason: "end_turn" });
+		rec(`run-${i}`, { type: "terminal", outcome: { kind: "completed" } });
+	}
+	rec("run-5", { type: "user_input", content: "round 5: read it" });
+	rec("run-5", { type: "usage", inputTokens: 150_000, outputTokens: 900, cacheRead: 149_000, cacheWrite: null, known: true });
+	const call = rec("run-5", { type: "tool_call_end", callId: "c5", name: "read_file", input: { path: "a.txt" } });
+	rec("run-5", { type: "permission_decided", decisionId: "d-5", callId: "c5", invocationSeq: call, decision: "approved", decidedBy: "mode:bypass" });
+	rec("run-5", { type: "stop", reason: "tool_use" });
+	rec("run-5", { type: "tool_execution_started", callId: "c5", invocationSeq: call, name: "read_file", input: { path: "a.txt" }, executionId: "ex-5" });
+	rec("run-5", { type: "tool_execution_succeeded", executionId: "ex-5", callId: "c5", invocationSeq: call, result: { content: "the file", isError: false } });
+	rec("run-5", { type: "tool_result", callId: "c5", invocationSeq: call, content: "the file", isError: false, executionId: "ex-5" });
+	mkdirSync(join(home, "sessions"), { recursive: true });
+	writeFileSync(join(home, "sessions", `${id}.jsonl`), `${lines.join("\n")}\n`);
+}
+
 const VALID_SUMMARY = ["## Goal", "g", "## Constraints", "c", "## User requests", "u", "## Files and changes", "f", "## Errors and fixes", "none", "## Current work", "w", "## Next steps", "n"].join("\n");
 
 /** The faux script resumes at its durable position (six finished rounds):
@@ -119,6 +149,30 @@ describe("0.40.0 — a resumed session whose cache has gone cold is offered a co
 		const k = kinds(dirs.home, "cold");
 		expect(k).toContain("summarized");
 		expect(k.filter((t) => t === "user_input")).toHaveLength(6); // no new turn was sent
+	}, 60_000);
+
+	it("an interrupted run is offered the compaction BEFORE it resumes, and resumes on the compacted history", () => {
+		const { env, dirs } = isolatedEnv();
+		seedInterrupted(dirs.home, "cut", 30);
+		// the durable position is six (five answers, one tool result): the
+		// seventh entry answers whichever call comes FIRST — so the order of
+		// the summary and the resumed run is what this case observes
+		const say = (text: string) => ({ events: [{ type: "text_delta", text }, { type: "stop", reason: "end_turn" }] });
+		const p = join(dirs.home, "faux.json");
+		writeFileSync(p, JSON.stringify([...Array.from({ length: 6 }, () => say("spent")), say(VALID_SUMMARY), say("resumed after compact")]), "utf8");
+		const screen = pty({ ...env, KISO_FAUX_SCRIPT: p }, ["chat", "cut"], [["cache is cold", "\r"]], ["resumed after compact"]);
+		expect(screen.replace(/\s+/g, " ")).toMatch(/this session is 15\dk tokens, last used 30 min ago, and its cache is cold/);
+		const events = readFileSync(join(dirs.home, "sessions", "cut.jsonl"), "utf8")
+			.split("\n")
+			.filter((l) => l.trim() !== "")
+			.map((l) => (JSON.parse(l) as { event: { type: string; text?: string; outcome?: { kind: string } } }).event);
+		const summarized = events.findIndex((e) => e.type === "summarized");
+		const resumed = events.findIndex((e) => e.type === "text_delta" && e.text === "resumed after compact");
+		expect(summarized, "the compaction landed").toBeGreaterThan(-1);
+		expect(resumed, "the run resumed").toBeGreaterThan(summarized);
+		expect(events.at(-1)).toMatchObject({ type: "terminal", outcome: { kind: "completed" } });
+		// the seeded run's user turn is the only one: nothing new was sent
+		expect(events.filter((e) => e.type === "user_input")).toHaveLength(6);
 	}, 60_000);
 
 	it("n keeps the full history — nothing is summarized", () => {

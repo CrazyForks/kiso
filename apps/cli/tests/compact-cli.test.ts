@@ -10,7 +10,7 @@
  *  2. Pipe: /compact as the first line of a seeded long session works
  *     end to end with ZERO ANSI (the non-TTY byte discipline), and the
  *     summary event is durable.
- *  3. W18: the indeterminate row (▘ compacting · rounds · tokens ·
+ *  3. W18: the compacting row (the working twinkle, rounds · tokens ·
  *     elapsed · esc to cancel) is LIVE for the whole call — a REAL 1.5s
  *     adapter delay via the faux delay pseudo-event — and esc cancels
  *     it mid-flight with nothing persisted.
@@ -307,7 +307,8 @@ describe("ADR-0044 cli: /compact on a real PTY", () => {
 				// The FIRST paint of the indeterminate row marks the call
 				// live — esc lands mid-flight (the call outlives the feed by
 				// ~1.4s, so the cancel is never a race against the settle).
-				["▘ compacting", "\x1b"],
+				// (0.40.0: the glyph is the working twinkle, not a fixed mark)
+				[" compacting · ", "\x1b"],
 				// The honest cancel notice — nothing was persisted (ADR-0044).
 				["cancelled — nothing was persisted", "/status\r"],
 				["ctx ~", "exit\r"],
@@ -320,11 +321,16 @@ describe("ADR-0044 cli: /compact on a real PTY", () => {
 
 		// The row: the knowable pre-call data (4 covered rounds of the 8
 		// seeded, the token estimate) with the cancel affordance right-aligned.
-		expect(plain).toContain("▘ compacting · 4 rounds · ~");
+		expect(plain).toMatch(/[✧✦✶✸✺] compacting · 4 rounds · ~/);
 		expect(plain).toContain("esc to cancel");
+		// 0.40.0 (the owner's dogfood): the row WALKS the working twinkle, the
+		// same 200 ms spinner a running turn shows — never a static mark
+		expect(plain).not.toContain("▘ compacting");
+		const frames = new Set([...plain.matchAll(/([✧✦✶✸✺]) compacting · /g)].map((m) => m[1]));
+		expect(frames.size, `glyphs seen on the compacting row: ${[...frames].join(" ")}`).toBeGreaterThanOrEqual(2);
 		// The row went LIVE across a real elapsed second — the 1.5s call
-		// makes the 1s repaint deterministic (the interval is cleared only
-		// when summarize() settles, so it fires even under the abort).
+		// spans several 200 ms repaints (the spinner stops only when
+		// summarize() settles, so it runs even under the abort).
 		// 0.40.0 — a DECLARED change: from the attempt's start the covered
 		// size carries the output bar ("~Nk → ▱▱▱▱▱▱ 0/32k"); nothing has
 		// streamed during the 1.5s delay, so it reads zero at the second tick.
