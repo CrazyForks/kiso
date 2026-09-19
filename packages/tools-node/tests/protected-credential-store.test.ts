@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { ToolContext } from "@vincemakes/kiso-core";
-import { editFileTool, readFileTool, searchTextTool, writeFileTool, type WorkspaceToolsOptions } from "../src/index.js";
+import { editFileTool, protectedIdentity, readFileTool, readUnlessProtected, searchTextTool, writeFileTool, type WorkspaceToolsOptions } from "../src/index.js";
 
 const CTX = { signal: { aborted: false, addEventListener: () => {}, removeEventListener: () => {} } } as unknown as ToolContext;
 const CANARY = "sk-canary-protected-store-0000";
@@ -110,5 +110,23 @@ describe("a search never returns a line from it", () => {
 	it("a search still finds ordinary files", async () => {
 		const r = (await searchTextTool(opts).execute({ pattern: "ordinary notes" }, CTX)) as R;
 		expect(r.content).toContain("notes.md");
+	});
+});
+
+describe("the read itself: one descriptor, compared by inode", () => {
+	// The path check judges a NAME. Between it and the read, the name can be
+	// swapped for a symlink to the store; the descriptor is the file that
+	// was actually opened. This drives the descriptor check ALONE — past
+	// any path check — so it holds on its own.
+	it("a descriptor opened through a symlink, or a hard link, to the store yields nothing", () => {
+		symlinkSync(STORE, join(HOME, "swapped.json"));
+		linkSync(STORE, join(HOME, "linked.json"));
+		const id = protectedIdentity([STORE]);
+		expect(readUnlessProtected(join(HOME, "swapped.json"), id)).toBeNull();
+		expect(readUnlessProtected(join(HOME, "linked.json"), id)).toBeNull();
+	});
+
+	it("an ordinary file reads whole", () => {
+		expect(readUnlessProtected(join(HOME, "notes.md"), protectedIdentity([STORE]))?.toString("utf8")).toBe("ordinary notes\n");
 	});
 });

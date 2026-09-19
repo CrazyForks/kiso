@@ -28,7 +28,8 @@
  * ignored (forward compatibility).
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { kisoHome } from "./state.js";
 import type { Mode } from "./mode.js";
@@ -170,6 +171,16 @@ export function parseConfig(text: string, source: string): KisoConfig {
 			// a relative path would be read against whatever directory kiso
 			// runs in — a different file in every project
 			if (typeof p !== "string" || !(p.startsWith("/") || p.startsWith("~/"))) fail(`protectedPaths[${i}]`, "expected an absolute path or one starting with ~/");
+			// kiso protects FILES. A directory listed here would protect
+			// nothing under it — a security setting that silently does
+			// nothing — so it is refused where the person can see it.
+			// (Read at every agent build: a directory created later is
+			// caught at the next start or /reload.)
+			const path = p as string;
+			const full = path.startsWith("~/") ? join(homedir(), path.slice(2)) : path;
+			if (path.endsWith("/") || statSync(full, { throwIfNoEntry: false })?.isDirectory() === true) {
+				fail(`protectedPaths[${i}]`, `${path} is a directory — kiso protects files, so list the files in it (for ~/.aws: "~/.aws/credentials", "~/.aws/config")`);
+			}
 		}
 		out.protectedPaths = obj.protectedPaths as string[];
 	}

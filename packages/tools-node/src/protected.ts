@@ -20,7 +20,7 @@
  */
 
 import { basename, dirname, join } from "node:path";
-import { realpathSync, statSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readFileSync, realpathSync, statSync } from "node:fs";
 
 export const PROTECTED_REFUSAL = "kiso never serves its own credential store to a model";
 
@@ -82,6 +82,25 @@ export function isProtectedPath(p: string, id: ProtectedIdentity): boolean {
 		return st.isFile() && id.inodes.includes(`${st.dev}:${st.ino}`);
 	} catch {
 		return false;
+	}
+}
+
+/**
+ * Read a file through ONE descriptor, and refuse it when that descriptor
+ * is a protected file. The path check before it judges a NAME, and a name
+ * can be swapped for a symlink between the check and the read; the
+ * descriptor is the file actually opened. Returns null when it is
+ * protected. (The sandbox is the guarantee; this closes the file tools'
+ * own check-then-use window.)
+ */
+export function readUnlessProtected(full: string, id: ProtectedIdentity): Buffer | null {
+	const fd = openSync(full, "r");
+	try {
+		const st = fstatSync(fd);
+		if (id.inodes.includes(`${st.dev}:${st.ino}`)) return null;
+		return readFileSync(fd);
+	} finally {
+		closeSync(fd);
 	}
 }
 
