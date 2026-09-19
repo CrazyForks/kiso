@@ -36,6 +36,7 @@ import {
 	breathFrame,
 	cutLine,
 	escapeTerminal,
+	stripAnsi,
 	foldThinking,
 	foldThinkingRow,
 	foldResult,
@@ -1599,7 +1600,8 @@ function blockRows(text: string, W: number, tone: "dim" | "body" = "dim"): strin
 	// rows around them take `washDim`, which was chosen for that ground.
 	const open = tone === "dim" ? p.dim : "";
 	const close = tone === "dim" ? p.reset : "";
-	for (const raw of escapeTerminal(text).split("\n")) {
+	// 0.40.0: the output's own styling is dropped whole before the escape
+	for (const raw of escapeTerminal(stripAnsi(text)).split("\n")) {
 		for (const row of foldLine(raw, textW)) rows.push(`${open}${bodyRow()}${row}${close}`);
 	}
 	while (rows.length > 0 && visibleWidth(rows[rows.length - 1]!) === visibleWidth(bodyRow())) rows.pop();

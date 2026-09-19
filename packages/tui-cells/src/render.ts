@@ -210,6 +210,23 @@ export function palette(): Palette {
  * bidi overrides. The kiso colors are applied by render, not by the data.
  * EVERY externally-sourced string must pass through this before any output.
  */
+/**
+ * 0.40.0 (the owner's dogfood) — a tool's OUTPUT, shown without its
+ * terminal styling. escapeTerminal drops the ESC byte and nothing else, so
+ * a coloured test run reached the card as `[31m─── [1m[41m Failed Tests`.
+ * Here the whole sequence goes: CSI (colours, cursor moves), OSC (titles,
+ * links), DCS/SOS/PM/APC strings, charset selections, the two-byte escapes,
+ * and the 8-bit CSI. Only output bodies pass through here — in a NAME the
+ * `[31m` remnant is the visible sign of an injected sequence, and stripping
+ * it would let `sh<ESC>[31mell` read as `shell`.
+ */
+// eslint-disable-next-line no-control-regex
+const ANSI_SEQUENCE = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[PX^_][\s\S]*?\x1b\\|\x1b[ -/]+[0-~]|\x1b[@-Z\\-_]|\x9b[0-?]*[ -/]*[@-~]/g;
+
+export function stripAnsi(text: string): string {
+	return text.replace(ANSI_SEQUENCE, "");
+}
+
 export function escapeTerminal(text: string): string {
 	// eslint-disable-next-line no-control-regex
 	return text
