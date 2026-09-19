@@ -256,7 +256,7 @@ const KEYWORD_ALONE = new Set(["fi", "done", "}", "esac", "in"]);
 
 /** Past keywords, `sudo -u x`, `env A=1`, `timeout 5`, `command`, … to the
  *  command that runs. Matched by basename: `/usr/bin/env rm` is env. */
-function unwrap(argv: readonly LooseWord[]): readonly LooseWord[] {
+export function unwrap(argv: readonly LooseWord[]): readonly LooseWord[] {
 	let a = argv;
 	for (;;) {
 		// a leading word that is only a variable may be EMPTY (`$SUDO rm …`,
@@ -297,7 +297,7 @@ const literal = (text: string): LooseWord => ({ text, unknownAt: -1, unknownIsGl
  *  keeps its script whole (B10, the lead's reading): either refusing is a
  *  refusal. In the re-quoted reading `~` is already expanded and a word
  *  holding an unknown stays raw — its value is unknown to eval too. */
-function innerLines(argv: readonly LooseWord[], home: string): { readonly lines: readonly string[]; readonly subshell: boolean } | null {
+export function innerLines(argv: readonly LooseWord[], home: string): { readonly lines: readonly string[]; readonly subshell: boolean } | null {
 	const name = basename(argv[0]?.text ?? "");
 	const quote = (t: string): string => `'${t.replaceAll("'", `'\\''`)}'`;
 	if (name === "eval") {

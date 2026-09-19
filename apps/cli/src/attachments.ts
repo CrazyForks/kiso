@@ -23,6 +23,7 @@
 
 import { readFileSync, statSync } from "node:fs";
 import type { ContentBlock } from "@vincemakes/kiso-core";
+import { isProtectedPath, protectedIdentity, type ProtectedIdentity } from "@vincemakes/kiso-tools-node";
 
 /**
  * The size a single image may reach before it is refused.
@@ -65,7 +66,11 @@ interface Found {
 	readonly block: ContentBlock;
 }
 
-function look(path: string): { mediaType: ReturnType<typeof sniff>; data: string } | null {
+function look(path: string, id: ProtectedIdentity): { mediaType: ReturnType<typeof sniff>; data: string } | null {
+	// a protected file is never attached, image or not: a user may list a
+	// scan of a passport, and a path in a turn can come from a model's
+	// delegate task or a command's output, not only from the person
+	if (isProtectedPath(path, id)) return null;
 	try {
 		const st = statSync(path);
 		if (!st.isFile() || st.size > MAX_IMAGE_BYTES || st.size === 0) return null;
@@ -91,7 +96,8 @@ function look(path: string): { mediaType: ReturnType<typeof sniff>; data: string
  * standing in the text. Silently dropping it would tell the model about
  * a file it cannot see, which is worse than telling it nothing.
  */
-export function attachImages(text: string, files?: ReadonlyMap<number, string>): string | ContentBlock[] {
+export function attachImages(text: string, files?: ReadonlyMap<number, string>, protectedFiles: readonly string[] = []): string | ContentBlock[] {
+	const id = protectedIdentity(protectedFiles);
 	const found: Found[] = [];
 	const claimed: { start: number; end: number }[] = [];
 	// REL-0152-D16: the `[Image #N]` capsules first. The buffer carries a
@@ -104,7 +110,7 @@ export function attachImages(text: string, files?: ReadonlyMap<number, string>):
 		for (const m of text.matchAll(/\[Image #(\d+)\]/g)) {
 			const path = files.get(Number(m[1]));
 			if (path === undefined) continue;
-			const hit = look(path);
+			const hit = look(path, id);
 			if (hit === null) continue;
 			claimed.push({ start: m.index!, end: m.index! + m[0].length });
 			found.push({ start: m.index!, end: m.index! + m[0].length, block: { type: "image", sourceType: "base64", mediaType: hit.mediaType!, data: hit.data } });
@@ -117,7 +123,7 @@ export function attachImages(text: string, files?: ReadonlyMap<number, string>):
 			const start = m.index!;
 			const end = start + m[0].length;
 			if (claimed.some((c) => start < c.end && end > c.start)) continue;
-			const hit = look(path);
+			const hit = look(path, id);
 			if (hit === null) continue;
 			claimed.push({ start, end });
 			found.push({ start, end, block: { type: "image", sourceType: "base64", mediaType: hit.mediaType!, data: hit.data } });

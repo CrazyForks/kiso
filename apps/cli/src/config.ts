@@ -28,7 +28,8 @@
  * ignored (forward compatibility).
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { kisoHome } from "./state.js";
 import type { Mode } from "./mode.js";
@@ -96,6 +97,12 @@ export interface KisoConfig {
 	 *  ONLY, and louder than theme about it: a repository that could lower
 	 *  the floor would be the one thing the floor exists to stop. */
 	readonly floor?: "catastrophe" | "off";
+	/** kiso never serves its own credential store to a model, and these
+	 *  files join it: no tool reads, writes or searches them, and no shell
+	 *  line may name them (protected-shell.ts). Absolute, or `~/…`. USER-
+	 *  LEVEL ONLY, as loud as floor: a project must never be able to change
+	 *  what kiso guards. */
+	readonly protectedPaths?: readonly string[];
 	/** DT-1a: named acceptance checks a delegated task may reference —
 	 *  user-authored (or trust-gated project) commands, run by the PARENT
 	 *  in the child's worktree. A model never supplies a command; it names
@@ -135,6 +142,7 @@ export function parseConfig(text: string, source: string): KisoConfig {
 		projectTrust?: "ask" | "never";
 		theme?: "dark" | "light";
 		floor?: "catastrophe" | "off";
+		protectedPaths?: readonly string[];
 		checks?: Record<string, string>;
 	} = {};
 	const obj = raw as Record<string, unknown>;
@@ -155,6 +163,26 @@ export function parseConfig(text: string, source: string): KisoConfig {
 		if (obj.floor !== "catastrophe" && obj.floor !== "off") fail("floor", 'expected "catastrophe" or "off"');
 		if (source.startsWith("<cwd>")) fail("floor", "belongs in the USER config — a project must never be able to lower the floor");
 		out.floor = obj.floor as "catastrophe" | "off";
+	}
+	if (obj.protectedPaths !== undefined) {
+		if (source.startsWith("<cwd>")) fail("protectedPaths", "belongs in the USER config — a project must never be able to change what kiso guards");
+		if (!Array.isArray(obj.protectedPaths)) fail("protectedPaths", "expected an array of paths");
+		for (const [i, p] of (obj.protectedPaths as unknown[]).entries()) {
+			// a relative path would be read against whatever directory kiso
+			// runs in — a different file in every project
+			if (typeof p !== "string" || !(p.startsWith("/") || p.startsWith("~/"))) fail(`protectedPaths[${i}]`, "expected an absolute path or one starting with ~/");
+			// kiso protects FILES. A directory listed here would protect
+			// nothing under it — a security setting that silently does
+			// nothing — so it is refused where the person can see it.
+			// (Read at every agent build: a directory created later is
+			// caught at the next start or /reload.)
+			const path = p as string;
+			const full = path.startsWith("~/") ? join(homedir(), path.slice(2)) : path;
+			if (path.endsWith("/") || statSync(full, { throwIfNoEntry: false })?.isDirectory() === true) {
+				fail(`protectedPaths[${i}]`, `${path} is a directory — kiso protects files, so list the files in it (for ~/.aws: "~/.aws/credentials", "~/.aws/config")`);
+			}
+		}
+		out.protectedPaths = obj.protectedPaths as string[];
 	}
 	if (obj.checks !== undefined) {
 		if (obj.checks === null || typeof obj.checks !== "object" || Array.isArray(obj.checks)) fail("checks", "expected an object of name → command");

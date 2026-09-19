@@ -356,6 +356,11 @@ export interface LooseCommand {
 	readonly kind: "cmd";
 	readonly argv: readonly LooseWord[];
 	readonly joinedBy: "&&" | "||" | ";" | "|";
+	/** The words the reader drops — redirection targets and leading
+	 *  assignments — kept only when the caller asks (`keepDropped`): the
+	 *  floor judges what a command DOES, the protected-file check what a
+	 *  line NAMES, and `< file` names a file. */
+	readonly dropped?: readonly LooseWord[];
 }
 
 /** A subshell: a `( … )` group, or the command line inside `$( … )` or
@@ -391,14 +396,14 @@ export function looseCommands(nodes: readonly LooseNode[]): LooseCommand[] {
 }
 
 export function parseShellLoose(src: string): LooseNode[] {
-	return parseLooseAt(src, 0, 0, false, { truncated: false }).items;
+	return parseLooseAt(src, 0, 0, false, { truncated: false, keepDropped: false }).items;
 }
 
 /** The same, saying whether the reader stopped short: a nest past
  *  LOOSE_MAX_DEPTH is not read, and a caller that must see every command
  *  (the floor) treats an unread line as one it could not read. */
-export function parseShellLooseChecked(src: string): { readonly nodes: LooseNode[]; readonly truncated: boolean } {
-	const flags = { truncated: false };
+export function parseShellLooseChecked(src: string, opts: { readonly keepDropped?: boolean } = {}): { readonly nodes: LooseNode[]; readonly truncated: boolean } {
+	const flags = { truncated: false, keepDropped: opts.keepDropped === true };
 	return { nodes: parseLooseAt(src, 0, 0, false, flags).items, truncated: flags.truncated };
 }
 
@@ -406,10 +411,11 @@ export function parseShellLooseChecked(src: string): { readonly nodes: LooseNode
  *  inside of `$(`: an unmatched `)` ends it and its index is returned — the
  *  recursion finds its own end, so a nest is read ONCE, in linear time,
  *  rather than scanned for its matching paren at every level. */
-function parseLooseAt(src: string, start: number, depth: number, closeParen: boolean, flags: { truncated: boolean }): { items: LooseNode[]; end: number } {
+function parseLooseAt(src: string, start: number, depth: number, closeParen: boolean, flags: { truncated: boolean; readonly keepDropped: boolean }): { items: LooseNode[]; end: number } {
 	// the open `( … )` groups at this level: [items so far, the joiner before the group]
 	const stack: { items: LooseNode[]; joinedBy: LooseCommand["joinedBy"] }[] = [{ items: [], joinedBy: ";" }];
 	let argv: LooseWord[] = [];
+	let dropped: LooseWord[] = [];
 	let joinedBy: LooseCommand["joinedBy"] = ";";
 	let text = "";
 	let lit = "";
@@ -433,11 +439,14 @@ function parseLooseAt(src: string, start: number, depth: number, closeParen: boo
 		if (!inWord) return;
 		const w: LooseWord = { text, unknownAt, unknownIsGlob, tilde, variableOnly: tooDeep || (startsWithExpansion && /^[/*.]*$/.test(lit)) };
 		const assign = /^[A-Za-z_][A-Za-z0-9_]*=/.exec(text);
-		if (dropNext) dropNext = false;
-		else if (!seenCommandWord && assign !== null && (unknownAt < 0 || unknownAt >= assign[0].length)) {
+		if (dropNext) {
+			dropNext = false;
+			if (flags.keepDropped) dropped.push(w);
+		} else if (!seenCommandWord && assign !== null && (unknownAt < 0 || unknownAt >= assign[0].length)) {
 			// a leading assignment: environment for the command, not the
 			// command — `X="$Y" rm …` included (B10: the value holding an
 			// expansion made it the command, and hid the rm)
+			if (flags.keepDropped) dropped.push(w);
 		} else {
 			argv.push(w);
 			seenCommandWord = true;
@@ -453,8 +462,13 @@ function parseLooseAt(src: string, start: number, depth: number, closeParen: boo
 	};
 	const endCommand = (next: LooseCommand["joinedBy"]): void => {
 		endWord();
-		if (argv.length > 0) top().push({ kind: "cmd", argv, joinedBy });
+		// without keepDropped, exactly as before: a command with no words is
+		// not a command. With it, `$(< file)` — a read with no command — is one
+		if (flags.keepDropped) {
+			if (argv.length > 0 || dropped.length > 0) top().push({ kind: "cmd", argv, joinedBy, dropped });
+		} else if (argv.length > 0) top().push({ kind: "cmd", argv, joinedBy });
 		argv = [];
+		dropped = [];
 		seenCommandWord = false;
 		dropNext = false;
 		// a separator after an empty command (`&& &&`) keeps the stronger one

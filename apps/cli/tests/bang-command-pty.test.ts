@@ -17,7 +17,8 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -86,6 +87,33 @@ describe("§2.2 — the shell gesture", () => {
 		expect(existsSync(join(dirs.home, "ran-anyway")), "the command died before its second half").toBe(false);
 		// the session is alive: the line typed after the abort became a turn
 		expect(userTurns(dirs.home, "bang-b").join("\n")).toContain("hello");
+	}, 240_000);
+
+	it("a line naming the credential store runs under neither ! nor !! — refused before it runs", () => {
+		// kiso never serves its own credential store to a model, and `!cmd`
+		// hands its output to one. HOME and KISO_HOME are a mkdtemp
+		// directory: `~` below is never the real home, and the store holds
+		// a canary, not a credential.
+		const canary = "sk-canary-bang-0000";
+		const home = realpathSync(mkdtempSync(join(tmpdir(), "kiso-bang-store-")));
+		mkdirSync(join(home, ".kiso"));
+		mkdirSync(join(home, "proj"));
+		writeFileSync(join(home, ".kiso", "auth.json"), `${JSON.stringify({ version: 1, credentials: { deepseek: { type: "api-key", key: canary } } })}\n`, { mode: 0o600 });
+		const { env, dirs } = isolatedEnv({ KISO_FAUX_SCRIPT: script(), HOME: home, KISO_HOME: join(home, ".kiso") });
+		const raw = ptyRun(["chat", "bang-e"], env as NodeJS.ProcessEnv, {
+			cwd: join(home, "proj"),
+			feeds: [
+				["/ commands · ↑ history", "!cat ~/.kiso/auth.json\r"],
+				["~/.kiso/auth.json names", "!!cat $HOME/.kiso/auth.json\r"],
+				["$HOME/.kiso/auth.json names", "exit\r"],
+			],
+		});
+		// the person is told what to do instead
+		expect(raw).toContain("Run it in your own terminal");
+		expect(raw, "neither command ran").not.toContain(canary);
+		expect(raw, "nothing was run").not.toContain("$ cat");
+		const log = join(dirs.home, "sessions", "bang-e.jsonl");
+		if (existsSync(log)) expect(readFileSync(log, "utf8"), "the model was told nothing of it").not.toContain(canary);
 	}, 240_000);
 
 	it("a PIPED session keeps ! as ordinary text — the gesture is the composer's alone", () => {
