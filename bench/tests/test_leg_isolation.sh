@@ -27,6 +27,11 @@ mkdir -p "$ROOT/claude"; echo "instructions" > "$ROOT/claude/CLAUDE.md"
 W="$ROOT/claude/runs/leg"; leg "$W"
 if assert_leg_isolated "$W" "$W/repo"; then bad "an ancestor CLAUDE.md passed"; else grep -q "$ROOT/claude/CLAUDE.md" "$W/void" && ok "an ancestor CLAUDE.md voids the leg, naming the file" || bad "void reason: $(cat "$W/void")"; fi
 
+# 2b. an ancestor AGENTS.md — the name the other arm reads first
+mkdir -p "$ROOT/agents"; echo "instructions" > "$ROOT/agents/AGENTS.md"
+W="$ROOT/agents/runs/leg"; leg "$W"
+if assert_leg_isolated "$W" "$W/repo"; then bad "an ancestor AGENTS.md passed"; else grep -q "$ROOT/agents/AGENTS.md" "$W/void" && ok "an ancestor AGENTS.md voids the leg, naming the file" || bad "void reason: $(cat "$W/void")"; fi
+
 # 3. an ancestor .kiso voids it too
 mkdir -p "$ROOT/kiso/.kiso"
 W="$ROOT/kiso/runs/leg"; leg "$W"
@@ -49,6 +54,17 @@ rc=$?
 set -e
 W="$ROOT/claude/runs/gate/pi-T5-gate1"
 if [ "$rc" -eq 3 ] && [ -s "$W/void" ] && ! ls "$W"/stdout-* >/dev/null 2>&1; then ok "run-t5.sh stops a contaminated leg before its first request (exit 3, void, no arm output)"; else bad "run-t5.sh: rc=$rc void=$(cat "$W/void" 2>/dev/null || echo none)"; fi
+
+# 7. the same, beneath AGENTS.md, for the T6 runner (and so every concealed leg)
+set +e
+KISO_RUNS_ROOT="$ROOT/agents/runs" KISO_ROUND=gate sh "$B/run-t6.sh" pi gate2 >/dev/null 2>&1
+rc=$?
+set -e
+W="$ROOT/agents/runs/gate/pi-T6-gate2"
+if [ "$rc" -eq 3 ] && grep -q "AGENTS.md" "$W/void" 2>/dev/null && ! ls "$W"/stdout-* >/dev/null 2>&1; then ok "run-t6.sh stops a leg beneath AGENTS.md before its first request (exit 3, void, no arm output)"; else bad "run-t6.sh: rc=$rc void=$(cat "$W/void" 2>/dev/null || echo none)"; fi
+# The runners always give a leg its own repository (git init), so the
+# walk-up gate cannot be reached through them; case 4 proves it red on the
+# gate itself, which both runners call.
 
 echo "[leg-isolation] $P ok, $F failed"
 [ "$F" -eq 0 ]

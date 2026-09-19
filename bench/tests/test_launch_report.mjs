@@ -57,4 +57,23 @@ ok("the bootstrap interval is reproducible from the kit's seed, and brackets the
 	assert.equal(bootstrapMedianCI([0.1]), null); // one pair has no interval
 });
 
+ok("below six valid pairs there is no interval, and the report says why", () => {
+	const legs = [];
+	for (let i = 1; i <= 5; i++) legs.push(leg("kiso", `p${i}`, 110), leg("pi", `p${i}`, 100));
+	const s5 = summarize(legs, { incomplete: false });
+	assert.equal(s5.comparative.costPairs, 5);
+	assert.equal(s5.comparative.ciDCost, null);
+	assert.match(s5.comparative.ciNote, /at least 6/);
+	legs.push(leg("kiso", "p6", 120), leg("pi", "p6", 100));
+	const s6 = summarize(legs, { incomplete: false });
+	assert.notEqual(s6.comparative.ciDCost, null);
+	assert.equal(s6.comparative.ciNote, null);
+});
+
+ok("extra calls are summed per arm, over the valid legs", () => {
+	const s = summarize([leg("kiso", "p1", 110, { extraCalls: "2" }), leg("pi", "p1", 100, { extraCalls: "0" }), leg("kiso", "p2", 110, { extraCalls: "1" })], { incomplete: false });
+	assert.equal(s.arms.kiso.extraCalls, 3);
+	assert.equal(s.arms.pi.extraCalls, 0);
+});
+
 console.log(`[launch-report] ${n} ok`);

@@ -35,6 +35,9 @@ import { fileURLToPath } from "node:url";
 
 const B = dirname(fileURLToPath(import.meta.url));
 export const BOOTSTRAP = { seed: 20260919, draws: 20000 };
+/** The lead's small-n rule: an interval is printed only from this many
+ *  valid pairs; below it, the median and n alone, with the reason. */
+export const MIN_PAIRS_FOR_CI = 6;
 const PARTS = [
 	{ part: "t5", extractor: "extract-t5.py", pattern: null },
 	{ part: "t6", extractor: "extract-t6.py", pattern: "T6" },
@@ -177,6 +180,9 @@ export function summarize(legs, { incomplete }) {
 			medianCostV2: median(valid.filter((l) => !l.unknownUsage).map((l) => l.costV2)),
 			medianWall: median(valid.map((l) => l.wall)),
 			medianRequests: median(valid.map((l) => l.requests)),
+			// billed-but-unrecorded traffic is outside cost v2 — printed so a
+			// reader can see whether it could matter
+			extraCalls: valid.reduce((n, l) => n + (Number(l.extraCalls) > 0 ? Number(l.extraCalls) : 0), 0),
 		};
 	};
 	const out = { arms: Object.fromEntries(arms.map((a) => [a, armSummary(byArm[a])])) };
@@ -198,13 +204,16 @@ export function summarize(legs, { incomplete }) {
 	}
 	const dc = pairs.map((p) => p.dCost).filter((x) => x !== null);
 	const dw = pairs.map((p) => p.dWall).filter((x) => x !== null);
+	const ciOf = (xs) => (xs.length >= MIN_PAIRS_FOR_CI ? bootstrapMedianCI(xs) : null);
 	out.comparative = {
 		pairs: pairs.length,
 		costPairs: dc.length,
+		wallPairs: dw.length,
 		medianDCost: median(dc),
-		ciDCost: bootstrapMedianCI(dc),
+		ciDCost: ciOf(dc),
 		medianDWall: median(dw),
-		ciDWall: bootstrapMedianCI(dw),
+		ciDWall: ciOf(dw),
+		ciNote: dc.length < MIN_PAIRS_FOR_CI || dw.length < MIN_PAIRS_FOR_CI ? `an interval needs at least ${MIN_PAIRS_FOR_CI} valid pairs` : null,
 	};
 	out.pairs = pairs;
 	return out;
@@ -260,17 +269,23 @@ const pct = (x) => (x === null || x === undefined ? "—" : `${x >= 0 ? "+" : ""
 const ci = (c) => (c ? `[${pct(c[0])}, ${pct(c[1])}]` : "—");
 
 function markdown(r) {
-	const lines = [`# Small launch bench — ${r.round}`, ""];
+	const lines = [
+		`# Small launch bench — ${r.round}`,
+		"",
+		"Cost v2 is computed from RECORDED usage: a retried call that was billed but left no usage record is outside it. `extra calls` counts such calls per arm, so a reader can see whether that could matter.",
+		"",
+	];
 	for (const [part, e] of Object.entries(r.parts)) {
 		const block = (title, s) => {
 			lines.push(`### ${title}${e.incomplete ? " — INCOMPLETE (cap hit; no comparative figure)" : ""}`, "");
-			lines.push("| arm | legs | void | verify | unknown usage | median cost v2 | median wall s | median requests |", "|---|---:|---:|---:|---:|---:|---:|---:|");
+			lines.push("| arm | legs | void | verify | unknown usage | extra calls | median cost v2 (n) | median wall s (n) | median requests |", "|---|---:|---:|---:|---:|---:|---:|---:|---:|");
 			for (const [arm, a] of Object.entries(s.arms)) {
-				lines.push(`| ${arm} | ${a.legs} | ${a.void} | ${a.verifyPass}/${a.verifyOf} | ${a.unknownUsageLegs} | ${a.medianCostV2 === null ? "—" : Math.round(a.medianCostV2)} | ${a.medianWall ?? "—"} | ${a.medianRequests ?? "—"} |`);
+				const nCost = a.verifyOf - a.unknownUsageLegs;
+				lines.push(`| ${arm} | ${a.legs} | ${a.void} | ${a.verifyPass}/${a.verifyOf} | ${a.unknownUsageLegs} | ${a.extraCalls} | ${a.medianCostV2 === null ? "—" : Math.round(a.medianCostV2)} (${nCost}) | ${a.medianWall ?? "—"} (${a.verifyOf}) | ${a.medianRequests ?? "—"} |`);
 			}
 			if (s.comparative) {
 				const c = s.comparative;
-				lines.push("", `pairs ${c.pairs} (cost ${c.costPairs}) · median Δcost ${pct(c.medianDCost)} ${ci(c.ciDCost)} · median Δwall ${pct(c.medianDWall)} ${ci(c.ciDWall)} — Δ = (kiso − reference) / reference`);
+				lines.push("", `median Δcost ${pct(c.medianDCost)} (n=${c.costPairs} valid pairs) ${ci(c.ciDCost)} · median Δwall ${pct(c.medianDWall)} (n=${c.wallPairs}) ${ci(c.ciDWall)} — Δ = (kiso − reference) / reference${c.ciNote ? ` · no interval: ${c.ciNote}` : ""}`);
 			}
 			lines.push("");
 		};

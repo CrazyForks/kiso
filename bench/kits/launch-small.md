@@ -122,6 +122,16 @@ VOID when any of these holds:
 - a 95% percentile-bootstrap interval of each median (seed `20260919`,
   20,000 draws).
 
+**Rules for small n (the lead's ruling):**
+- Every figure prints the n of valid legs or pairs it rests on, beside it.
+- An interval is printed only for n ≥ 6 valid pairs. Below that, the
+  report prints the median and n alone, and says why.
+
+**What cost v2 cannot see:** cost v2 is computed from RECORDED usage. A
+retried call that was billed but left no usage record is outside it.
+`extra calls` is printed per arm and per part, so a reader can see
+whether that could matter.
+
 **There is no pass/fail threshold and no marketing verdict.**
 - The report states what it measured.
 - Every family carries its `favours` label, and B+D states its small
@@ -168,6 +178,13 @@ bench tested.
   - family A (the multi-turn native-session mechanism on both arms);
   - family E (`answer.txt` from each arm's own record).
 - **Cost:** about $0.15.
+- **Before any paid pilot leg, both gates must fail once, offline and
+  free** (`test_leg_isolation.sh`, in the check chain):
+  - a leg beneath a dummy `AGENTS.md`, and one beneath a `CLAUDE.md`, are
+    each VOID through the runner before the credential is read;
+  - a leg whose git resolves upward is VOID at the gate. The runners always
+    give a leg its own repository, so this is proved on the gate both
+    runners call.
 - **Criteria:**
   - every leg is non-void;
   - the effort is `high` on the wire for both arms;
@@ -191,5 +208,33 @@ bench tested.
 
 After the scored legs, the round directory is archived with a sha256
 manifest, together with the ledgers and the report. The archive covers
-every leg directory: the bare home, the capture, the session records, the
-sidecars.
+every leg directory:
+- the bare home;
+- the capture;
+- the session records;
+- the sidecars, `verify.json` among them.
+
+A concealed leg's fixture and turns are archived through its repo and
+its turn logs. Its verifier is NOT archived: it is regenerable from the
+seed, which the report publishes after the scored legs.
+
+## The T5 text (the lead's addition A)
+
+- **This branch changes the runners' default T5 text.** The change is
+  turn 5 (`parseRangeList`). The rule for a part that parses is now stated
+  exactly, where before it was undecidable on the empty input.
+- **The archived release-ceremony band was measured on the CORRECTED
+  text.** That band is the 0.37.0 ceremony (`rel-037-rerun`, 24 legs, all
+  carrying the corrected turn 5).
+  - The original `rel-037` run carried the old text, and it is not the
+    band.
+  - `rel-038` and `rel-039` also carry the corrected text.
+- **The 0.40.0 ceremony smoke (`rel-040-smoke`, `rel-040-smoke2`) ran from
+  a checkout with the OLD text.** It was judged against a band measured on
+  the corrected one, so that comparison was not like-for-like. The
+  ceremony's ruling file records this.
+- The ruling also quoted the band's maxima as `32,388` and `38,527`. Those
+  are pair 1's values. The rel-037-rerun ranges are rc 24,082–36,291 and
+  ctl 24,595–50,997.
+- From this merge on, the default T5 is the corrected text. Release
+  smokes are then like-for-like with that band.
