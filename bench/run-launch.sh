@@ -47,7 +47,7 @@ PARTDIR="$LAUNCH_ROOT/$KISO_ROUND"
 mkdir -p "$PARTDIR"
 . "$B/leg-limits.sh"
 LEDGER="$PARTDIR/ledger.tsv"
-[ -f "$LEDGER" ] || printf 'leg\ttool\trequests\tstatus\tverify\teffort_wire\tvoid\n' > "$LEDGER"
+[ -f "$LEDGER" ] || printf 'leg\ttool\trequests\tstatus\tverify\teffort_wire\tvoid\textra_calls\n' > "$LEDGER"
 
 say() { printf '%s  %s\n' "$(date +%H:%M:%S)" "$1"; }
 
@@ -84,7 +84,18 @@ check_leg() {
 		_why=""
 		[ "$_ew" = "$BENCH_EFFORT" ] || _why="the wire shows effort '$_ew', not $BENCH_EFFORT"
 		if [ -z "$_why" ]; then
-			_ok=$(node -e 'try{const r=require(process.argv[1]);process.stdout.write(r.ok?"ok":(r.problems||[]).join("; "))}catch{process.stdout.write("no capture record")}' "$_w/capture.json" 2>/dev/null || echo "unreadable")
+			# MORE bodies than recorded requests is a retry or a failed call the
+			# arm never billed — real traffic, REPORTED (extra_calls), never a
+			# reason to void. FEWER bodies, another model, or a missing effort
+			# means the leg cannot say what it ran: VOID.
+			_ok=$(node -e '
+				let r; try { r = require(process.argv[1]); } catch { process.stdout.write("no capture record"); process.exit(0); }
+				const rest = (r.problems || []).filter((p) => {
+					const m = /^captured (\d+) model calls, the leg recorded (\d+) requests$/.exec(p);
+					return !(m && Number(m[1]) > Number(m[2]));
+				});
+				process.stdout.write(rest.length === 0 ? "ok" : rest.join("; "));
+			' "$_w/capture.json" 2>/dev/null || echo "unreadable")
 			[ "$_ok" = ok ] || _why="its capture does not reconcile: $_ok"
 		fi
 		if [ -z "$_why" ]; then
@@ -94,7 +105,8 @@ check_leg() {
 		[ -z "$_why" ] || printf 'VOID: %s\n' "$_why" > "$_w/void"
 	fi
 	_vd=$(cat "$_w/void" 2>/dev/null | head -1 || true)
-	printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$(basename "$_w")" "$_t" "$_rq" "$_st" "$_vf" "$_ew" "${_vd:--}" >> "$LEDGER"
+	_xc=$(node -e 'try { const r = require(process.argv[1]); const m = (r.problems || []).map((p) => /^captured (\d+) model calls, the leg recorded (\d+) requests$/.exec(p)).find(Boolean); process.stdout.write(m && Number(m[1]) > Number(m[2]) ? String(Number(m[1]) - Number(m[2])) : "0"); } catch { process.stdout.write("unknown"); }' "$_w/capture.json" 2>/dev/null || echo unknown)
+	printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$(basename "$_w")" "$_t" "$_rq" "$_st" "$_vf" "$_ew" "${_vd:--}" "$_xc" >> "$LEDGER"
 	say "  $(basename "$_w"): status=$_st verify=$_vf effort_wire=$_ew requests=$_rq ${_vd:+· $_vd}"
 }
 
