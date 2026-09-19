@@ -180,7 +180,12 @@ if ! assert_leg_isolated "$WORK" "$WORK/repo"; then
   echo "$(cat "$WORK/void")" >&2
   exit 3
 fi
-. "${XDG_CONFIG_HOME:-$HOME/.config}/claude-deepseek/credentials.env"
+# THE KEY NEVER ENTERS ANY ARGV (the owner's rule). The runner holds only
+# the credentials file's PATH; cred-exec.sh reads the key inside the process
+# that becomes the arm. The file must exist and name the key; nothing here
+# reads the value.
+CRED_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/claude-deepseek/credentials.env"
+grep -q 'DEEPSEEK_API_KEY=' "$CRED_FILE" 2>/dev/null || { echo "no DEEPSEEK_API_KEY in $CRED_FILE" >&2; exit 1; }
 TOT=0
 # PER-LEG HARD LIMITS. A leg had none: a hung arm ran until someone noticed,
 # a looping arm spent the programme's budget on one task. Overridable, but
@@ -278,7 +283,7 @@ case "$TOOL" in
 { "models": { "ds": { "kind": "openai-compat", "model": "deepseek-flash",
   "baseUrl": "https://api.deepseek.com", "apiKeyEnv": "OPENAI_API_KEY" } } }
 CFG
-    set -- "OPENAI_BASE_URL=https://api.deepseek.com" "OPENAI_API_KEY=$DEEPSEEK_API_KEY" \
+    set -- "OPENAI_BASE_URL=https://api.deepseek.com" "BENCH_CRED_FILE=$CRED_FILE" "BENCH_CRED_AS=OPENAI_API_KEY" \
       "OPENAI_MODEL=deepseek-flash" "KISO_EXTENSIONS_DIR=$EXTDIR" \
       "KISO_HOME=$WORK/kiso-home" "KISO_SESSIONS_DIR=$WORK/kiso-home/sessions" "KISO_SKILLS_DIR=$SKILLDIR" "KISO_NO_UPDATE_CHECK=1"
     # EDIT-ECHO A/B: the ONLY difference between the two arms of that
@@ -319,10 +324,10 @@ CFG
       # bucket 1 opens with the effort switch, the way a human sets it
       if [ "$P" -eq 1 ]; then
         { printf '%s\n' "/model ds $BENCH_EFFORT"; BUCKET $P; } | bare_bounded "$BARE_HOME" "$_left" "$WORK/stdout-$P.log" \
-          $KISO_ENV_PAIRS -- $KISO_BIN --mode bypass "bench-t6-$TOOL-$RUN"
+          $KISO_ENV_PAIRS -- sh "$B/cred-exec.sh" $KISO_BIN --mode bypass "bench-t6-$TOOL-$RUN"
       else
         BUCKET $P | bare_bounded "$BARE_HOME" "$_left" "$WORK/stdout-$P.log" \
-          $KISO_ENV_PAIRS -- $KISO_BIN --mode bypass "bench-t6-$TOOL-$RUN"
+          $KISO_ENV_PAIRS -- sh "$B/cred-exec.sh" $KISO_BIN --mode bypass "bench-t6-$TOOL-$RUN"
       fi
       _rc=$?; set -e
       E=$(date +%s); echo $((E - S)) > "$WORK/wall_$P"
@@ -362,8 +367,8 @@ CFG
       S=$(date +%s); _left=$(remaining)
       set +e
       bare_bounded "$BARE_HOME" "$_left" "$WORK/stdout-$i.log" \
-        "DEEPSEEK_API_KEY=$DEEPSEEK_API_KEY" -- \
-        pi --provider deepseek --model deepseek-flash --thinking "$BENCH_EFFORT" -p --mode json \
+        "BENCH_CRED_FILE=$CRED_FILE" "BENCH_CRED_AS=DEEPSEEK_API_KEY" -- \
+        sh "$B/cred-exec.sh" pi --provider deepseek --model deepseek-flash --thinking "$BENCH_EFFORT" -p --mode json \
         --session "$WORK/pi-session" "$(TURN $i)" < /dev/null
       _rc=$?; set -e
       E=$(date +%s); echo $((E - S)) > "$WORK/wall_turn_$i"
@@ -379,7 +384,7 @@ CFG
     assert_bare claude "$BARE_HOME" || exit 1
     set -- "CLAUDE_CONFIG_DIR=$CCFG" \
       "ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic" \
-      "ANTHROPIC_AUTH_TOKEN=$DEEPSEEK_API_KEY" \
+      "BENCH_CRED_FILE=$CRED_FILE" "BENCH_CRED_AS=ANTHROPIC_AUTH_TOKEN" \
       "ANTHROPIC_MODEL=deepseek-flash" \
       "ANTHROPIC_DEFAULT_SONNET_MODEL=deepseek-flash" \
       "ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-flash"
@@ -391,10 +396,10 @@ CFG
       set +e
       if [ -z "$SID" ]; then
         bare_bounded "$BARE_HOME" "$_left" "$WORK/stdout-$i.log" $CLAUDE_ENV_PAIRS -- \
-          claude -p "$(TURN $i)" --effort "$BENCH_EFFORT" --output-format json --strict-mcp-config --mcp-config '{"mcpServers":{}}' --dangerously-skip-permissions < /dev/null
+          sh "$B/cred-exec.sh" claude -p "$(TURN $i)" --effort "$BENCH_EFFORT" --output-format json --strict-mcp-config --mcp-config '{"mcpServers":{}}' --dangerously-skip-permissions < /dev/null
       else
         bare_bounded "$BARE_HOME" "$_left" "$WORK/stdout-$i.log" $CLAUDE_ENV_PAIRS -- \
-          claude -p "$(TURN $i)" --resume "$SID" --effort "$BENCH_EFFORT" --output-format json --strict-mcp-config --mcp-config '{"mcpServers":{}}' --dangerously-skip-permissions < /dev/null
+          sh "$B/cred-exec.sh" claude -p "$(TURN $i)" --resume "$SID" --effort "$BENCH_EFFORT" --output-format json --strict-mcp-config --mcp-config '{"mcpServers":{}}' --dangerously-skip-permissions < /dev/null
       fi
       _rc=$?; set -e
       E=$(date +%s); echo $((E - S)) > "$WORK/wall_turn_$i"
