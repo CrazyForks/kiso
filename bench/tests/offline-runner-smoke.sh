@@ -157,6 +157,29 @@ for tool in kiso pi claude; do
 		|| note RED "$tool T6: exit 3 not classified ($(cat "$W/status" 2>/dev/null || echo none))"
 done
 
+echo "  --- a concealed instance runs through the same apparatus ---"
+# BENCH_INSTANCE: one generated instance (a THROWAWAY test seed — never the
+# real one) through run-t6.sh. Its own fixture, its own N turns in buckets
+# of six, its own verifier; the substitutes write no record, so the final
+# text is UNREAD (a failed read, recorded as such) and the untouched fixture
+# fails its verifier — the apparatus is what is checked, not an arm.
+CI_DIR="$TMP/instance"
+node "$B/concealed/cli.mjs" materialize --seed 424242 --instance A-1 --out "$CI_DIR" >/dev/null 2>&1
+CI_TURNS=$(node -e 'process.stdout.write(String(require(process.argv[1]).length))' "$CI_DIR/tasks.json")
+CI_BUCKETS=$(( (CI_TURNS + 5) / 6 ))
+for tool in kiso pi; do
+	W="$RUNS/offline-smoke/$tool-A-1-cs1"
+	rm -rf "$W"; rm -f "$TMP/exit-code"
+	BENCH_INSTANCE="$CI_DIR" sh "$B/run-t6.sh" "$tool" cs1 >/dev/null 2>&1
+	[ -d "$W/repo" ] && note ok "$tool A-1: the leg is named by the instance id" || note RED "$tool A-1: no leg at $W"
+	[ "$(cat "$W/verify" 2>/dev/null)" = fail ] && note ok "$tool A-1: the instance's own verifier read the untouched fixture as fail" || note RED "$tool A-1: verify=$(cat "$W/verify" 2>/dev/null || echo none)"
+	[ "$(cat "$W/answer_status" 2>/dev/null)" = unread ] && note ok "$tool A-1: no record means the final text is UNREAD, not empty" || note RED "$tool A-1: answer_status=$(cat "$W/answer_status" 2>/dev/null || echo none)"
+	n=$(ls "$W"/wall_[0-9]* 2>/dev/null | wc -l | tr -d " ")
+	[ "$n" = "$CI_BUCKETS" ] && note ok "$tool A-1: $CI_TURNS turns in $CI_BUCKETS bucket walls" || note RED "$tool A-1: $n bucket walls, expected $CI_BUCKETS"
+	grep -q '"task": "A-1"' "$W/config.json" 2>/dev/null && note ok "$tool A-1: the manifest names the instance" || note RED "$tool A-1: the manifest does not name the instance"
+done
+[ -z "$(ls "$RUNS/offline-smoke"/*-T6-cs1 2>/dev/null)" ] && note ok "an instance leg never lands under the T6 name" || note RED "an instance leg was named T6"
+
 echo "  --- a leg's git cannot reach the host ---"
 # A T6 leg ran `git stash ... ; git stash pop` against HEAD. With no
 # repository of its own the fixture sat inside the HOST worktree, git

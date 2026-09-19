@@ -1,5 +1,7 @@
 #!/bin/sh
 # run-t6.sh <tool: kiso|pi|claude> <run-id>
+#   (BENCH_INSTANCE=<materialized instance dir> runs one concealed-set
+#   instance through the same apparatus instead — see THE SCENARIO below)
 # The long-curve scenario: 24 progressive turns on fixture-t6, split into
 # FOUR 6-turn buckets. Each tool drives the session with its NATIVE
 # mechanism (the T5 pattern, scaled):
@@ -119,9 +121,25 @@ fi
 # LB-1: legs live under the runs root — KISO_RUNS_ROOT when set (the launch
 # bench keeps them outside any checkout; see leg-isolation.sh), else runs/.
 . "$B/leg-isolation.sh"
-WORK="$(runs_root "$B")/${KISO_ROUND:+$KISO_ROUND/}$TOOL-T6-$RUN"
+# THE SCENARIO. Unset BENCH_INSTANCE = T6 exactly as it was (fixture-t6, its
+# 24 turns in four buckets of six, t6-verify.sh). Set = ONE generated
+# instance of the launch bench's concealed set — a `cli.mjs materialize`
+# directory — with its own fixture, its own N turns (buckets of six, the
+# last one short), and its own held-out verifier fed the leg's final text.
+# One apparatus: the limits, the bareness, the capture, the manifest and the
+# completion classification are the T6 ones either way.
+INSTANCE=${BENCH_INSTANCE:-}
+if [ -n "$INSTANCE" ]; then
+  FIXTURE="$INSTANCE/fixture"; TASKS="$INSTANCE/tasks.json"
+  LABEL=$(node -e 'process.stdout.write(String(require(process.argv[1]).id))' "$INSTANCE/instance.json")
+else
+  FIXTURE="$B/fixture-t6"; TASKS="$B/tasks-t6.json"; LABEL=T6
+fi
+NTURNS=$(node -e 'process.stdout.write(String(require(process.argv[1]).length))' "$TASKS")
+NBUCKETS=$(( (NTURNS + 5) / 6 ))
+WORK="$(runs_root "$B")/${KISO_ROUND:+$KISO_ROUND/}$TOOL-$LABEL-$RUN"
 rm -rf "$WORK"; mkdir -p "$WORK"
-cp -R "$B/fixture-t6/" "$WORK/repo/"
+cp -R "$FIXTURE/" "$WORK/repo/"
 rm -rf "$WORK/repo/.git"
 # ISOLATION: the leg's repo gets its OWN git, and it is not optional.
 #
@@ -195,9 +213,9 @@ cd "$WORK/repo"
 # THE ROUND'S REASONING LEVEL, pinned for every arm that has the knob —
 # the same constant and the same reasoning as run-t5.sh (Amendment 4b).
 BENCH_EFFORT=${BENCH_EFFORT:-high}
-TURN() { node -e "console.log(JSON.parse(require('fs').readFileSync('$B/tasks-t6.json','utf8'))[$1-1])"; }
+TURN() { node -e "console.log(JSON.parse(require('fs').readFileSync('$TASKS','utf8'))[$1-1])"; }
 BUCKET() { # $1=1..4 — the turn range's start and end
-  P=$1; S=$(( (P - 1) * 6 + 1 )); E=$(( P * 6 ))
+  P=$1; S=$(( (P - 1) * 6 + 1 )); E=$(( P * 6 )); [ "$E" -le "$NTURNS" ] || E=$NTURNS
   i=$S; while [ "$i" -le "$E" ]; do TURN $i; i=$((i + 1)); done
 }
 
@@ -205,8 +223,8 @@ BUCKET() { # $1=1..4 — the turn range's start and end
 # turns into the same wall_N files kiso writes directly, so the divergence
 # curve reads one shape for all three.
 BUCKET_WALLS() {
-  for P in 1 2 3 4; do
-    TOT=0; i=$(( (P - 1) * 6 + 1 )); E=$(( P * 6 ))
+  P=1; while [ "$P" -le "$NBUCKETS" ]; do
+    TOT=0; i=$(( (P - 1) * 6 + 1 )); E=$(( P * 6 )); [ "$E" -le "$NTURNS" ] || E=$NTURNS
     while [ "$i" -le "$E" ]; do
       # a turn the budget stopped before has no wall file; count it as zero
       # rather than failing under `set -u` — a short leg is a recorded
@@ -216,6 +234,7 @@ BUCKET_WALLS() {
       i=$((i + 1))               # wipe later buckets' walls (the run bug)
     done
     echo "$TOT" > "$WORK/wall_$P"
+    P=$((P + 1))
   done
 }
 
@@ -280,7 +299,7 @@ CFG
     # ruled the capability must never require manual configuration.
     if [ "${BENCH_NO_DELEGATE:-0}" = 1 ]; then set -- "$@" "KISO_SUBAGENT_DEPTH=1"; fi
     KISO_ENV_PAIRS="$*"
-    for P in 1 2 3 4; do
+    P=1; while [ "$P" -le "$NBUCKETS" ]; do
       over_budget && break
       S=$(date +%s); _left=$(remaining)
       set +e
@@ -296,6 +315,7 @@ CFG
       E=$(date +%s); echo $((E - S)) > "$WORK/wall_$P"
       printf '%s\n' "$_rc" > "$WORK/exit-$P"
       note_exit "bucket $P" "$_rc" "$_left"
+      P=$((P + 1))
     done
     ;;
   pi)
@@ -324,7 +344,7 @@ CFG
       CAPTURE_DECL=".pi/agent/models-store.json"
     fi
     assert_bare pi "$BARE_HOME" $CAPTURE_DECL || exit 1
-    for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24; do
+    i=1; while [ "$i" -le "$NTURNS" ]; do
       over_budget && break
       S=$(date +%s); _left=$(remaining)
       set +e
@@ -336,6 +356,7 @@ CFG
       E=$(date +%s); echo $((E - S)) > "$WORK/wall_turn_$i"
       printf '%s\n' "$_rc" > "$WORK/exit-$i"
       note_exit "turn $i" "$_rc" "$_left"
+      i=$((i + 1))
     done
     BUCKET_WALLS
     [ -n "${CAP_PID:-}" ] && kill "$CAP_PID" 2>/dev/null
@@ -351,7 +372,7 @@ CFG
       "ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-flash"
     CLAUDE_ENV_PAIRS="$*"
     SID=""
-    for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24; do
+    i=1; while [ "$i" -le "$NTURNS" ]; do
       over_budget && break
       S=$(date +%s); _left=$(remaining)
       set +e
@@ -381,6 +402,7 @@ for line in open('$WORK/stdout-$i.log', errors='ignore'):
 " 2>/dev/null || true)
         [ -n "$SID" ] || echo "WARN: no session_id in turn $i — the next turn cannot resume" >&2
       fi
+      i=$((i + 1))
     done
     BUCKET_WALLS
     ;;
@@ -428,7 +450,7 @@ const cfg = captureArm({
   reasoning: '$ARM_REASONING' === '' ? null : { effort: '$ARM_REASONING' },
   observed,
 });
-cfg.task = 'T6'; cfg.run = '$RUN'; cfg.round = process.env.KISO_ROUND || null;
+cfg.task = '$LABEL'; cfg.run = '$RUN'; cfg.round = process.env.KISO_ROUND || null;
 cfg.legDeadlineSeconds = $LEG_DEADLINE_S; cfg.legMaxRequests = $LEG_MAX_REQUESTS;
 cfg.editEchoRequested = '$TOOL' === 'kiso' ? ${BENCH_EDIT_ECHO:-0} === 1 : null;
 writeFileSync('$WORK/config.json', JSON.stringify(cfg, null, 1) + '\n');
@@ -565,6 +587,23 @@ fi
 # The second argument is the sidecar directory: t6-verify.sh writes the
 # per-check detail to $WORK/verify.json while `verify` stays one word, which
 # is what every consumer of it reads (extract-t6.py, run-e6hard.sh, ...).
-VERIFY=$("$B/t6-verify.sh" "$WORK/repo" "$WORK")
+if [ -n "$INSTANCE" ]; then
+  # THE CONCEALED VERDICT. First the leg's FINAL text, from the arm's own
+  # record (final-answer.mjs) — every leg writes it, family E reads it; an
+  # empty read is a failed read (`answer_status: unread`), never an empty
+  # answer. Then the instance's held-out verifier, which prints ONE word and
+  # exits 0 either way: a non-zero exit means it could not run, and the leg
+  # reads `error` — not `fail`, which would charge the arm for our apparatus.
+  ANSWER_ARG=""
+  if node "$B/final-answer.mjs" "$TOOL" "$WORK" 2> "$WORK/answer.err"; then
+    printf 'read\n' > "$WORK/answer_status"; ANSWER_ARG="--answer $WORK/answer.txt"
+  else
+    printf 'unread\n' > "$WORK/answer_status"
+  fi
+  VERIFY=$(node "$B/concealed/cli.mjs" verify --instance-dir "$INSTANCE" --workspace "$WORK/repo" $ANSWER_ARG --out "$WORK" 2> "$WORK/verify.err") || VERIFY=error
+  [ -n "$VERIFY" ] || VERIFY=error
+else
+  VERIFY=$("$B/t6-verify.sh" "$WORK/repo" "$WORK")
+fi
 echo "$VERIFY" > "$WORK/verify"
-echo "DONE T6 $TOOL run=$RUN verify=$VERIFY"
+echo "DONE $LABEL $TOOL run=$RUN verify=$VERIFY"
