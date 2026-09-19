@@ -48,6 +48,10 @@ mkdir -p "$TMP/cfg/claude-deepseek"
 echo 'DEEPSEEK_API_KEY=smoke-not-a-key' > "$TMP/cfg/claude-deepseek/credentials.env"
 XDG_CONFIG_HOME="$TMP/cfg"; export XDG_CONFIG_HOME
 KISO_BIN=kiso; export KISO_BIN
+# LB-1: the legs live outside the checkout — a checkout may carry an
+# untracked instruction file, and the runners' isolation gate voids any leg
+# beneath one (leg-isolation.sh)
+RUNS=$(cd "$(mktemp -d)" && pwd -P)/runs; export KISO_RUNS_ROOT="$RUNS"
 KISO_ROUND=offline-smoke; export KISO_ROUND
 # RUNNER-R2 (Astra): the PUBLIC override names, which is what the runner
 # reads. The smoke used to export LEG_MAX_REQUESTS and LEG_DEADLINE_S, and
@@ -64,7 +68,7 @@ KISO_LEG_DEADLINE_S=20; export KISO_LEG_DEADLINE_S
 KISO_PROBE_DEADLINE_S=${KISO_PROBE_DEADLINE_S:-10}; export KISO_PROBE_DEADLINE_S
 
 for tool in kiso pi claude; do
-	W="$B/runs/offline-smoke/$tool-T5-s1"
+	W="$RUNS/offline-smoke/$tool-T5-s1"
 	rm -rf "$W"
 	rm -f "$TMP/exit-code"
 	if out=$(sh "$B/run-t5.sh" "$tool" s1 2>&1); then
@@ -89,7 +93,7 @@ done
 
 echo "  --- a nonzero exit is OURS, never the task's verdict ---"
 for tool in kiso pi claude; do
-	W="$B/runs/offline-smoke/$tool-T5-s2"
+	W="$RUNS/offline-smoke/$tool-T5-s2"
 	rm -rf "$W"
 	echo 3 > "$TMP/exit-code"
 	sh "$B/run-t5.sh" "$tool" s2 >/dev/null 2>&1
@@ -106,7 +110,7 @@ echo "  --- the effort must be BOUND, not merely typed ---"
 # was typed and never took. That is the shape a REFUSED `/model` has, and
 # an arm labelled `high` whose requests were never high is worse than a
 # failed leg: it gets scored.
-W="$B/runs/offline-smoke/kiso-T5-s3"
+W="$RUNS/offline-smoke/kiso-T5-s3"
 rm -rf "$W"; rm -f "$TMP/exit-code"
 sh "$B/run-t5.sh" kiso s3 >/dev/null 2>&1
 if grep -q "effort_not_bound" "$W/status" 2>/dev/null; then
@@ -116,7 +120,7 @@ else
 fi
 # and the ORDER: a leg that never ran reports why it never ran, not the
 # binding it could not have made
-W="$B/runs/offline-smoke/kiso-T5-s4"
+W="$RUNS/offline-smoke/kiso-T5-s4"
 rm -rf "$W"; echo 3 > "$TMP/exit-code"
 sh "$B/run-t5.sh" kiso s4 >/dev/null 2>&1
 rm -f "$TMP/exit-code"
@@ -131,7 +135,7 @@ echo "  --- the T6 runner, ported to the same apparatus ---"
 # codes discarded, no third arm. The port is only real if it holds the same
 # lifecycle, so it is checked by the same substitutes.
 for tool in kiso pi claude; do
-	W="$B/runs/offline-smoke/$tool-T6-s1"
+	W="$RUNS/offline-smoke/$tool-T6-s1"
 	rm -rf "$W"; rm -f "$TMP/exit-code"
 	sh "$B/run-t6.sh" "$tool" s1 >/dev/null 2>&1
 	[ -f "$W/verify" ] && note ok "$tool T6: a verify record exists" || note RED "$tool T6: NO verify record"
@@ -144,7 +148,7 @@ done
 
 echo "  --- and a nonzero exit is OURS on the T6 arms too ---"
 for tool in kiso pi claude; do
-	W="$B/runs/offline-smoke/$tool-T6-s2"
+	W="$RUNS/offline-smoke/$tool-T6-s2"
 	rm -rf "$W"; echo 3 > "$TMP/exit-code"
 	sh "$B/run-t6.sh" "$tool" s2 >/dev/null 2>&1
 	rm -f "$TMP/exit-code"
@@ -152,6 +156,44 @@ for tool in kiso pi claude; do
 		&& note ok "$tool T6: classified as launch_or_run_error" \
 		|| note RED "$tool T6: exit 3 not classified ($(cat "$W/status" 2>/dev/null || echo none))"
 done
+
+echo "  --- a concealed instance runs through the same apparatus ---"
+# BENCH_INSTANCE: one generated instance (a THROWAWAY test seed — never the
+# real one) through run-t6.sh. Its own fixture, its own N turns in buckets
+# of six, its own verifier; the substitutes write no record, so the final
+# text is UNREAD (a failed read, recorded as such) and the untouched fixture
+# fails its verifier — the apparatus is what is checked, not an arm.
+CI_DIR="$TMP/instance"
+node "$B/concealed/cli.mjs" materialize --seed 424242 --instance A-1 --out "$CI_DIR" >/dev/null 2>&1
+CI_TURNS=$(node -e 'process.stdout.write(String(require(process.argv[1]).length))' "$CI_DIR/tasks.json")
+CI_BUCKETS=$(( (CI_TURNS + 5) / 6 ))
+for tool in kiso pi; do
+	W="$RUNS/offline-smoke/$tool-A-1-cs1"
+	rm -rf "$W"; rm -f "$TMP/exit-code"
+	BENCH_INSTANCE="$CI_DIR" sh "$B/run-t6.sh" "$tool" cs1 >/dev/null 2>&1
+	[ -d "$W/repo" ] && note ok "$tool A-1: the leg is named by the instance id" || note RED "$tool A-1: no leg at $W"
+	[ "$(cat "$W/verify" 2>/dev/null)" = fail ] && note ok "$tool A-1: the instance's own verifier read the untouched fixture as fail" || note RED "$tool A-1: verify=$(cat "$W/verify" 2>/dev/null || echo none)"
+	[ "$(cat "$W/answer_status" 2>/dev/null)" = unread ] && note ok "$tool A-1: no record means the final text is UNREAD, not empty" || note RED "$tool A-1: answer_status=$(cat "$W/answer_status" 2>/dev/null || echo none)"
+	n=$(ls "$W"/wall_[0-9]* 2>/dev/null | wc -l | tr -d " ")
+	[ "$n" = "$CI_BUCKETS" ] && note ok "$tool A-1: $CI_TURNS turns in $CI_BUCKETS bucket walls" || note RED "$tool A-1: $n bucket walls, expected $CI_BUCKETS"
+	grep -q '"task": "A-1"' "$W/config.json" 2>/dev/null && note ok "$tool A-1: the manifest names the instance" || note RED "$tool A-1: the manifest does not name the instance"
+done
+[ -z "$(ls "$RUNS/offline-smoke"/*-T6-cs1 2>/dev/null)" ] && note ok "an instance leg never lands under the T6 name" || note RED "an instance leg was named T6"
+# THE STAGED FORM the launch driver uses: fixture/ and tasks.json only — no
+# verifier, no instance.json — so the answer is never on disk while an arm
+# runs; the verifier is materialized again from the seed after the arm exits.
+# That rests on generation being deterministic, which is checked first.
+CI_AGAIN="$TMP/instance-again"
+node "$B/concealed/cli.mjs" materialize --seed 424242 --instance A-1 --out "$CI_AGAIN" >/dev/null 2>&1
+if diff -r "$CI_DIR/fixture" "$CI_AGAIN/fixture" >/dev/null && diff "$CI_DIR/tasks.json" "$CI_AGAIN/tasks.json" >/dev/null; then note ok "materialize is deterministic: the same seed gives the same fixture and turns"; else note RED "materialize is NOT deterministic — the just-in-time verifier would judge a different instance"; fi
+STAGE="$TMP/staged"; mkdir -p "$STAGE"; cp -R "$CI_DIR/fixture" "$STAGE/fixture"; cp "$CI_DIR/tasks.json" "$STAGE/tasks.json"
+HELD_BEFORE=$(ls -d "${TMPDIR:-/tmp}"/tmp.* 2>/dev/null | wc -l | tr -d " ")
+W="$RUNS/offline-smoke/pi-A-1-st1"; rm -rf "$W"
+BENCH_INSTANCE="$STAGE" BENCH_INSTANCE_ID=A-1 BENCH_INSTANCE_SEED=424242 sh "$B/run-t6.sh" pi st1 >/dev/null 2>&1
+[ "$(cat "$W/verify" 2>/dev/null)" = fail ] && note ok "staged: the verifier, materialized after the arm, read the untouched fixture as fail" || note RED "staged: verify=$(cat "$W/verify" 2>/dev/null || echo none) ($(cat "$W/verify.err" 2>/dev/null | head -1))"
+[ ! -e "$STAGE/verifier" ] && [ ! -e "$STAGE/instance.json" ] && note ok "staged: no verifier and no parameters sat beside the leg" || note RED "staged: the answer was on disk during the leg"
+HELD_AFTER=$(ls -d "${TMPDIR:-/tmp}"/tmp.* 2>/dev/null | wc -l | tr -d " ")
+[ "$HELD_AFTER" -le "$HELD_BEFORE" ] && note ok "staged: the held verifier was deleted after the verdict" || note RED "staged: a held verifier directory outlived the verdict"
 
 echo "  --- a leg's git cannot reach the host ---"
 # A T6 leg ran `git stash ... ; git stash pop` against HEAD. With no
@@ -162,7 +204,7 @@ echo "  --- a leg's git cannot reach the host ---"
 # The check is not "does .git exist" — it is whether git RESOLVES to the
 # leg, which is the question the failure actually turned on.
 for fam in t5 t6; do
-	W="$B/runs/offline-smoke/kiso-$(echo $fam | tr a-z A-Z)-s1"
+	W="$RUNS/offline-smoke/kiso-$(echo $fam | tr a-z A-Z)-s1"
 	if [ -d "$W/repo" ]; then
 		top=$(git -C "$W/repo" rev-parse --show-toplevel 2>/dev/null || echo "")
 		case "$top" in
@@ -346,14 +388,14 @@ for want in 0 1; do
 	( cd "$B" && BENCH_EDIT_ECHO=$want KISO_BIN="$TMP/bin/envprobe" KISO_VERSION=9.9.9 \
 		KISO_ROUND=offline-echo DEEPSEEK_API_KEY=x KISO_LEG_DEADLINE_S=60 \
 		sh ./run-t6.sh kiso "e$want" >/dev/null 2>&1 )
-	got=$(cat "$B/runs/offline-echo/kiso-T6-e$want/stdout-1.log" 2>/dev/null | grep -m1 '^KISO_EDIT_ECHO=' || echo "")
+	got=$(cat "$RUNS/offline-echo/kiso-T6-e$want/stdout-1.log" 2>/dev/null | grep -m1 '^KISO_EDIT_ECHO=' || echo "")
 	case "$want:$got" in
 		"1:KISO_EDIT_ECHO=1") note ok "BENCH_EDIT_ECHO=1 reaches the binary as KISO_EDIT_ECHO=1" ;;
 		"0:KISO_EDIT_ECHO=<unset>") note ok "BENCH_EDIT_ECHO=0 leaves the binary with no KISO_EDIT_ECHO" ;;
 		*) note RED "BENCH_EDIT_ECHO=$want produced [$got] at the binary — the arms are not distinct" ;;
 	esac
 done
-rm -rf "$B/runs/offline-echo"
+rm -rf "$RUNS/offline-echo"
 
 # And the leg's OWN evidence decides which arm it was. `effort_bound` taught
 # this: a label a leg carries must be read back from what the leg did, never
@@ -398,14 +440,22 @@ done
 
 # ---- the frozen criteria and the script that applies them must agree ---
 if [ -f "$B/kits/edit-echo-ab.md" ] && [ -f "$B/edit-echo-verdict.mjs" ]; then
-	agree=$(node "$B/tests/criteria-agree.mjs" "$B/kits/edit-echo-ab.md" "$B/edit-echo-verdict.mjs" 2>&1 || echo "the comparison itself failed")
+	agree=$(node "$B/tests/criteria-agree.mjs" "$B/kits/edit-echo-ab.md" "$B/edit-echo-verdict.mjs" edit-echo 2>&1 || echo "the comparison itself failed")
 	if [ "$agree" = agree ]; then
-		note ok "the verdict script's margins match the frozen kit"
+		note ok "the edit-echo verdict's margins match its frozen kit"
 	else
-		note RED "the verdict script and the frozen kit disagree: $agree"
+		note RED "the edit-echo verdict and its frozen kit disagree: $agree"
+	fi
+fi
+if [ -f "$B/kits/tool-table-a.md" ] && [ -f "$B/tool-table-verdict.mjs" ]; then
+	agree=$(node "$B/tests/criteria-agree.mjs" "$B/kits/tool-table-a.md" "$B/tool-table-verdict.mjs" tool-table 2>&1 || echo "the comparison itself failed")
+	if [ "$agree" = agree ]; then
+		note ok "round A's verdict margins match its frozen kit"
+	else
+		note RED "round A's verdict and its frozen kit disagree: $agree"
 	fi
 fi
 
-rm -rf "$B/runs/offline-smoke"
+rm -rf "$RUNS/offline-smoke"
 [ "$FAILED" -eq 0 ] && echo "[offline-runner-smoke] the lifecycle holds on all three arms" || echo "[offline-runner-smoke] RED"
 exit "$FAILED"

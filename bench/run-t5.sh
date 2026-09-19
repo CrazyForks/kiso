@@ -113,7 +113,10 @@ fi
 # E4-e: KISO_ROUND scopes the runs under runs/<round>/ (the run-hygiene
 # discipline — a round never reuses a historical run name); absent = the
 # historical flat layout.
-WORK="$B/runs/${KISO_ROUND:+$KISO_ROUND/}$TOOL-T5-$RUN"
+# LB-1: legs live under the runs root — KISO_RUNS_ROOT when set (the launch
+# bench keeps them outside any checkout; see leg-isolation.sh), else runs/.
+. "$B/leg-isolation.sh"
+WORK="$(runs_root "$B")/${KISO_ROUND:+$KISO_ROUND/}$TOOL-T5-$RUN"
 rm -rf "$WORK"; mkdir -p "$WORK"
 cp -R "$B/fixture-t5/" "$WORK/repo/"
 rm -rf "$WORK/repo/.git"
@@ -137,7 +140,18 @@ git -C "$WORK/repo" config user.email bench@localhost
 git -C "$WORK/repo" config user.name bench
 git -C "$WORK/repo" add -A
 git -C "$WORK/repo" -c commit.gpgsign=false commit -q -m "fixture baseline" || true
-. "${XDG_CONFIG_HOME:-$HOME/.config}/claude-deepseek/credentials.env"
+# The two pre-flight gates, BEFORE any request is spent: git resolves to
+# this repo, and no ancestor carries an instruction file (leg-isolation.sh).
+if ! assert_leg_isolated "$WORK" "$WORK/repo"; then
+  echo "$(cat "$WORK/void")" >&2
+  exit 3
+fi
+# THE KEY NEVER ENTERS ANY ARGV (the owner's rule). The runner holds only
+# the credentials file's PATH; cred-exec.sh reads the key inside the process
+# that becomes the arm. The file must exist and name the key; nothing here
+# reads the value.
+CRED_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/claude-deepseek/credentials.env"
+grep -q 'DEEPSEEK_API_KEY=' "$CRED_FILE" 2>/dev/null || { echo "no DEEPSEEK_API_KEY in $CRED_FILE" >&2; exit 1; }
 TOT=0
 # PER-LEG HARD LIMITS. A leg had none: a hung arm ran until someone noticed,
 # a looping arm spent the programme's budget on one task. Overridable, but
@@ -241,9 +255,16 @@ CFG
     # skills is not the product as installed.
     # §3: KISO_SKILLS_DIR was missing entirely — an arm reading the
     # operator's skills is not the product as installed.
-    set -- "OPENAI_BASE_URL=https://api.deepseek.com" "OPENAI_API_KEY=$DEEPSEEK_API_KEY" \
+    set -- "OPENAI_BASE_URL=https://api.deepseek.com" "BENCH_CRED_FILE=$CRED_FILE" "BENCH_CRED_AS=OPENAI_API_KEY" \
       "OPENAI_MODEL=deepseek-flash" "KISO_EXTENSIONS_DIR=$EXTDIR" \
       "KISO_HOME=$WORK/kiso-home" "KISO_SESSIONS_DIR=$WORK/kiso-home/sessions" "KISO_SKILLS_DIR=$SKILLDIR" "KISO_NO_UPDATE_CHECK=1"
+    # CAPTURE (the launch bench, the T6 runner's mechanism): this arm dumps
+    # its own request bodies — never a proxy, whose loopback base URL would
+    # defeat the endpoint-keyed metadata lookup and refuse `/model ds high`
+    if [ "${BENCH_CAPTURE:-0}" = 1 ]; then
+      mkdir -p "$WORK/capture"
+      set -- "$@" "KISO_DUMP_REQUESTS=$WORK/capture"
+    fi
     KISO_ENV_PAIRS="$*"
     # F33-R4: the exit status is KEPT, not discarded. Every segment used to
     # end in `|| true`, and the absence of a limit status later became
@@ -264,7 +285,7 @@ CFG
       set +e
       # shellcheck disable=SC2086
       "$@" | bare_bounded "$BARE_HOME" "$_left" "$WORK/stdout-$_n.log" \
-        $KISO_ENV_PAIRS -- $KISO_BIN --mode bypass "bench-t5-$TOOL-$RUN"
+        $KISO_ENV_PAIRS -- sh "$B/cred-exec.sh" $KISO_BIN --mode bypass "bench-t5-$TOOL-$RUN"
       _rc=$?
       set -e
       E=$(date +%s); TOT=$((TOT + E - S))
@@ -295,28 +316,68 @@ CFG
       seg 1 printf '%s\n' "/model ds $BENCH_EFFORT" "$(TURN 1)" "$(TURN 2)" "$(TURN 3)" "$(TURN 4)" "$(TURN 5)"
       seg 2 printf '%s\n' "$(TURN 6)" "$(TURN 7)" "$(TURN 8)"
     fi
+    # NO `commit` FIELD, and its absence is deliberate.
+    #
+    # It held `git -C $B/.. rev-parse --short HEAD` — the BENCH CLONE's HEAD,
+    # not the running binary's. Both arms of a paired run therefore recorded
+    # the SAME commit whichever binary they executed, and under
+    # KISO_BIN="npx -y ..." it named a commit that bin was never built from.
+    # A field that cannot differ between the things it claims to identify is
+    # not provenance, it is the shape of provenance — the same defect as the
+    # host-version probe above, one field over.
+    #
+    # The running binary cannot attest a commit at all: `$KISO_BIN --version`
+    # prints the package version and nothing else, and no build-commit
+    # constant exists anywhere in the CLI for it to report. So there is
+    # nothing honest to put here, and a fabricated one is worse than none.
+    # `kisoVersion` above is the provenance this record can carry.
+    #
+    # What CAN be attested about the artifact — the resolved executable, its
+    # entry-file digest, and the installed package — is asked of the binary
+    # by capture-config.mjs and lands in config.json beside this file. The
+    # historical records are not rewritten; their `commit` stands as what it
+    # always was, the bench clone's HEAD.
     node -e "
 const fs = require('fs');
-const { execSync } = require('child_process');
 const meta = {
   tool: 'kiso', task: 'T5', run: '$RUN', round: process.env.KISO_ROUND || null,
   model: 'deepseek-flash',
   kisoVersion: '$KISO_VERSION',
-  commit: execSync('git -C $B/.. rev-parse --short HEAD').toString().trim(),
   createdAt: Date.now(),
 };
 fs.writeFileSync('$WORK/meta.json', JSON.stringify(meta, null, 1) + '\n');
 "
     ;;
   pi)
-    assert_bare pi "$BARE_HOME" || exit 1
+    # CAPTURE: the T6 runner's mechanism, unchanged — this arm has no dump
+    # sink, so a local proxy records for it; its base URL moves through its
+    # MODEL STORE (one file in the bare home, DECLARED to the bareness gate)
+    CAPTURE_DECL=""
+    if [ "${BENCH_CAPTURE:-0}" = 1 ]; then
+      mkdir -p "$WORK/capture" "$BARE_HOME/.pi/agent"
+      CAP_UP=${CAP_UPSTREAM:-api.deepseek.com}
+      CAP_PORT=$(node -e 'const n=require("net");const s=n.createServer();s.listen(0,()=>{console.log(s.address().port);s.close();});')
+      python3 "$B/capture-proxy.py" --port "$CAP_PORT" --upstream "$CAP_UP" --scheme https --out "$WORK/capture" --label "pi-$RUN" >/dev/null 2>&1 &
+      CAP_PID=$!
+      sleep 2
+      node -e '
+        const fs = require("fs");
+        const src = process.env.HOME + "/.pi/agent/models-store.json";
+        const d = JSON.parse(fs.readFileSync(src, "utf8"));
+        // metadata only — no credential; the key rides in the environment
+        for (const m of (d.deepseek && d.deepseek.models) || []) m.baseUrl = process.argv[1];
+        fs.writeFileSync(process.argv[2], JSON.stringify(d));
+      ' "http://127.0.0.1:$CAP_PORT" "$BARE_HOME/.pi/agent/models-store.json"
+      CAPTURE_DECL=".pi/agent/models-store.json"
+    fi
+    assert_bare pi "$BARE_HOME" $CAPTURE_DECL || exit 1
     for i in 1 2 3 4 5 6 7 8; do
       over_budget && break
       S=$(date +%s); _left=$(remaining)
       set +e
       bare_bounded "$BARE_HOME" "$_left" "$WORK/stdout-$i.log" \
-        "DEEPSEEK_API_KEY=$DEEPSEEK_API_KEY" -- \
-        pi --provider deepseek --model deepseek-flash --thinking "$BENCH_EFFORT" -p --mode json \
+        "BENCH_CRED_FILE=$CRED_FILE" "BENCH_CRED_AS=DEEPSEEK_API_KEY" -- \
+        sh "$B/cred-exec.sh" pi --provider deepseek --model deepseek-flash --thinking "$BENCH_EFFORT" -p --mode json \
         --session "$WORK/pi-session" "$(TURN $i)" < /dev/null
       _rc=$?
       set -e
@@ -324,6 +385,7 @@ fs.writeFileSync('$WORK/meta.json', JSON.stringify(meta, null, 1) + '\n');
       printf '%s\n' "$_rc" > "$WORK/exit-$i"
       note_exit "turn $i" "$_rc" "$_left"
     done
+    [ -n "${CAP_PID:-}" ] && kill "$CAP_PID" 2>/dev/null
     ;;
   claude)
     assert_bare claude "$BARE_HOME" || exit 1
@@ -333,7 +395,7 @@ fs.writeFileSync('$WORK/meta.json', JSON.stringify(meta, null, 1) + '\n');
     # eight 401s recorded as a task failure.
     set -- "CLAUDE_CONFIG_DIR=$CCFG" \
       "ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic" \
-      "ANTHROPIC_AUTH_TOKEN=$DEEPSEEK_API_KEY" \
+      "BENCH_CRED_FILE=$CRED_FILE" "BENCH_CRED_AS=ANTHROPIC_AUTH_TOKEN" \
       "ANTHROPIC_MODEL=deepseek-flash" \
       "ANTHROPIC_DEFAULT_SONNET_MODEL=deepseek-flash" \
       "ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-flash"
@@ -346,7 +408,7 @@ fs.writeFileSync('$WORK/meta.json', JSON.stringify(meta, null, 1) + '\n');
         set +e
         bare_bounded "$BARE_HOME" "$_left" "$WORK/stdout-$i.log" \
           $CLAUDE_ENV_PAIRS -- \
-          claude -p "$(TURN $i)" --effort "$BENCH_EFFORT" --output-format json --strict-mcp-config --mcp-config '{"mcpServers":{}}' --dangerously-skip-permissions < /dev/null
+          sh "$B/cred-exec.sh" claude -p "$(TURN $i)" --effort "$BENCH_EFFORT" --output-format json --strict-mcp-config --mcp-config '{"mcpServers":{}}' --dangerously-skip-permissions < /dev/null
         _rc=$?; set -e
         printf '%s\n' "$_rc" > "$WORK/exit-$i"
         note_exit "turn $i" "$_rc" "$_left"
@@ -375,7 +437,7 @@ for line in open('$WORK/stdout-$i.log', errors='ignore'):
         set +e
         bare_bounded "$BARE_HOME" "$_left" "$WORK/stdout-$i.log" \
           $CLAUDE_ENV_PAIRS -- \
-          claude -p "$(TURN $i)" --resume "$SID" --effort "$BENCH_EFFORT" --output-format json --strict-mcp-config --mcp-config '{"mcpServers":{}}' --dangerously-skip-permissions < /dev/null
+          sh "$B/cred-exec.sh" claude -p "$(TURN $i)" --resume "$SID" --effort "$BENCH_EFFORT" --output-format json --strict-mcp-config --mcp-config '{"mcpServers":{}}' --dangerously-skip-permissions < /dev/null
         _rc=$?; set -e
         printf '%s\n' "$_rc" > "$WORK/exit-$i"
         note_exit "turn $i" "$_rc" "$_left"
@@ -468,6 +530,24 @@ cfg.t5Compact = ${BENCH_T5_COMPACT:-0} === 1;
 cfg.effortVerified = '$TOOL' === 'kiso' ? 'durable-profile' : 'not-verified: the flag is in the command; no read-back exists until request bodies are captured';
 writeFileSync('$WORK/config.json', JSON.stringify(cfg, null, 1) + '\n');
 " 2>/dev/null || echo "WARN: configuration capture failed for $TOOL" >&2
+# CAPTURE, reconciled (the T6 runner's block): one body per recorded request,
+# every body naming the model, every body carrying the effort — and the
+# WIRE-VERIFIED effort as its own sidecar beside effort_bound.
+if [ "${BENCH_CAPTURE:-0}" = 1 ]; then
+  node --input-type=module -e "
+    import { readCapture, reconcile } from '$B/reconcile-capture.mjs';
+    import { readFileSync, writeFileSync } from 'node:fs';
+    let requests = null;
+    try {
+      const cfg = JSON.parse(readFileSync('$WORK/config.json', 'utf8'));
+      requests = cfg.model && typeof cfg.model.requests === 'number' ? cfg.model.requests : null;
+    } catch {}
+    const recs = readCapture('$WORK/capture');
+    const r = reconcile(recs, { requests, model: 'deepseek-flash', effort: '$BENCH_EFFORT' });
+    writeFileSync('$WORK/capture.json', JSON.stringify(r, null, 1) + '\n');
+    writeFileSync('$WORK/effort_wire', (r.effortObserved && r.effortObserved.length ? String(r.effortObserved) : 'not-observed') + '\n');
+  " 2>/dev/null || { echo "reconcile-failed" > "$WORK/effort_wire"; echo '{\"ok\":false,\"problems\":[\"the reconciler did not run\"]}' > "$WORK/capture.json"; }
+fi
 # F33-R4: execution validity is decided BEFORE the task verdict, and the
 # two are kept apart. A leg whose process never ran did not fail the task.
 # THE EFFORT MUST BE BOUND, NOT MERELY TYPED. A refused switch runs the

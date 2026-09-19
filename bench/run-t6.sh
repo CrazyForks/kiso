@@ -1,5 +1,7 @@
 #!/bin/sh
 # run-t6.sh <tool: kiso|pi|claude> <run-id>
+#   (BENCH_INSTANCE=<materialized instance dir> runs one concealed-set
+#   instance through the same apparatus instead — see THE SCENARIO below)
 # The long-curve scenario: 24 progressive turns on fixture-t6, split into
 # FOUR 6-turn buckets. Each tool drives the session with its NATIVE
 # mechanism (the T5 pattern, scaled):
@@ -116,9 +118,41 @@ fi
 # E4-e: KISO_ROUND scopes the runs under runs/<round>/ (the run-hygiene
 # discipline — a round never reuses a historical run name); absent = the
 # historical flat layout.
-WORK="$B/runs/${KISO_ROUND:+$KISO_ROUND/}$TOOL-T6-$RUN"
+# LB-1: legs live under the runs root — KISO_RUNS_ROOT when set (the launch
+# bench keeps them outside any checkout; see leg-isolation.sh), else runs/.
+. "$B/leg-isolation.sh"
+# THE SCENARIO. Unset BENCH_INSTANCE = T6 exactly as it was (fixture-t6, its
+# 24 turns in four buckets of six, t6-verify.sh). Set = ONE generated
+# instance of the launch bench's concealed set — a `cli.mjs materialize`
+# directory — with its own fixture, its own N turns (buckets of six, the
+# last one short), and its own held-out verifier fed the leg's final text.
+# One apparatus: the limits, the bareness, the capture, the manifest and the
+# completion classification are the T6 ones either way.
+INSTANCE=${BENCH_INSTANCE:-}
+# THE ANSWER IS NEVER ON DISK WHILE AN ARM RUNS. A materialized instance
+# carries its verifier (the pristine fixture, the REFERENCE SOLUTION, the
+# negative controls) and instance.json (B+D's parameters name the defect).
+# The launch driver therefore hands the leg a STAGED instance — fixture/ and
+# tasks.json only, id in BENCH_INSTANCE_ID — and the verifier is
+# materialized again from the seed (BENCH_INSTANCE_SEED; generation is
+# deterministic) into a throwaway directory after the arm has exited, and
+# deleted after the verdict. A full materialized directory (the offline
+# smoke's) still works: its verifier is used where it lies.
+if [ -n "$INSTANCE" ]; then
+  FIXTURE="$INSTANCE/fixture"; TASKS="$INSTANCE/tasks.json"
+  if [ -n "${BENCH_INSTANCE_ID:-}" ]; then
+    LABEL=$BENCH_INSTANCE_ID
+  else
+    LABEL=$(node -e 'process.stdout.write(String(require(process.argv[1]).id))' "$INSTANCE/instance.json")
+  fi
+else
+  FIXTURE="$B/fixture-t6"; TASKS="$B/tasks-t6.json"; LABEL=T6
+fi
+NTURNS=$(node -e 'process.stdout.write(String(require(process.argv[1]).length))' "$TASKS")
+NBUCKETS=$(( (NTURNS + 5) / 6 ))
+WORK="$(runs_root "$B")/${KISO_ROUND:+$KISO_ROUND/}$TOOL-$LABEL-$RUN"
 rm -rf "$WORK"; mkdir -p "$WORK"
-cp -R "$B/fixture-t6/" "$WORK/repo/"
+cp -R "$FIXTURE/" "$WORK/repo/"
 rm -rf "$WORK/repo/.git"
 # ISOLATION: the leg's repo gets its OWN git, and it is not optional.
 #
@@ -140,7 +174,18 @@ git -C "$WORK/repo" config user.email bench@localhost
 git -C "$WORK/repo" config user.name bench
 git -C "$WORK/repo" add -A
 git -C "$WORK/repo" -c commit.gpgsign=false commit -q -m "fixture baseline" || true
-. "${XDG_CONFIG_HOME:-$HOME/.config}/claude-deepseek/credentials.env"
+# The two pre-flight gates, BEFORE any request is spent: git resolves to
+# this repo, and no ancestor carries an instruction file (leg-isolation.sh).
+if ! assert_leg_isolated "$WORK" "$WORK/repo"; then
+  echo "$(cat "$WORK/void")" >&2
+  exit 3
+fi
+# THE KEY NEVER ENTERS ANY ARGV (the owner's rule). The runner holds only
+# the credentials file's PATH; cred-exec.sh reads the key inside the process
+# that becomes the arm. The file must exist and name the key; nothing here
+# reads the value.
+CRED_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/claude-deepseek/credentials.env"
+grep -q 'DEEPSEEK_API_KEY=' "$CRED_FILE" 2>/dev/null || { echo "no DEEPSEEK_API_KEY in $CRED_FILE" >&2; exit 1; }
 TOT=0
 # PER-LEG HARD LIMITS. A leg had none: a hung arm ran until someone noticed,
 # a looping arm spent the programme's budget on one task. Overridable, but
@@ -186,9 +231,9 @@ cd "$WORK/repo"
 # THE ROUND'S REASONING LEVEL, pinned for every arm that has the knob —
 # the same constant and the same reasoning as run-t5.sh (Amendment 4b).
 BENCH_EFFORT=${BENCH_EFFORT:-high}
-TURN() { node -e "console.log(JSON.parse(require('fs').readFileSync('$B/tasks-t6.json','utf8'))[$1-1])"; }
+TURN() { node -e "console.log(JSON.parse(require('fs').readFileSync('$TASKS','utf8'))[$1-1])"; }
 BUCKET() { # $1=1..4 — the turn range's start and end
-  P=$1; S=$(( (P - 1) * 6 + 1 )); E=$(( P * 6 ))
+  P=$1; S=$(( (P - 1) * 6 + 1 )); E=$(( P * 6 )); [ "$E" -le "$NTURNS" ] || E=$NTURNS
   i=$S; while [ "$i" -le "$E" ]; do TURN $i; i=$((i + 1)); done
 }
 
@@ -196,8 +241,8 @@ BUCKET() { # $1=1..4 — the turn range's start and end
 # turns into the same wall_N files kiso writes directly, so the divergence
 # curve reads one shape for all three.
 BUCKET_WALLS() {
-  for P in 1 2 3 4; do
-    TOT=0; i=$(( (P - 1) * 6 + 1 )); E=$(( P * 6 ))
+  P=1; while [ "$P" -le "$NBUCKETS" ]; do
+    TOT=0; i=$(( (P - 1) * 6 + 1 )); E=$(( P * 6 )); [ "$E" -le "$NTURNS" ] || E=$NTURNS
     while [ "$i" -le "$E" ]; do
       # a turn the budget stopped before has no wall file; count it as zero
       # rather than failing under `set -u` — a short leg is a recorded
@@ -207,6 +252,7 @@ BUCKET_WALLS() {
       i=$((i + 1))               # wipe later buckets' walls (the run bug)
     done
     echo "$TOT" > "$WORK/wall_$P"
+    P=$((P + 1))
   done
 }
 
@@ -237,7 +283,7 @@ case "$TOOL" in
 { "models": { "ds": { "kind": "openai-compat", "model": "deepseek-flash",
   "baseUrl": "https://api.deepseek.com", "apiKeyEnv": "OPENAI_API_KEY" } } }
 CFG
-    set -- "OPENAI_BASE_URL=https://api.deepseek.com" "OPENAI_API_KEY=$DEEPSEEK_API_KEY" \
+    set -- "OPENAI_BASE_URL=https://api.deepseek.com" "BENCH_CRED_FILE=$CRED_FILE" "BENCH_CRED_AS=OPENAI_API_KEY" \
       "OPENAI_MODEL=deepseek-flash" "KISO_EXTENSIONS_DIR=$EXTDIR" \
       "KISO_HOME=$WORK/kiso-home" "KISO_SESSIONS_DIR=$WORK/kiso-home/sessions" "KISO_SKILLS_DIR=$SKILLDIR" "KISO_NO_UPDATE_CHECK=1"
     # EDIT-ECHO A/B: the ONLY difference between the two arms of that
@@ -252,63 +298,108 @@ CFG
     # check below reads `edit_echo=off` on a leg that asked for `on`, and
     # the leg is VOID rather than quietly joining the control arm.
     if [ "${BENCH_EDIT_ECHO:-0}" = 1 ]; then set -- "$@" "KISO_EDIT_ECHO=1"; fi
+    # CAPTURE: our arm dumps its OWN bodies. It must NOT go through a proxy —
+    # a loopback baseUrl defeats the endpoint-keyed metadata lookup
+    # (dispatch.ts: lookupModelMetadata(model, baseUrl)), so `/model ds high`
+    # is refused and every leg reads effort_not_bound. The round would be
+    # void, after the money.
+    if [ "${BENCH_CAPTURE:-0}" = 1 ]; then
+      mkdir -p "$WORK/capture"
+      set -- "$@" "KISO_DUMP_REQUESTS=$WORK/capture"
+    fi
+    # ROUND A: the default table without `delegate`, through the product's
+    # OWN code path — the subagent extension's depth guard returns no tools
+    # at depth >= 1. One environment variable, the same binary, no shadowing
+    # extension and no config file, so the two arms differ in exactly one
+    # thing and neither is a build the product does not ship.
+    #
+    # The arm APPROXIMATES A DEFERRED DESIGN, not a removal: the owner has
+    # ruled the capability must never require manual configuration.
+    if [ "${BENCH_NO_DELEGATE:-0}" = 1 ]; then set -- "$@" "KISO_SUBAGENT_DEPTH=1"; fi
     KISO_ENV_PAIRS="$*"
-    for P in 1 2 3 4; do
+    P=1; while [ "$P" -le "$NBUCKETS" ]; do
       over_budget && break
       S=$(date +%s); _left=$(remaining)
       set +e
       # bucket 1 opens with the effort switch, the way a human sets it
       if [ "$P" -eq 1 ]; then
         { printf '%s\n' "/model ds $BENCH_EFFORT"; BUCKET $P; } | bare_bounded "$BARE_HOME" "$_left" "$WORK/stdout-$P.log" \
-          $KISO_ENV_PAIRS -- $KISO_BIN --mode bypass "bench-t6-$TOOL-$RUN"
+          $KISO_ENV_PAIRS -- sh "$B/cred-exec.sh" $KISO_BIN --mode bypass "bench-t6-$TOOL-$RUN"
       else
         BUCKET $P | bare_bounded "$BARE_HOME" "$_left" "$WORK/stdout-$P.log" \
-          $KISO_ENV_PAIRS -- $KISO_BIN --mode bypass "bench-t6-$TOOL-$RUN"
+          $KISO_ENV_PAIRS -- sh "$B/cred-exec.sh" $KISO_BIN --mode bypass "bench-t6-$TOOL-$RUN"
       fi
       _rc=$?; set -e
       E=$(date +%s); echo $((E - S)) > "$WORK/wall_$P"
       printf '%s\n' "$_rc" > "$WORK/exit-$P"
       note_exit "bucket $P" "$_rc" "$_left"
+      P=$((P + 1))
     done
     ;;
   pi)
-    assert_bare pi "$BARE_HOME" || exit 1
-    for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24; do
+    # CAPTURE: this arm has no dump sink, so the proxy records for it. Its
+    # base URL moves via its MODEL STORE (environment variables are not
+    # honoured — the older note stands), which means one file inside the
+    # bare home. That file is DECLARED to the bareness gate rather than
+    # hidden from it, and the gate still fails on anything undeclared.
+    CAPTURE_DECL=""
+    if [ "${BENCH_CAPTURE:-0}" = 1 ]; then
+      mkdir -p "$WORK/capture" "$BARE_HOME/.pi/agent"
+      CAP_UP=${CAP_UPSTREAM:-api.deepseek.com}
+      CAP_PORT=$(node -e 'const n=require("net");const s=n.createServer();s.listen(0,()=>{console.log(s.address().port);s.close();});')
+      python3 "$B/capture-proxy.py" --port "$CAP_PORT" --upstream "$CAP_UP" --scheme https         --out "$WORK/capture" --label "pi-$RUN" >/dev/null 2>&1 &
+      CAP_PID=$!
+      sleep 2
+      node -e '
+        const fs = require("fs");
+        const src = process.env.HOME + "/.pi/agent/models-store.json";
+        const d = JSON.parse(fs.readFileSync(src, "utf8"));
+        // metadata only — this file carries no credential (checked); the key
+        // rides in the environment, as it does without the proxy
+        for (const m of (d.deepseek && d.deepseek.models) || []) m.baseUrl = process.argv[1];
+        fs.writeFileSync(process.argv[2], JSON.stringify(d));
+      ' "http://127.0.0.1:$CAP_PORT" "$BARE_HOME/.pi/agent/models-store.json"
+      CAPTURE_DECL=".pi/agent/models-store.json"
+    fi
+    assert_bare pi "$BARE_HOME" $CAPTURE_DECL || exit 1
+    i=1; while [ "$i" -le "$NTURNS" ]; do
       over_budget && break
       S=$(date +%s); _left=$(remaining)
       set +e
       bare_bounded "$BARE_HOME" "$_left" "$WORK/stdout-$i.log" \
-        "DEEPSEEK_API_KEY=$DEEPSEEK_API_KEY" -- \
-        pi --provider deepseek --model deepseek-flash --thinking "$BENCH_EFFORT" -p --mode json \
+        "BENCH_CRED_FILE=$CRED_FILE" "BENCH_CRED_AS=DEEPSEEK_API_KEY" -- \
+        sh "$B/cred-exec.sh" pi --provider deepseek --model deepseek-flash --thinking "$BENCH_EFFORT" -p --mode json \
         --session "$WORK/pi-session" "$(TURN $i)" < /dev/null
       _rc=$?; set -e
       E=$(date +%s); echo $((E - S)) > "$WORK/wall_turn_$i"
       printf '%s\n' "$_rc" > "$WORK/exit-$i"
       note_exit "turn $i" "$_rc" "$_left"
+      i=$((i + 1))
     done
     BUCKET_WALLS
+    [ -n "${CAP_PID:-}" ] && kill "$CAP_PID" 2>/dev/null
     ;;
   claude)
     CCFG="$WORK/claude-config"; mkdir -p "$CCFG"
     assert_bare claude "$BARE_HOME" || exit 1
     set -- "CLAUDE_CONFIG_DIR=$CCFG" \
       "ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic" \
-      "ANTHROPIC_AUTH_TOKEN=$DEEPSEEK_API_KEY" \
+      "BENCH_CRED_FILE=$CRED_FILE" "BENCH_CRED_AS=ANTHROPIC_AUTH_TOKEN" \
       "ANTHROPIC_MODEL=deepseek-flash" \
       "ANTHROPIC_DEFAULT_SONNET_MODEL=deepseek-flash" \
       "ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-flash"
     CLAUDE_ENV_PAIRS="$*"
     SID=""
-    for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24; do
+    i=1; while [ "$i" -le "$NTURNS" ]; do
       over_budget && break
       S=$(date +%s); _left=$(remaining)
       set +e
       if [ -z "$SID" ]; then
         bare_bounded "$BARE_HOME" "$_left" "$WORK/stdout-$i.log" $CLAUDE_ENV_PAIRS -- \
-          claude -p "$(TURN $i)" --effort "$BENCH_EFFORT" --output-format json --strict-mcp-config --mcp-config '{"mcpServers":{}}' --dangerously-skip-permissions < /dev/null
+          sh "$B/cred-exec.sh" claude -p "$(TURN $i)" --effort "$BENCH_EFFORT" --output-format json --strict-mcp-config --mcp-config '{"mcpServers":{}}' --dangerously-skip-permissions < /dev/null
       else
         bare_bounded "$BARE_HOME" "$_left" "$WORK/stdout-$i.log" $CLAUDE_ENV_PAIRS -- \
-          claude -p "$(TURN $i)" --resume "$SID" --effort "$BENCH_EFFORT" --output-format json --strict-mcp-config --mcp-config '{"mcpServers":{}}' --dangerously-skip-permissions < /dev/null
+          sh "$B/cred-exec.sh" claude -p "$(TURN $i)" --resume "$SID" --effort "$BENCH_EFFORT" --output-format json --strict-mcp-config --mcp-config '{"mcpServers":{}}' --dangerously-skip-permissions < /dev/null
       fi
       _rc=$?; set -e
       E=$(date +%s); echo $((E - S)) > "$WORK/wall_turn_$i"
@@ -329,6 +420,7 @@ for line in open('$WORK/stdout-$i.log', errors='ignore'):
 " 2>/dev/null || true)
         [ -n "$SID" ] || echo "WARN: no session_id in turn $i — the next turn cannot resume" >&2
       fi
+      i=$((i + 1))
     done
     BUCKET_WALLS
     ;;
@@ -376,7 +468,7 @@ const cfg = captureArm({
   reasoning: '$ARM_REASONING' === '' ? null : { effort: '$ARM_REASONING' },
   observed,
 });
-cfg.task = 'T6'; cfg.run = '$RUN'; cfg.round = process.env.KISO_ROUND || null;
+cfg.task = '$LABEL'; cfg.run = '$RUN'; cfg.round = process.env.KISO_ROUND || null;
 cfg.legDeadlineSeconds = $LEG_DEADLINE_S; cfg.legMaxRequests = $LEG_MAX_REQUESTS;
 cfg.editEchoRequested = '$TOOL' === 'kiso' ? ${BENCH_EDIT_ECHO:-0} === 1 : null;
 writeFileSync('$WORK/config.json', JSON.stringify(cfg, null, 1) + '\n');
@@ -427,7 +519,67 @@ if [ "$TOOL" = "kiso" ]; then
   process.stdout.write(edits===0?"none":(saw>0?"on":"off"));
   ' "$WORK" 2>/dev/null || echo "unknown")
   printf '%s\n' "$EDIT_ECHO_OBSERVED" > "$WORK/edit_echo"
+  # WHICH TABLE THE LEG ACTUALLY CARRIED, read from its own captured bodies
+  # rather than from what the runner was asked to do. A leg labelled A whose
+  # table still carries `delegate` is not an A leg, and the label would make
+  # both arms agree because they were the same arm.
+  if [ "${BENCH_CAPTURE:-0}" = 1 ]; then
+    node --input-type=module -e "
+      import { readCapture } from '$B/reconcile-capture.mjs';
+      import { writeFileSync } from 'node:fs';
+      const recs = readCapture('$WORK/capture').filter((r) => r.body?.tools);
+      if (recs.length === 0) { writeFileSync('$WORK/tool_table', 'unknown\n'); process.exit(0); }
+      const names = (recs[0].body.tools ?? []).map((t) => t.function?.name ?? t.name).sort();
+      writeFileSync('$WORK/tool_table', names.join(',') + '\n');
+    " 2>/dev/null || printf 'unknown\n' > "$WORK/tool_table"
+    # WHICH PROMPT THE LEG ACTUALLY CARRIED, on the same principle. The arm
+    # of the re-read round is one bullet of the system prompt, and the
+    # runner selects it by KISO_BIN — a build path, which is exactly the
+    # kind of label that can be wrong while every number still looks fine.
+    # This reads the system message off the leg's own first captured body.
+    node --input-type=module -e "
+      import { readCapture } from '$B/reconcile-capture.mjs';
+      import { writeFileSync } from 'node:fs';
+      const recs = readCapture('$WORK/capture').filter((r) => Array.isArray(r.body?.messages));
+      const sysOf = (r) => {
+        const m = r.body.messages.find((x) => x.role === 'system');
+        if (!m) return '';
+        return typeof m.content === 'string' ? m.content : (m.content ?? []).map((c) => c.text ?? '').join('');
+      };
+      const sys = recs.map(sysOf).find((t) => t.length > 0) ?? '';
+      const extended = /or one you changed\s*\n?\s*yourself through a confirmed edit/i.test(sys);
+      const published = /do not re-?read a file you already read unchanged/i.test(sys);
+      // 'unknown' when neither clause is present: a prompt that carries
+      // neither is not one of this round's two arms, whatever was launched.
+      writeFileSync('$WORK/prompt_arm', (extended ? 'exemption-extended' : published ? 'published' : 'unknown') + '\n');
+    " 2>/dev/null || printf 'unknown\n' > "$WORK/prompt_arm"
+  fi
   printf '%s\n' "${BENCH_EDIT_ECHO:-0}" > "$WORK/edit_echo_requested"
+fi
+
+# CAPTURE RECONCILIATION, both arms, before any verdict is read off this leg.
+#
+# A directory of bodies proves nothing alone: if the sink missed requests,
+# the bodies describe a DIFFERENT session from the one the usage numbers
+# came from. And the effort read from a body is the WIRE-VERIFIED level —
+# the thing this programme has never had for the arm without a durable
+# profile, which carried "requested, not verified" on every leg ever run.
+if [ "${BENCH_CAPTURE:-0}" = 1 ]; then
+  node --input-type=module -e "
+    import { readCapture, reconcile } from '$B/reconcile-capture.mjs';
+    import { readFileSync, writeFileSync } from 'node:fs';
+    let requests = null;
+    try {
+      const cfg = JSON.parse(readFileSync('$WORK/config.json', 'utf8'));
+      requests = cfg.model && typeof cfg.model.requests === 'number' ? cfg.model.requests : null;
+    } catch {}
+    const recs = readCapture('$WORK/capture');
+    const r = reconcile(recs, { requests, model: 'deepseek-flash', effort: '$BENCH_EFFORT' });
+    writeFileSync('$WORK/capture.json', JSON.stringify(r, null, 1) + '\n');
+    // the wire-verified effort is its own sidecar, beside effort_bound, so a
+    // reader never has to infer which arm's claim rests on what
+    writeFileSync('$WORK/effort_wire', (r.effortObserved && r.effortObserved.length ? String(r.effortObserved) : 'not-observed') + '\n');
+  " 2>/dev/null || { echo "reconcile-failed" > "$WORK/effort_wire"; echo '{\"ok\":false,\"problems\":[\"the reconciler did not run\"]}' > "$WORK/capture.json"; }
 fi
 
 if [ -f "$WORK/status" ]; then
@@ -453,6 +605,34 @@ fi
 # The second argument is the sidecar directory: t6-verify.sh writes the
 # per-check detail to $WORK/verify.json while `verify` stays one word, which
 # is what every consumer of it reads (extract-t6.py, run-e6hard.sh, ...).
-VERIFY=$("$B/t6-verify.sh" "$WORK/repo" "$WORK")
+if [ -n "$INSTANCE" ]; then
+  # THE CONCEALED VERDICT. First the leg's FINAL text, from the arm's own
+  # record (final-answer.mjs) — every leg writes it, family E reads it; an
+  # empty read is a failed read (`answer_status: unread`), never an empty
+  # answer. Then the instance's held-out verifier, which prints ONE word and
+  # exits 0 either way: a non-zero exit means it could not run, and the leg
+  # reads `error` — not `fail`, which would charge the arm for our apparatus.
+  ANSWER_ARG=""
+  if node "$B/final-answer.mjs" "$TOOL" "$WORK" 2> "$WORK/answer.err"; then
+    printf 'read\n' > "$WORK/answer_status"; ANSWER_ARG="--answer $WORK/answer.txt"
+  else
+    printf 'unread\n' > "$WORK/answer_status"
+  fi
+  VDIR="$INSTANCE"; HELD=""
+  if [ ! -d "$INSTANCE/verifier" ]; then
+    HELD=$(mktemp -d)
+    VDIR="$HELD/instance"
+    node "$B/concealed/cli.mjs" materialize --seed "${BENCH_INSTANCE_SEED:?a staged instance needs its seed to verify}" --instance "$LABEL" --out "$VDIR" > /dev/null 2>> "$WORK/verify.err" || VDIR=""
+  fi
+  if [ -n "$VDIR" ]; then
+    VERIFY=$(node "$B/concealed/cli.mjs" verify --instance-dir "$VDIR" --workspace "$WORK/repo" $ANSWER_ARG --out "$WORK" 2>> "$WORK/verify.err") || VERIFY=error
+  else
+    VERIFY=error
+  fi
+  [ -n "$HELD" ] && rm -rf "$HELD"
+  [ -n "$VERIFY" ] || VERIFY=error
+else
+  VERIFY=$("$B/t6-verify.sh" "$WORK/repo" "$WORK")
+fi
 echo "$VERIFY" > "$WORK/verify"
-echo "DONE T6 $TOOL run=$RUN verify=$VERIFY"
+echo "DONE $LABEL $TOOL run=$RUN verify=$VERIFY"
