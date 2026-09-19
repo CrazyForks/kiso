@@ -64,10 +64,12 @@ const MAX_CWDS = 32;
  *  a command can run in. */
 const MAX_PATH = 4096;
 /** Path readings per line — one word from one candidate directory: at
- *  most one `stat` each, and 20,000 `stat`s is ~40 ms here. A line that
- *  needs more is not read to the end, and a line not read to the end
- *  denies. */
-const MAX_READINGS = 20_000;
+ *  most one `stat` each. A line a person or a model writes needs a few
+ *  hundred; 8,000 bounds the hostile ones to ~15 ms on a laptop, and under
+ *  100 ms on a loaded 2-core CI runner, where 20,000 measured 139 ms. A
+ *  line that needs more is not read to the end, and a line not read to
+ *  the end denies. */
+const MAX_READINGS = 8_000;
 /** Directory changes per line the check follows. Each one respells every
  *  candidate directory, so an unbounded run of `cd a;` is quadratic; a
  *  line a person or a model writes changes directory a handful of times. */
