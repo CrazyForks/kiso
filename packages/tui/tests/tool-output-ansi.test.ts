@@ -13,6 +13,9 @@ import { escapeTerminal, stripAnsi } from "@vincemakes/kiso-tui-cells/render";
 import { Body } from "../src/compositor.js";
 
 const E = "\x1b";
+/** The REAL clock, taken before the fake timers replace it — a timing gate
+ *  read through faked time measures nothing. */
+const realNow = performance.now.bind(performance);
 /** What a coloured vitest run prints, as the owner's card received it. */
 const VITEST = [
 	`${E}[31m────────${E}[39m${E}[1m${E}[41m Failed Tests 2 ${E}[49m${E}[22m${E}[31m────────${E}[39m`,
@@ -27,6 +30,7 @@ describe("tool output without its terminal styling", () => {
 		expect(stripAnsi(VITEST)).toBe(["──────── Failed Tests 2 ────────", "      Tests  2 failed | 13 passed (15)"].join("\n"));
 		expect(stripAnsi(`a${E}]0;title\x07b${E}]8;;https://x${E}\\link${E}]8;;${E}\\c`)).toBe("ablinkc");
 		expect(stripAnsi(`${E}(B${E}[mdone \x9b31mred`)).toBe("done red");
+		expect(stripAnsi(`a${E}Pq#0;1;2${E}\\b${E}_apc body${E}\\c`)).toBe("abc"); // DCS and APC strings, terminated
 		expect(stripAnsi("plain [31m text")).toBe("plain [31m text"); // no ESC, nothing to strip
 	});
 
@@ -42,6 +46,32 @@ describe("tool output without its terminal styling", () => {
 		expect(frame).toContain("Failed Tests 2");
 		expect(frame).toContain("2 failed | 13 passed (15)");
 		for (const remnant of ["[31m", "[41m", "[39m", "[22m", "[90m"]) expect(frame).not.toContain(remnant);
+	});
+
+	it("hostile output stays linear: 100,000 chars of unterminated ESC P through the card in under 50 ms", () => {
+		// the lead's review: a string-body branch that scanned lazily to the
+		// end of the text for its terminator made every unterminated `ESC P`
+		// an O(n) scan — n²/2 steps on the render path, synchronously (the
+		// DC-54 shape: a missing bound, not a sync/async question)
+		// ~100k chars: 30 rows, each 1,700 unterminated `ESC P` and a label —
+		// rows, so the card has a body to expand
+		const hostile = Array.from({ length: 30 }, (_, i) => `${`${E}P`.repeat(1_700)}row ${i}`).join("\n");
+		const writes: string[] = [];
+		const body = new Body({ active: () => true, height: () => 24, width: () => 100, editCol: () => 1, write: (s) => writes.push(s) });
+		body.enter();
+		body.toolStart("shell", "c1", { command: "cat hostile" });
+		body.toolRunning("c1");
+		// ctrl+o: the expanded card draws the WHOLE output through blockRows
+		const started = realNow();
+		body.toolResult("c1", { content: hostile, isError: false });
+		vi.advanceTimersByTime(16);
+		body.toggleExpanded();
+		vi.advanceTimersByTime(16);
+		const elapsed = realNow() - started;
+		const frame = writes.join("");
+		expect(frame).toContain("ctrl+o collapses"); // the expanded card was drawn
+		expect(frame).toContain("row 0"); // …with the WHOLE output
+		expect(elapsed, `rendering took ${Math.round(elapsed)} ms`).toBeLessThan(50);
 	});
 
 	it("a NAME keeps the visible remnant — stripping it would let an injected name pass as another", () => {
