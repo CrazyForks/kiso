@@ -129,9 +129,22 @@ fi
 # One apparatus: the limits, the bareness, the capture, the manifest and the
 # completion classification are the T6 ones either way.
 INSTANCE=${BENCH_INSTANCE:-}
+# THE ANSWER IS NEVER ON DISK WHILE AN ARM RUNS. A materialized instance
+# carries its verifier (the pristine fixture, the REFERENCE SOLUTION, the
+# negative controls) and instance.json (B+D's parameters name the defect).
+# The launch driver therefore hands the leg a STAGED instance — fixture/ and
+# tasks.json only, id in BENCH_INSTANCE_ID — and the verifier is
+# materialized again from the seed (BENCH_INSTANCE_SEED; generation is
+# deterministic) into a throwaway directory after the arm has exited, and
+# deleted after the verdict. A full materialized directory (the offline
+# smoke's) still works: its verifier is used where it lies.
 if [ -n "$INSTANCE" ]; then
   FIXTURE="$INSTANCE/fixture"; TASKS="$INSTANCE/tasks.json"
-  LABEL=$(node -e 'process.stdout.write(String(require(process.argv[1]).id))' "$INSTANCE/instance.json")
+  if [ -n "${BENCH_INSTANCE_ID:-}" ]; then
+    LABEL=$BENCH_INSTANCE_ID
+  else
+    LABEL=$(node -e 'process.stdout.write(String(require(process.argv[1]).id))' "$INSTANCE/instance.json")
+  fi
 else
   FIXTURE="$B/fixture-t6"; TASKS="$B/tasks-t6.json"; LABEL=T6
 fi
@@ -600,7 +613,18 @@ if [ -n "$INSTANCE" ]; then
   else
     printf 'unread\n' > "$WORK/answer_status"
   fi
-  VERIFY=$(node "$B/concealed/cli.mjs" verify --instance-dir "$INSTANCE" --workspace "$WORK/repo" $ANSWER_ARG --out "$WORK" 2> "$WORK/verify.err") || VERIFY=error
+  VDIR="$INSTANCE"; HELD=""
+  if [ ! -d "$INSTANCE/verifier" ]; then
+    HELD=$(mktemp -d)
+    VDIR="$HELD/instance"
+    node "$B/concealed/cli.mjs" materialize --seed "${BENCH_INSTANCE_SEED:?a staged instance needs its seed to verify}" --instance "$LABEL" --out "$VDIR" > /dev/null 2>> "$WORK/verify.err" || VDIR=""
+  fi
+  if [ -n "$VDIR" ]; then
+    VERIFY=$(node "$B/concealed/cli.mjs" verify --instance-dir "$VDIR" --workspace "$WORK/repo" $ANSWER_ARG --out "$WORK" 2>> "$WORK/verify.err") || VERIFY=error
+  else
+    VERIFY=error
+  fi
+  [ -n "$HELD" ] && rm -rf "$HELD"
   [ -n "$VERIFY" ] || VERIFY=error
 else
   VERIFY=$("$B/t6-verify.sh" "$WORK/repo" "$WORK")

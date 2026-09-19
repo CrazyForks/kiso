@@ -179,6 +179,21 @@ for tool in kiso pi; do
 	grep -q '"task": "A-1"' "$W/config.json" 2>/dev/null && note ok "$tool A-1: the manifest names the instance" || note RED "$tool A-1: the manifest does not name the instance"
 done
 [ -z "$(ls "$RUNS/offline-smoke"/*-T6-cs1 2>/dev/null)" ] && note ok "an instance leg never lands under the T6 name" || note RED "an instance leg was named T6"
+# THE STAGED FORM the launch driver uses: fixture/ and tasks.json only — no
+# verifier, no instance.json — so the answer is never on disk while an arm
+# runs; the verifier is materialized again from the seed after the arm exits.
+# That rests on generation being deterministic, which is checked first.
+CI_AGAIN="$TMP/instance-again"
+node "$B/concealed/cli.mjs" materialize --seed 424242 --instance A-1 --out "$CI_AGAIN" >/dev/null 2>&1
+if diff -r "$CI_DIR/fixture" "$CI_AGAIN/fixture" >/dev/null && diff "$CI_DIR/tasks.json" "$CI_AGAIN/tasks.json" >/dev/null; then note ok "materialize is deterministic: the same seed gives the same fixture and turns"; else note RED "materialize is NOT deterministic — the just-in-time verifier would judge a different instance"; fi
+STAGE="$TMP/staged"; mkdir -p "$STAGE"; cp -R "$CI_DIR/fixture" "$STAGE/fixture"; cp "$CI_DIR/tasks.json" "$STAGE/tasks.json"
+HELD_BEFORE=$(ls -d "${TMPDIR:-/tmp}"/tmp.* 2>/dev/null | wc -l | tr -d " ")
+W="$RUNS/offline-smoke/pi-A-1-st1"; rm -rf "$W"
+BENCH_INSTANCE="$STAGE" BENCH_INSTANCE_ID=A-1 BENCH_INSTANCE_SEED=424242 sh "$B/run-t6.sh" pi st1 >/dev/null 2>&1
+[ "$(cat "$W/verify" 2>/dev/null)" = fail ] && note ok "staged: the verifier, materialized after the arm, read the untouched fixture as fail" || note RED "staged: verify=$(cat "$W/verify" 2>/dev/null || echo none) ($(cat "$W/verify.err" 2>/dev/null | head -1))"
+[ ! -e "$STAGE/verifier" ] && [ ! -e "$STAGE/instance.json" ] && note ok "staged: no verifier and no parameters sat beside the leg" || note RED "staged: the answer was on disk during the leg"
+HELD_AFTER=$(ls -d "${TMPDIR:-/tmp}"/tmp.* 2>/dev/null | wc -l | tr -d " ")
+[ "$HELD_AFTER" -le "$HELD_BEFORE" ] && note ok "staged: the held verifier was deleted after the verdict" || note RED "staged: a held verifier directory outlived the verdict"
 
 echo "  --- a leg's git cannot reach the host ---"
 # A T6 leg ran `git stash ... ; git stash pop` against HEAD. With no
