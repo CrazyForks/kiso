@@ -660,5 +660,40 @@ class MalformedCompletenessMarkerTest(unittest.TestCase):
         self.assertEqual(m["fresh"], 58)
 
 
+class ConcealedPartDirectoryTest(unittest.TestCase):
+    """The launch pilot (2026-09-19): the report reads a concealed part by
+    linking its part directory as `runs` and calling extract-t6 with an
+    EMPTY pattern — the leg ids (A-1, BD-2, …) share no substring. The empty
+    pattern matched the part's ledger.tsv and every file inside every leg,
+    and the name split crashed on the first one with no two dashes. Only a
+    directory named <tool>-<task>-<run> is a leg."""
+
+    def _part(self):
+        root = tempfile.mkdtemp(prefix="concealed-part-")
+        part = os.path.join(root, "runs")
+        leg = os.path.join(part, "kiso-A-1-p1")
+        os.makedirs(os.path.join(leg, "kiso-home", "sessions"))
+        with open(os.path.join(part, "ledger.tsv"), "w") as f:
+            f.write("leg\ttool\trequests\n")
+        with open(os.path.join(part, "INCOMPLETE"), "w") as f:
+            f.write("INCOMPLETE: a note, not a leg\n")
+        with open(os.path.join(leg, "config.json"), "w") as f:
+            json.dump({"task": "A-1", "run": "p1"}, f)
+        for name, text in (("wall_1", "12"), ("verify", "pass"), ("status", "complete"), ("stdout-1.log", ""), ("capture.json", "{}")):
+            with open(os.path.join(leg, name), "w") as f:
+                f.write(text)
+        with open(os.path.join(leg, "kiso-home", "sessions", "s.jsonl"), "w") as f:
+            f.write(json.dumps({"event": {"type": "user_input"}}) + "\n")
+            f.write(json.dumps({"event": {"type": "usage", "inputTokens": 1000, "cacheRead": 0, "outputTokens": 50}}) + "\n")
+        return root
+
+    def test_an_empty_pattern_reads_the_legs_and_nothing_else(self):
+        import contextlib, io
+        with contextlib.redirect_stdout(io.StringIO()):
+            rows = extract_t6.main(self._part(), "")
+        self.assertEqual([(r["tool"], r["task"], r["run"]) for r in rows], [("kiso", "A-1", "p1")])
+        self.assertEqual(rows[0]["buckets"][0]["requests"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

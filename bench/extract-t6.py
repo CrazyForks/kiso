@@ -232,6 +232,12 @@ def main(workdir, pattern="T6"):
                       + glob.glob(workdir + f"/runs/*/*{pattern}*")))
     for work in legs:
         name = os.path.basename(work)
+        # only a directory named <tool>-<task>-<run> is a leg: the concealed
+        # part is read with an EMPTY pattern (its ids share no substring),
+        # which also matches the part's ledger.tsv and every file inside
+        # every leg — the launch pilot crashed here on the first of them
+        if not os.path.isdir(work) or name.count("-") < 2 or name.split("-", 1)[0] not in ("kiso", "pi", "claude"):
+            continue
         tool, task, run = name.split("-", 2)
         # a concealed leg is named <tool>-<instance id>-<run> and the id has
         # its own dash (A-1): the leg's manifest names the task exactly
