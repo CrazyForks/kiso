@@ -49,8 +49,26 @@ export function codingToolOptions(): {
 	readonly workspaceRoot: string;
 	readonly excludeRoots: readonly string[];
 	readonly secretEnvNames: readonly string[];
+	readonly protectedFiles: readonly string[];
 } {
-	return { workspaceRoot: process.cwd(), excludeRoots: [kisoHome()], secretEnvNames: secretEnvNamesOf(configModels) };
+	return { workspaceRoot: process.cwd(), excludeRoots: [kisoHome()], secretEnvNames: secretEnvNamesOf(configModels), protectedFiles: protectedFiles() };
+}
+
+/** The user config's `protectedPaths`, as read at the agent's build (and
+ *  again at /reload) — `~/` taken against the home directory. */
+let userProtectedPaths: readonly string[] = [];
+export function setUserProtectedPaths(paths: readonly string[] | undefined): void {
+	userProtectedPaths = (paths ?? []).map((p) => (p.startsWith("~/") ? join(homedir(), p.slice(2)) : p));
+}
+
+/** kiso never serves its own credential store to a model. The store is
+ *  `auth.json` under KISO_HOME — the path auth/credentials.ts writes (a
+ *  test holds the two together); its temp file and lock are covered by
+ *  the match rule (tools-node protected.ts). Then the user's own list.
+ *  ONE list for every reader: the file tools, the search, the shell
+ *  check and the `!` gesture. */
+export function protectedFiles(): readonly string[] {
+	return [join(kisoHome(), "auth.json"), ...userProtectedPaths];
 }
 
 /** 0.40.0 — the workspace a session records: the realpath of where kiso

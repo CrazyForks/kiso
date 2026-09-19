@@ -25,7 +25,7 @@ import {
 	type RunUsage,
 } from "@vincemakes/kiso-tui";
 import { askView, coldResumeLine, coldResumeView, deletionRiskHint, editFileDiff, writeFileDiff, type DiffResult, type SaferAnswer, type SaferFailure, type SaferOption } from "@vincemakes/kiso-tui";
-import { canonicalTargetPath, shellProgressPath } from "@vincemakes/kiso-tools-node";
+import { canonicalTargetPath, isProtectedPath, protectedIdentity, shellProgressPath } from "@vincemakes/kiso-tools-node";
 import { echoText } from "@vincemakes/kiso-tui-cells/render";
 import { canonicalizeUsage } from "@vincemakes/kiso-runtime";
 import { canonicalizeUsageForModel, requestBudget } from "@vincemakes/kiso-runtime/internal";
@@ -33,7 +33,7 @@ import type { AgentSession, Run } from "@vincemakes/kiso-runtime";
 import type { UserInputVia } from "@vincemakes/kiso-core";
 import { dispatch, type DispatchCtx, abortBangCommand } from "./dispatch.js";
 import { paintWindowTitle } from "./window-title.js";
-import { agentBaseUrl, agentModel, body, bodyLog, configuredWindow, dock, retryOnRow, retryShown, setRetryShown, floorOn, type LineInput } from "./state.js";
+import { agentBaseUrl, agentModel, body, bodyLog, configuredWindow, dock, retryOnRow, retryShown, setRetryShown, floorOn, protectedFiles, type LineInput } from "./state.js";
 import { attachImages } from "./attachments.js";
 import { lookupModelMetadata } from "@vincemakes/kiso-runtime/internal";
 import { addDontAskAgainRule, askPanel, fixHintFor, pendingAsk, resolveUncertains } from "./trust-ui.js";
@@ -496,6 +496,9 @@ function approvalDiff(name: string, input: Record<string, unknown>): DiffResult 
 	if (name !== "edit_file" && name !== "write_file") return null;
 	const path = typeof input.path === "string" ? input.path : "";
 	if (path === "") return null;
+	// the tool refuses a protected file whatever the answer; the panel
+	// must not print the store on the way there
+	if (isProtectedPath(path, protectedIdentity(protectedFiles()))) return null;
 	let oldContent: string | null = null;
 	try {
 		oldContent = readFileSync(path, "utf8");
@@ -1289,7 +1292,7 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 			// 0.40.0: a skill turn is not scanned either — its text is a
 			// SKILL.md body, and a body that mentions `diagram.png` must not
 			// attach a file from the workspace the person never pointed at.
-			const content = seedSource !== undefined || via !== undefined ? text : attachImages(text, input.attachments?.());
+			const content = seedSource !== undefined || via !== undefined ? text : attachImages(text, input.attachments?.(), protectedFiles());
 			const run =
 				seedSource !== undefined ? session.run(content, { source: seedSource }) : via !== undefined ? session.run(content, { via }) : session.run(content);
 			currentRun = run;

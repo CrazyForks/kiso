@@ -11,7 +11,8 @@ import { buildAdapter, lookupModelMetadata, resolveContinuationScope, resolveRea
 import type { AgentSession } from "@vincemakes/kiso-runtime";
 import { MODES, MODE_NOTE, OFFERED_MODES, getMode, setMode } from "./mode.js";
 import { clipboardWrite, lastAnswer } from "./clipboard.js";
-import { agentModel, body, bodyLog, codingToolOptions, kisoHome, configModels, dock, lastBinding, loadedSkillsCatalog, mergedConfig, readContextLedger, retryOnRow, sessionsDir, setAgentModel, setConfiguredWindow, setCurrentModelName, setModelChoice, setRetryShown, type LineInput , setLastBinding } from "./state.js";
+import { protectedBangReason, protectedShellVerdict } from "./protected-shell.js";
+import { agentModel, body, bodyLog, codingToolOptions, protectedFiles, kisoHome, configModels, dock, lastBinding, loadedSkillsCatalog, mergedConfig, readContextLedger, retryOnRow, sessionsDir, setAgentModel, setConfiguredWindow, setCurrentModelName, setModelChoice, setRetryShown, type LineInput , setLastBinding } from "./state.js";
 import { adapterOptionsFor } from "./auth/adapter-options.js";
 import { contextWindowTokens, microcompactThresholdFor, startStatusSpinner } from "./chat.js";
 import { authForProfile, directWriteProfile, profileAvailable, resolveContextWindow, unavailableReason, type ModelProfile } from "./config.js";
@@ -196,9 +197,21 @@ export function parseBang(trimmed: string): { readonly command: string; readonly
  *  No approval panel, at any tier including plan: the human typed the
  *  command. That is not a policy exemption, it is structural — this
  *  dispatcher only ever sees lines a human submitted, so a model cannot
- *  reach this branch. */
+ *  reach this branch.
+ *
+ *  One check it does take: kiso never serves its own credential store to a
+ *  model, and `!cmd` hands its output to one. `!!cmd` does not — but the
+ *  two are one keystroke apart, so a line naming a protected file runs
+ *  under neither, and the store stays one `cat` away in the person's own
+ *  terminal. */
 function runBang(command: string, send: boolean, ctx: DispatchCtx): void {
 	ctx.chainRef.current = ctx.chainRef.current.then(async () => {
+		const guard = protectedShellVerdict(command, codingToolOptions().workspaceRoot, protectedFiles(), { home: homedir(), kisoHome: kisoHome() });
+		if (guard.refused) {
+			bodyLog(protectedBangReason(guard));
+			ctx.input.prompt();
+			return;
+		}
 		const controller = new AbortController();
 		activeBang = controller;
 		try {

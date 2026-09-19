@@ -46,15 +46,16 @@ import { skillMenuItems } from "./skill-invoke.js";
 import { canonicalPath, claimProjectDir, hasSession, locateSession, projectLayoutActive, sessionFolders, type SessionFolder, type SessionRoute } from "./projects.js";
 import { migrationNotice, pendingLegacyIds, planMigration, reverseMigration, runMigration } from "./session-migration.js";
 import { createFauxProvider } from "@vincemakes/kiso-evals";
-import { createCodingTools } from "@vincemakes/kiso-tools-node";
+import { createCodingTools, isProtectedPath, protectedIdentity, PROTECTED_REFUSAL } from "@vincemakes/kiso-tools-node";
 import { MODES, OFFERED_MODES, getMode, modeExtensions, modeFromEnv, modeSystemPrompt, setMode } from "./mode.js";
 import { readOnlyShellExtension } from "./readonly-shell.js";
 import type { PolicyCall } from "@vincemakes/kiso-core";
 import { guardSavedAllow, isProtectedWrite } from "./protected-writes.js";
 import { floorExtension, isDestructiveCall } from "./floor.js";
+import { protectedShellExtension } from "./protected-shell.js";
 import { breakerExtension } from "./breaker.js";
 import { builtInLayer } from "./builtin.js";
-import { agentModel, atFiles, body, bodyLog, codingToolOptions, kisoHome, workspaceRoot, projectRoot, ownSessionsDir, setOpenSessionFolder, builtInExtensions, currentFaux, dock, extensionsDir, loadedExtensions, mergedConfig, mergedTempPaths, modelChoice, projectExtensions, configModels, configuredWindow, agentBaseUrl, currentModelName, currentAgentExtensions, sessionStoreRef, sessionsDir, setAgentModel, setBody, setConfigModels, setConfiguredWindow, setCurrentAgentExtensions, setCurrentFaux, setCurrentModelName, setExtensionLists, setMergedConfig, setModelChoice, setSessionStore, setRetryShown, setNeverInherited, secretEnvNamesOf, userExtensions, VERSION, type LineInput, lastBinding, acceptDrift, setAcceptDrift, setFloorOn, floorOn, loadedSkillsCatalog } from "./state.js";
+import { agentModel, atFiles, body, bodyLog, codingToolOptions, kisoHome, workspaceRoot, projectRoot, ownSessionsDir, setOpenSessionFolder, builtInExtensions, currentFaux, dock, extensionsDir, loadedExtensions, mergedConfig, mergedTempPaths, modelChoice, projectExtensions, configModels, configuredWindow, agentBaseUrl, currentModelName, currentAgentExtensions, sessionStoreRef, sessionsDir, setAgentModel, setBody, setConfigModels, setConfiguredWindow, setCurrentAgentExtensions, setCurrentFaux, setCurrentModelName, setExtensionLists, setUserProtectedPaths, protectedFiles, setMergedConfig, setModelChoice, setSessionStore, setRetryShown, setNeverInherited, secretEnvNamesOf, userExtensions, VERSION, type LineInput, lastBinding, acceptDrift, setAcceptDrift, setFloorOn, floorOn, loadedSkillsCatalog } from "./state.js";
 import { maxRetriesFromEnv } from "./retries.js";
 import { askUi, resolveProjectTrust } from "./trust-ui.js";
 import { isFirstRun, scaffoldFirstRun } from "./first-run.js";
@@ -654,9 +655,17 @@ const INSTRUCTION_FILES = ["AGENTS.md", "CLAUDE.md"] as const;
  * return it as an injected section, or "" when none exists. Truncated at
  * 8KB with an explicit note. Pure — read once per session, so the prompt
  * is byte-stable for the session's lifetime.
+ *
+ * kiso never serves its own credential store to a model, and this read is
+ * the one that needs no model at all: a cloned repository whose AGENTS.md
+ * is a symlink to the store would put it in the SYSTEM PROMPT of every
+ * request, with no tool call and no trust prompt. A file that resolves to
+ * a protected one is skipped as though absent.
  */
-export function readProjectInstructions(cwd: string): string {
+export function readProjectInstructions(cwd: string, protectedFiles: readonly string[] = []): string {
+	const id = protectedIdentity(protectedFiles);
 	for (const name of INSTRUCTION_FILES) {
+		if (isProtectedPath(join(cwd, name), id)) continue;
 		let text: string;
 		try {
 			text = readFileSync(join(cwd, name), "utf8");
@@ -670,8 +679,8 @@ export function readProjectInstructions(cwd: string): string {
 
 /** A area: the session's system prompt — the constant plus any project
  *  instructions found in the workspace. Deterministic per cwd. */
-export function composeSystemPrompt(cwd: string): string {
-	const injected = readProjectInstructions(cwd);
+export function composeSystemPrompt(cwd: string, protectedFiles: readonly string[] = []): string {
+	const injected = readProjectInstructions(cwd, protectedFiles);
 	return injected === "" ? SYSTEM_PROMPT : `${SYSTEM_PROMPT}\n${injected}`;
 }
 
@@ -823,8 +832,16 @@ async function makeAgent(sessionId: string | undefined, input?: LineInput, model
 	// 0.40.0: the catastrophe floor, at the chain's HEAD — a deny there
 	// names itself in decidedBy and outranks every tier, bypass included.
 	// Read per agent, so /reload picks up an edited user config.
-	setFloorOn(loadUserConfig()?.floor !== "off");
+	const userConfig = loadUserConfig();
+	setFloorOn(userConfig?.floor !== "off");
+	// kiso never serves its own credential store to a model: the file tools
+	// refuse it through codingToolOptions, and this member denies a shell
+	// line naming it — at the HEAD with the floor, in every mode, and NOT
+	// switched off with it (`floor: "off"` lowers the catastrophe floor,
+	// never this).
+	setUserProtectedPaths(userConfig?.protectedPaths);
 	const extensions = [
+		protectedShellExtension({ files: protectedFiles, workspaceRoot, env: () => ({ home: homedir(), kisoHome: kisoHome() }) }),
 		floorExtension(() => floorOn, workspaceRoot),
 		breakerExtension(),
 		...modeExtensions(workspaceRoot),
@@ -854,7 +871,7 @@ async function makeAgent(sessionId: string | undefined, input?: LineInput, model
 		// still counts loadedExtensions only — the modes are in-process,
 		// never a file extension.
 		systemPrompt: (() => {
-			const sp = composeSystemPrompt(process.cwd());
+			const sp = composeSystemPrompt(process.cwd(), protectedFiles());
 			const extra = modeSystemPrompt();
 			return extra === undefined ? sp : `${sp}\n\n${extra}`;
 		})(),
@@ -1592,6 +1609,10 @@ async function main(): Promise<void> {
 		if (i !== -1) {
 			const path = args[i + 1];
 			if (path === undefined) throw new CliUsageError("--task-file needs a path");
+			// the file becomes the turn a model reads — never the credential
+			// store. The list here is the store's own path: the user config's
+			// protectedPaths is read later, with the agent
+			if (isProtectedPath(path, protectedIdentity(protectedFiles()))) throw new CliUsageError(`--task-file: ${path} — ${PROTECTED_REFUSAL}`);
 			try {
 				taskFile = readFileSync(path, "utf8");
 			} catch (err) {

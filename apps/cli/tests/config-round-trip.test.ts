@@ -64,6 +64,7 @@ const CONFIG_SAMPLE: Record<string, unknown> = {
 	projectTrust: "ask",
 	theme: "dark",
 	floor: "off", // 0.40.0, user-level only — "round-trip" is not a <cwd> source
+	protectedPaths: ["/kiso-round-trip-absent/secret.md"], // user-level only, like floor; absent, so no home is read
 	checks: { test: "npm test" },
 };
 

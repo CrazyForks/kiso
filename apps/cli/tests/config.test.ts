@@ -212,3 +212,34 @@ describe("the other config keys ride the same precedence", () => {
 		expect(Object.keys(m.models ?? {}).sort()).toEqual(["a", "b"]);
 	});
 });
+
+describe("protectedPaths: user config only, loud everywhere else", () => {
+	// `~/` is read against HOME: the temp home, never the real one
+	beforeEach(() => {
+		saveEnv("HOME");
+		process.env.HOME = home;
+	});
+
+	it("the user config names files kiso guards — absolute or ~/", () => {
+		expect(parseConfig(JSON.stringify({ protectedPaths: ["/srv/keys.env", "~/notes/secret.md"] }), "~/.kiso/config.json").protectedPaths).toEqual(["/srv/keys.env", "~/notes/secret.md"]);
+	});
+
+	it("a project config naming it fails loudly, whatever it holds — a project must never change what kiso guards", () => {
+		expect(() => parseConfig(JSON.stringify({ protectedPaths: [] }), "<cwd>/.kiso/config.json")).toThrow(/protectedPaths — belongs in the USER config/);
+		expect(() => parseConfig(JSON.stringify({ protectedPaths: ["/x"] }), "<cwd>/.kiso/config.json")).toThrow(ConfigError);
+	});
+
+	it("a DIRECTORY fails loudly — it would protect nothing under it, and silently", () => {
+		// the temp home this file's beforeEach made: an existing directory
+		expect(() => parseConfig(JSON.stringify({ protectedPaths: [home] }), "~/.kiso/config.json")).toThrow(/protectedPaths\[0\] — .* is a directory — kiso protects files/);
+		// spelled as one, whether or not it exists
+		expect(() => parseConfig(JSON.stringify({ protectedPaths: ["~/.aws/"] }), "~/.kiso/config.json")).toThrow(/is a directory/);
+		// a file that does not exist yet is accepted: it is protected from the moment it appears
+		expect(parseConfig(JSON.stringify({ protectedPaths: [join(home, "later.txt")] }), "~/.kiso/config.json").protectedPaths).toEqual([join(home, "later.txt")]);
+	});
+
+	it("a relative path, or not a list, fails loudly", () => {
+		expect(() => parseConfig(JSON.stringify({ protectedPaths: ["secret.md"] }), "~/.kiso/config.json")).toThrow(/protectedPaths\[0\]/);
+		expect(() => parseConfig(JSON.stringify({ protectedPaths: "~/x" }), "~/.kiso/config.json")).toThrow(/expected an array/);
+	});
+});
