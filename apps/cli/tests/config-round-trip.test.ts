@@ -64,6 +64,7 @@ const CONFIG_SAMPLE: Record<string, unknown> = {
 	projectTrust: "ask",
 	theme: "dark",
 	floor: "off", // 0.40.0, user-level only — "round-trip" is not a <cwd> source
+	protectedPaths: ["~/secret.md"], // user-level only, like floor
 	checks: { test: "npm test" },
 };
 

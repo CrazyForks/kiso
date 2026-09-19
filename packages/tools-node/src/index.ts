@@ -31,6 +31,7 @@ import { defineTool, type Tool, type ToolResult } from "@vincemakes/kiso-core";
 // WR-1/WR-1A — the revision-guard primitives (unit-tested in wr1a-coda):
 import { strippedShellEnv } from "./secret-env.js";
 import { contentRevision, normalizeRevision, postEffectEscape, precondition, publishNewFile, revalidateBeforeRename } from "./wr1.js";
+import { isProtectedPath, protectedIdentity, protectedRefusalText } from "./protected.js";
 import { CORPUS_MAX_DEPTH, globToRegExp, walkCorpus } from "./corpus.js";
 import { describeSearchMiss } from "./search-miss.js";
 
@@ -279,6 +280,15 @@ export interface WorkspaceToolsOptions {
 	 * read.
 	 */
 	readonly excludeRoots?: readonly string[];
+	/**
+	 * ACCESS, where excludeRoots is discovery: files kiso NEVER serves to a
+	 * model, however they are named (protected.ts) — read_file, edit_file
+	 * and write_file refuse them, search_text never returns a line from
+	 * them. The CLI passes its own credential store (and a user's own
+	 * `protectedPaths`). A protected file's name-suffixed siblings (the
+	 * writer's temp file and lock) share the protection.
+	 */
+	readonly protectedFiles?: readonly string[];
 	readonly limits?: {
 		/** search_text: skip a file larger than this (default 1 MiB). */
 		readonly searchMaxFileBytes?: number;
@@ -425,6 +435,9 @@ export function readFileTool(opts: WorkspaceToolsOptions): Tool<{ path: string; 
 			const maxReadBytes = opts.limits?.readMaxFileBytes ?? READ_MAX_FILE_BYTES;
 			try {
 				const full = resolveWithinRoot(opts.workspaceRoot, path);
+				// the credential store is never served (protected.ts) — checked
+				// by the disk's own resolution and by inode, before any read
+				if (isProtectedPath(full, protectedIdentity(opts.protectedFiles))) return precondition(protectedRefusalText("read_file", path));
 				const denied = await inodeReadPolicy(opts.workspaceRoot, full);
 				if (denied !== null) return escapeResult(denied);
 				// DC-54 — the ceiling. `read_file` had the same unbounded
@@ -797,7 +810,7 @@ export function searchTextTool(opts: WorkspaceToolsOptions): Tool<{ pattern: str
 				// root uses: `full` is walked from a realpath'd root, and making
 				// a path relative between a resolved and an unresolved base
 				// yields `../..` the moment a symlink sits between them.
-				{ token: 0, root: searchRootReal, workspaceRoot: realOrSelf(opts.workspaceRoot), single, pattern, flags, excluded, maxFileBytes, maxFiles, deadline, maxMatches: MAX_SEARCH_MATCHES, sniffBytes: BINARY_SNIFF_BYTES },
+				{ token: 0, root: searchRootReal, workspaceRoot: realOrSelf(opts.workspaceRoot), single, pattern, flags, excluded, protectedIdentity: protectedIdentity(opts.protectedFiles), maxFileBytes, maxFiles, deadline, maxMatches: MAX_SEARCH_MATCHES, sniffBytes: BINARY_SNIFF_BYTES },
 				deadline,
 				ctx.signal,
 			);
@@ -861,6 +874,7 @@ export function writeFileTool(opts: WorkspaceToolsOptions): Tool<{ path: string;
 				if (err instanceof PathEscapeError) return escapeResult(err.message);
 				throw err;
 			}
+			if (isProtectedPath(full, protectedIdentity(opts.protectedFiles))) return precondition(protectedRefusalText("write_file", path));
 			// WR-1 — the observed-revision stale-write guard. The decision
 			// lattice runs BEFORE any bytes move; every refusal is a
 			// precondition with one actionable sentence. What it proves:
@@ -1067,6 +1081,7 @@ export function editFileTool(opts: WorkspaceToolsOptions): Tool<{ path: string; 
 				if (err instanceof PathEscapeError) return escapeResult(err.message);
 				throw err;
 			}
+			if (isProtectedPath(full, protectedIdentity(opts.protectedFiles))) return precondition(protectedRefusalText("edit_file", path));
 			// WR-1: edits always target an existing file — the revision is
 			// not optional here, and the refusal teaches the protocol.
 			if (expectedRevision === undefined) {
@@ -1193,6 +1208,7 @@ export function editFileTool(opts: WorkspaceToolsOptions): Tool<{ path: string; 
 // with a hand-kept copy over there; the copy never learned the
 // declared names, which is how MCP children kept leaking.
 export { SHELL_STRIP_EXACT, strippedShellEnv } from "./secret-env.js";
+export { PROTECTED_REFUSAL, diskPath, isProtectedPath, protectedIdentity, protectedRefusalText, type ProtectedIdentity } from "./protected.js";
 /** The search corpus's credential rule, by name — exported so the CLI's
  *  read-only shell allow holds a shell read to the same definition rather
  *  than a copy of it. */

@@ -212,3 +212,19 @@ describe("the other config keys ride the same precedence", () => {
 		expect(Object.keys(m.models ?? {}).sort()).toEqual(["a", "b"]);
 	});
 });
+
+describe("protectedPaths: user config only, loud everywhere else", () => {
+	it("the user config names files kiso guards — absolute or ~/", () => {
+		expect(parseConfig(JSON.stringify({ protectedPaths: ["/srv/keys.env", "~/notes/secret.md"] }), "~/.kiso/config.json").protectedPaths).toEqual(["/srv/keys.env", "~/notes/secret.md"]);
+	});
+
+	it("a project config naming it fails loudly, whatever it holds — a project must never change what kiso guards", () => {
+		expect(() => parseConfig(JSON.stringify({ protectedPaths: [] }), "<cwd>/.kiso/config.json")).toThrow(/protectedPaths — belongs in the USER config/);
+		expect(() => parseConfig(JSON.stringify({ protectedPaths: ["/x"] }), "<cwd>/.kiso/config.json")).toThrow(ConfigError);
+	});
+
+	it("a relative path, or not a list, fails loudly", () => {
+		expect(() => parseConfig(JSON.stringify({ protectedPaths: ["secret.md"] }), "~/.kiso/config.json")).toThrow(/protectedPaths\[0\]/);
+		expect(() => parseConfig(JSON.stringify({ protectedPaths: "~/x" }), "~/.kiso/config.json")).toThrow(/expected an array/);
+	});
+});

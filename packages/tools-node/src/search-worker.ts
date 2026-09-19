@@ -20,6 +20,18 @@ import { open, readdir } from "node:fs/promises";
 import { basename, join, relative } from "node:path";
 import { corpusSkips, layersEntering, readLayer, type Layer } from "./corpus.js";
 import { isMainThread, parentPort } from "node:worker_threads";
+import { diskPath, isProtectedDiskPath, type ProtectedIdentity } from "./protected.js";
+
+/** A scanned file is protected by inode (the store itself, under any name
+ *  or case), or — for a name that starts like a protected one, the writer's
+ *  temp file and lock — by the disk's own resolution. The resolution runs
+ *  only for such a name, so an ordinary search pays nothing for it. */
+function isProtectedScan(full: string, st: { readonly dev: number; readonly ino: number }, id: ProtectedIdentity): boolean {
+	if (id.inodes.includes(`${st.dev}:${st.ino}`)) return true;
+	const name = basename(full).toLowerCase();
+	if (!id.paths.some((p) => name.startsWith(basename(p).toLowerCase()))) return false;
+	return isProtectedDiskPath(diskPath(full), id);
+}
 
 
 /** ACI-5 — the excerpt WINDOWS THE MATCH instead of taking the line's head.
@@ -61,6 +73,10 @@ export interface SearchRequest {
 	readonly pattern: string;
 	readonly flags: string;
 	readonly excluded: readonly string[];
+	/** files never searched: kiso's credential store (protected.ts) — skipped
+	 *  without a hit, matched by inode and, for a protected name, by the
+	 *  disk's own resolution */
+	readonly protectedIdentity?: ProtectedIdentity;
 	readonly maxFileBytes: number;
 	readonly maxFiles: number;
 	/** the call's wall-clock deadline (epoch ms): the walk stops COOPERATIVELY
@@ -118,6 +134,7 @@ export async function runSearch(req: SearchRequest): Promise<SearchReply> {
 			let text: string;
 			try {
 				const st = await fh.stat();
+				if (req.protectedIdentity !== undefined && isProtectedScan(full, st, req.protectedIdentity)) return;
 				if (st.nlink > 1) {
 					multiLink += 1;
 					return;
