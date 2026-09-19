@@ -253,6 +253,13 @@ CFG
     set -- "OPENAI_BASE_URL=https://api.deepseek.com" "OPENAI_API_KEY=$DEEPSEEK_API_KEY" \
       "OPENAI_MODEL=deepseek-flash" "KISO_EXTENSIONS_DIR=$EXTDIR" \
       "KISO_HOME=$WORK/kiso-home" "KISO_SESSIONS_DIR=$WORK/kiso-home/sessions" "KISO_SKILLS_DIR=$SKILLDIR" "KISO_NO_UPDATE_CHECK=1"
+    # CAPTURE (the launch bench, the T6 runner's mechanism): this arm dumps
+    # its own request bodies — never a proxy, whose loopback base URL would
+    # defeat the endpoint-keyed metadata lookup and refuse `/model ds high`
+    if [ "${BENCH_CAPTURE:-0}" = 1 ]; then
+      mkdir -p "$WORK/capture"
+      set -- "$@" "KISO_DUMP_REQUESTS=$WORK/capture"
+    fi
     KISO_ENV_PAIRS="$*"
     # F33-R4: the exit status is KEPT, not discarded. Every segment used to
     # end in `|| true`, and the absence of a limit status later became
@@ -337,7 +344,28 @@ fs.writeFileSync('$WORK/meta.json', JSON.stringify(meta, null, 1) + '\n');
 "
     ;;
   pi)
-    assert_bare pi "$BARE_HOME" || exit 1
+    # CAPTURE: the T6 runner's mechanism, unchanged — this arm has no dump
+    # sink, so a local proxy records for it; its base URL moves through its
+    # MODEL STORE (one file in the bare home, DECLARED to the bareness gate)
+    CAPTURE_DECL=""
+    if [ "${BENCH_CAPTURE:-0}" = 1 ]; then
+      mkdir -p "$WORK/capture" "$BARE_HOME/.pi/agent"
+      CAP_UP=${CAP_UPSTREAM:-api.deepseek.com}
+      CAP_PORT=$(node -e 'const n=require("net");const s=n.createServer();s.listen(0,()=>{console.log(s.address().port);s.close();});')
+      python3 "$B/capture-proxy.py" --port "$CAP_PORT" --upstream "$CAP_UP" --scheme https --out "$WORK/capture" --label "pi-$RUN" >/dev/null 2>&1 &
+      CAP_PID=$!
+      sleep 2
+      node -e '
+        const fs = require("fs");
+        const src = process.env.HOME + "/.pi/agent/models-store.json";
+        const d = JSON.parse(fs.readFileSync(src, "utf8"));
+        // metadata only — no credential; the key rides in the environment
+        for (const m of (d.deepseek && d.deepseek.models) || []) m.baseUrl = process.argv[1];
+        fs.writeFileSync(process.argv[2], JSON.stringify(d));
+      ' "http://127.0.0.1:$CAP_PORT" "$BARE_HOME/.pi/agent/models-store.json"
+      CAPTURE_DECL=".pi/agent/models-store.json"
+    fi
+    assert_bare pi "$BARE_HOME" $CAPTURE_DECL || exit 1
     for i in 1 2 3 4 5 6 7 8; do
       over_budget && break
       S=$(date +%s); _left=$(remaining)
@@ -352,6 +380,7 @@ fs.writeFileSync('$WORK/meta.json', JSON.stringify(meta, null, 1) + '\n');
       printf '%s\n' "$_rc" > "$WORK/exit-$i"
       note_exit "turn $i" "$_rc" "$_left"
     done
+    [ -n "${CAP_PID:-}" ] && kill "$CAP_PID" 2>/dev/null
     ;;
   claude)
     assert_bare claude "$BARE_HOME" || exit 1
@@ -496,6 +525,24 @@ cfg.t5Compact = ${BENCH_T5_COMPACT:-0} === 1;
 cfg.effortVerified = '$TOOL' === 'kiso' ? 'durable-profile' : 'not-verified: the flag is in the command; no read-back exists until request bodies are captured';
 writeFileSync('$WORK/config.json', JSON.stringify(cfg, null, 1) + '\n');
 " 2>/dev/null || echo "WARN: configuration capture failed for $TOOL" >&2
+# CAPTURE, reconciled (the T6 runner's block): one body per recorded request,
+# every body naming the model, every body carrying the effort — and the
+# WIRE-VERIFIED effort as its own sidecar beside effort_bound.
+if [ "${BENCH_CAPTURE:-0}" = 1 ]; then
+  node --input-type=module -e "
+    import { readCapture, reconcile } from '$B/reconcile-capture.mjs';
+    import { readFileSync, writeFileSync } from 'node:fs';
+    let requests = null;
+    try {
+      const cfg = JSON.parse(readFileSync('$WORK/config.json', 'utf8'));
+      requests = cfg.model && typeof cfg.model.requests === 'number' ? cfg.model.requests : null;
+    } catch {}
+    const recs = readCapture('$WORK/capture');
+    const r = reconcile(recs, { requests, model: 'deepseek-flash', effort: '$BENCH_EFFORT' });
+    writeFileSync('$WORK/capture.json', JSON.stringify(r, null, 1) + '\n');
+    writeFileSync('$WORK/effort_wire', (r.effortObserved && r.effortObserved.length ? String(r.effortObserved) : 'not-observed') + '\n');
+  " 2>/dev/null || { echo "reconcile-failed" > "$WORK/effort_wire"; echo '{\"ok\":false,\"problems\":[\"the reconciler did not run\"]}' > "$WORK/capture.json"; }
+fi
 # F33-R4: execution validity is decided BEFORE the task verdict, and the
 # two are kept apart. A leg whose process never ran did not fail the task.
 # THE EFFORT MUST BE BOUND, NOT MERELY TYPED. A refused switch runs the

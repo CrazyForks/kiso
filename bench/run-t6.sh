@@ -560,7 +560,7 @@ if [ "${BENCH_CAPTURE:-0}" = 1 ]; then
     writeFileSync('$WORK/capture.json', JSON.stringify(r, null, 1) + '\n');
     // the wire-verified effort is its own sidecar, beside effort_bound, so a
     // reader never has to infer which arm's claim rests on what
-    writeFileSync('$WORK/effort_wire', (r.effortObserved ?? 'not-observed') + '\n');
+    writeFileSync('$WORK/effort_wire', (r.effortObserved && r.effortObserved.length ? String(r.effortObserved) : 'not-observed') + '\n');
   " 2>/dev/null || { echo "reconcile-failed" > "$WORK/effort_wire"; echo '{\"ok\":false,\"problems\":[\"the reconciler did not run\"]}' > "$WORK/capture.json"; }
 fi
 
