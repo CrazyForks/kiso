@@ -1706,6 +1706,28 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 	// round 8: the startup resume is bound to currentRun — Ctrl+C during it
 	// aborts the recovery, exactly like the interactive turns.
 	await resolveUncertains(session, input, () => cancelled);
+	// 0.40.0 item 9: a big session whose cache has gone cold compacts BEFORE
+	// its first request, on the person's word — or without asking in
+	// dontAsk, where compacting is not an approval. A piped session is left
+	// to the auto policy, which fires above the hard tier on its own. Lines
+	// typed meanwhile queue behind the compaction.
+	//
+	// The owner's dogfood: asked BEFORE the recovery run. A session whose
+	// last run was cut resumes that run at once, and the resume's first
+	// request is the whole cold prefix — asked afterwards, the question is
+	// about a bill already paid (and the in-run tiers have usually shrunk the
+	// context by then, so it is never asked at all). The compaction settles
+	// before the run resumes: the run continues on the compacted projection.
+	const cold = !cancelled && process.stdin.isTTY ? coldResumeOffer(session) : null;
+	if (cold !== null) {
+		if (getMode() === "dontAsk") {
+			body.notice(`[dontAsk] ${coldResumeLine(cold.tokens, cold.minutes)} — compacting first`);
+			dispatch("/compact", dispatchCtx);
+		} else if ((await askPanel(input, coldResumeView(cold.tokens, cold.minutes))).action === "allow") {
+			dispatch("/compact", dispatchCtx);
+		}
+		await chainRef.current;
+	}
 	if (!cancelled) {
 		const recoveryRun = session.resume();
 		currentRun = recoveryRun;
@@ -1732,20 +1754,6 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 		input.close();
 		await input.closed;
 		return { next: "exit" };
-	}
-	// 0.40.0 item 9: a big session whose cache has gone cold compacts BEFORE
-	// its first request, on the person's word — or without asking in
-	// dontAsk, where compacting is not an approval. A piped session is left
-	// to the auto policy, which fires above the hard tier on its own. Lines
-	// typed meanwhile queue behind the compaction.
-	const cold = process.stdin.isTTY ? coldResumeOffer(session) : null;
-	if (cold !== null) {
-		if (getMode() === "dontAsk") {
-			body.notice(`[dontAsk] ${coldResumeLine(cold.tokens, cold.minutes)} — compacting first`);
-			dispatch("/compact", dispatchCtx);
-		} else if ((await askPanel(input, coldResumeView(cold.tokens, cold.minutes))).action === "allow") {
-			dispatch("/compact", dispatchCtx);
-		}
 	}
 	// The REPL is ready: replay anything that arrived during recovery.
 	replReady = true;
