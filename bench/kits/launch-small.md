@@ -21,6 +21,42 @@ a scored leg has run. The plan and the lead's rulings are in kiso-doc:
 Under this bench's isolation both read only what the fixture itself
 carries (finding LB-1).
 
+## The freeze (2026-09-20, before the first scored leg)
+
+This section fills in what the table above left for the freeze. Nothing
+else in this file changes.
+
+- **kiso artifact:** 0.40.0, packed from main `5f1b10a1` (the merge of the
+  credential-store fix, #91), installed in the prefix
+  `/private/tmp/kiso-launch-install`, where the binary reports 0.40.0.
+  The same artifact passed the release ceremony (kiso-doc
+  `rel-040-ceremony-2026-09-19.md`).
+- **The reference implementation:** pi 0.84.2, probed on every leg.
+- **Runners:** main `f4538135`, which includes #92, the concealed part's
+  report fix found by the pilot.
+- **The seed:** drawn by the owner on 2026-09-20 under
+  `concealed-seed-ceremony-2026-09-18.md`. Draw 1 is IN BAND (40.0%) and
+  used, and self-check proves 30 of 30 verifiers. It is held by the
+  operator and published with the report.
+
+```
+b25aa659f06017a21c102a34ab84941df91a7068ec81157c7c88bc78895b9722  vincemakes-kiso-ask-ext-0.40.0.tgz
+c1db5456ea783a7e185b72db0a4caf12f4e8a37955a36e0a314f39bbb44bef34  vincemakes-kiso-code-0.40.0.tgz
+18ca50f22677b0e20abb1f66c04eb1e9f592d67710fbe3214766660695f5fe91  vincemakes-kiso-core-0.40.0.tgz
+baa656989490938db7ecde116513a11cab8fc13ec00dcb34b0ec40bd382e5e76  vincemakes-kiso-evals-0.40.0.tgz
+e4223401f83fb18c83b1fc8a0f774213f01e28753e6e6e0a523dd45c2d8ba1a1  vincemakes-kiso-mcp-ext-0.40.0.tgz
+5ea877274812cf75731c5691fe23070ba8fc13e3e56d17d95969f4eb390cbf86  vincemakes-kiso-provider-anthropic-0.40.0.tgz
+9b175f0bd7f2c5204868fb4db83e88be3dd50f485b9b9ba7b6d7430513d7a1f2  vincemakes-kiso-provider-openai-0.40.0.tgz
+23ce698d806a4e9469914bbcad03221b9ea6f8da0e869adfa5f8c6bf027a7504  vincemakes-kiso-provider-openai-responses-0.40.0.tgz
+2f81894220e137de40684df36a673df5db8116e171257749bccbef8a12300ba8  vincemakes-kiso-runtime-0.40.0.tgz
+f5f8d25d78f5fc1a51f6108d80888e234999a9930c1c4db013903b919c7e61f3  vincemakes-kiso-skills-ext-0.40.0.tgz
+ee1633031a1936327c16242145ddda509537ab87d394830a85cf0d4f78f6d577  vincemakes-kiso-subagent-ext-0.40.0.tgz
+27380b6f8f2a8678a64d05b5f9df3b3c9040d41b2edb55acc1ce5e857543b9d6  vincemakes-kiso-task-ext-0.40.0.tgz
+c2fe22f205e9a87c6d1f9f7fbb4a1ae80531914ce0bfe9a3d67379138f2b45dc  vincemakes-kiso-tools-node-0.40.0.tgz
+96c7bc74df7a1a5b0b6b9bc0cc7b59ea87fa0fd220854c03187efb977111e228  vincemakes-kiso-tui-0.40.0.tgz
+7f78001df31931b5176ebed2ffcdfa6121ed9f60997997aaf19e8a963c9b468b  vincemakes-kiso-tui-cells-0.40.0.tgz
+```
+
 ## Where legs live, and the gates every leg passes before a request
 
 - Legs live under `/private/tmp/kiso-launch-bench/runs/<round>-<part>/<leg>`.
