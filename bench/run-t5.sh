@@ -113,7 +113,10 @@ fi
 # E4-e: KISO_ROUND scopes the runs under runs/<round>/ (the run-hygiene
 # discipline — a round never reuses a historical run name); absent = the
 # historical flat layout.
-WORK="$B/runs/${KISO_ROUND:+$KISO_ROUND/}$TOOL-T5-$RUN"
+# LB-1: legs live under the runs root — KISO_RUNS_ROOT when set (the launch
+# bench keeps them outside any checkout; see leg-isolation.sh), else runs/.
+. "$B/leg-isolation.sh"
+WORK="$(runs_root "$B")/${KISO_ROUND:+$KISO_ROUND/}$TOOL-T5-$RUN"
 rm -rf "$WORK"; mkdir -p "$WORK"
 cp -R "$B/fixture-t5/" "$WORK/repo/"
 rm -rf "$WORK/repo/.git"
@@ -137,6 +140,12 @@ git -C "$WORK/repo" config user.email bench@localhost
 git -C "$WORK/repo" config user.name bench
 git -C "$WORK/repo" add -A
 git -C "$WORK/repo" -c commit.gpgsign=false commit -q -m "fixture baseline" || true
+# The two pre-flight gates, BEFORE any request is spent: git resolves to
+# this repo, and no ancestor carries an instruction file (leg-isolation.sh).
+if ! assert_leg_isolated "$WORK" "$WORK/repo"; then
+  echo "$(cat "$WORK/void")" >&2
+  exit 3
+fi
 . "${XDG_CONFIG_HOME:-$HOME/.config}/claude-deepseek/credentials.env"
 TOT=0
 # PER-LEG HARD LIMITS. A leg had none: a hung arm ran until someone noticed,

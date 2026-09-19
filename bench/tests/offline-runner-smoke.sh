@@ -48,6 +48,10 @@ mkdir -p "$TMP/cfg/claude-deepseek"
 echo 'DEEPSEEK_API_KEY=smoke-not-a-key' > "$TMP/cfg/claude-deepseek/credentials.env"
 XDG_CONFIG_HOME="$TMP/cfg"; export XDG_CONFIG_HOME
 KISO_BIN=kiso; export KISO_BIN
+# LB-1: the legs live outside the checkout — a checkout may carry an
+# untracked instruction file, and the runners' isolation gate voids any leg
+# beneath one (leg-isolation.sh)
+RUNS=$(cd "$(mktemp -d)" && pwd -P)/runs; export KISO_RUNS_ROOT="$RUNS"
 KISO_ROUND=offline-smoke; export KISO_ROUND
 # RUNNER-R2 (Astra): the PUBLIC override names, which is what the runner
 # reads. The smoke used to export LEG_MAX_REQUESTS and LEG_DEADLINE_S, and
@@ -64,7 +68,7 @@ KISO_LEG_DEADLINE_S=20; export KISO_LEG_DEADLINE_S
 KISO_PROBE_DEADLINE_S=${KISO_PROBE_DEADLINE_S:-10}; export KISO_PROBE_DEADLINE_S
 
 for tool in kiso pi claude; do
-	W="$B/runs/offline-smoke/$tool-T5-s1"
+	W="$RUNS/offline-smoke/$tool-T5-s1"
 	rm -rf "$W"
 	rm -f "$TMP/exit-code"
 	if out=$(sh "$B/run-t5.sh" "$tool" s1 2>&1); then
@@ -89,7 +93,7 @@ done
 
 echo "  --- a nonzero exit is OURS, never the task's verdict ---"
 for tool in kiso pi claude; do
-	W="$B/runs/offline-smoke/$tool-T5-s2"
+	W="$RUNS/offline-smoke/$tool-T5-s2"
 	rm -rf "$W"
 	echo 3 > "$TMP/exit-code"
 	sh "$B/run-t5.sh" "$tool" s2 >/dev/null 2>&1
@@ -106,7 +110,7 @@ echo "  --- the effort must be BOUND, not merely typed ---"
 # was typed and never took. That is the shape a REFUSED `/model` has, and
 # an arm labelled `high` whose requests were never high is worse than a
 # failed leg: it gets scored.
-W="$B/runs/offline-smoke/kiso-T5-s3"
+W="$RUNS/offline-smoke/kiso-T5-s3"
 rm -rf "$W"; rm -f "$TMP/exit-code"
 sh "$B/run-t5.sh" kiso s3 >/dev/null 2>&1
 if grep -q "effort_not_bound" "$W/status" 2>/dev/null; then
@@ -116,7 +120,7 @@ else
 fi
 # and the ORDER: a leg that never ran reports why it never ran, not the
 # binding it could not have made
-W="$B/runs/offline-smoke/kiso-T5-s4"
+W="$RUNS/offline-smoke/kiso-T5-s4"
 rm -rf "$W"; echo 3 > "$TMP/exit-code"
 sh "$B/run-t5.sh" kiso s4 >/dev/null 2>&1
 rm -f "$TMP/exit-code"
@@ -131,7 +135,7 @@ echo "  --- the T6 runner, ported to the same apparatus ---"
 # codes discarded, no third arm. The port is only real if it holds the same
 # lifecycle, so it is checked by the same substitutes.
 for tool in kiso pi claude; do
-	W="$B/runs/offline-smoke/$tool-T6-s1"
+	W="$RUNS/offline-smoke/$tool-T6-s1"
 	rm -rf "$W"; rm -f "$TMP/exit-code"
 	sh "$B/run-t6.sh" "$tool" s1 >/dev/null 2>&1
 	[ -f "$W/verify" ] && note ok "$tool T6: a verify record exists" || note RED "$tool T6: NO verify record"
@@ -144,7 +148,7 @@ done
 
 echo "  --- and a nonzero exit is OURS on the T6 arms too ---"
 for tool in kiso pi claude; do
-	W="$B/runs/offline-smoke/$tool-T6-s2"
+	W="$RUNS/offline-smoke/$tool-T6-s2"
 	rm -rf "$W"; echo 3 > "$TMP/exit-code"
 	sh "$B/run-t6.sh" "$tool" s2 >/dev/null 2>&1
 	rm -f "$TMP/exit-code"
@@ -162,7 +166,7 @@ echo "  --- a leg's git cannot reach the host ---"
 # The check is not "does .git exist" — it is whether git RESOLVES to the
 # leg, which is the question the failure actually turned on.
 for fam in t5 t6; do
-	W="$B/runs/offline-smoke/kiso-$(echo $fam | tr a-z A-Z)-s1"
+	W="$RUNS/offline-smoke/kiso-$(echo $fam | tr a-z A-Z)-s1"
 	if [ -d "$W/repo" ]; then
 		top=$(git -C "$W/repo" rev-parse --show-toplevel 2>/dev/null || echo "")
 		case "$top" in
@@ -346,14 +350,14 @@ for want in 0 1; do
 	( cd "$B" && BENCH_EDIT_ECHO=$want KISO_BIN="$TMP/bin/envprobe" KISO_VERSION=9.9.9 \
 		KISO_ROUND=offline-echo DEEPSEEK_API_KEY=x KISO_LEG_DEADLINE_S=60 \
 		sh ./run-t6.sh kiso "e$want" >/dev/null 2>&1 )
-	got=$(cat "$B/runs/offline-echo/kiso-T6-e$want/stdout-1.log" 2>/dev/null | grep -m1 '^KISO_EDIT_ECHO=' || echo "")
+	got=$(cat "$RUNS/offline-echo/kiso-T6-e$want/stdout-1.log" 2>/dev/null | grep -m1 '^KISO_EDIT_ECHO=' || echo "")
 	case "$want:$got" in
 		"1:KISO_EDIT_ECHO=1") note ok "BENCH_EDIT_ECHO=1 reaches the binary as KISO_EDIT_ECHO=1" ;;
 		"0:KISO_EDIT_ECHO=<unset>") note ok "BENCH_EDIT_ECHO=0 leaves the binary with no KISO_EDIT_ECHO" ;;
 		*) note RED "BENCH_EDIT_ECHO=$want produced [$got] at the binary — the arms are not distinct" ;;
 	esac
 done
-rm -rf "$B/runs/offline-echo"
+rm -rf "$RUNS/offline-echo"
 
 # And the leg's OWN evidence decides which arm it was. `effort_bound` taught
 # this: a label a leg carries must be read back from what the leg did, never
@@ -414,6 +418,6 @@ if [ -f "$B/kits/tool-table-a.md" ] && [ -f "$B/tool-table-verdict.mjs" ]; then
 	fi
 fi
 
-rm -rf "$B/runs/offline-smoke"
+rm -rf "$RUNS/offline-smoke"
 [ "$FAILED" -eq 0 ] && echo "[offline-runner-smoke] the lifecycle holds on all three arms" || echo "[offline-runner-smoke] RED"
 exit "$FAILED"
