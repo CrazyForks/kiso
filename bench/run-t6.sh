@@ -252,6 +252,24 @@ CFG
     # check below reads `edit_echo=off` on a leg that asked for `on`, and
     # the leg is VOID rather than quietly joining the control arm.
     if [ "${BENCH_EDIT_ECHO:-0}" = 1 ]; then set -- "$@" "KISO_EDIT_ECHO=1"; fi
+    # CAPTURE: our arm dumps its OWN bodies. It must NOT go through a proxy —
+    # a loopback baseUrl defeats the endpoint-keyed metadata lookup
+    # (dispatch.ts: lookupModelMetadata(model, baseUrl)), so `/model ds high`
+    # is refused and every leg reads effort_not_bound. The round would be
+    # void, after the money.
+    if [ "${BENCH_CAPTURE:-0}" = 1 ]; then
+      mkdir -p "$WORK/capture"
+      set -- "$@" "KISO_DUMP_REQUESTS=$WORK/capture"
+    fi
+    # ROUND A: the default table without `delegate`, through the product's
+    # OWN code path — the subagent extension's depth guard returns no tools
+    # at depth >= 1. One environment variable, the same binary, no shadowing
+    # extension and no config file, so the two arms differ in exactly one
+    # thing and neither is a build the product does not ship.
+    #
+    # The arm APPROXIMATES A DEFERRED DESIGN, not a removal: the owner has
+    # ruled the capability must never require manual configuration.
+    if [ "${BENCH_NO_DELEGATE:-0}" = 1 ]; then set -- "$@" "KISO_SUBAGENT_DEPTH=1"; fi
     KISO_ENV_PAIRS="$*"
     for P in 1 2 3 4; do
       over_budget && break
@@ -272,7 +290,31 @@ CFG
     done
     ;;
   pi)
-    assert_bare pi "$BARE_HOME" || exit 1
+    # CAPTURE: this arm has no dump sink, so the proxy records for it. Its
+    # base URL moves via its MODEL STORE (environment variables are not
+    # honoured — the older note stands), which means one file inside the
+    # bare home. That file is DECLARED to the bareness gate rather than
+    # hidden from it, and the gate still fails on anything undeclared.
+    CAPTURE_DECL=""
+    if [ "${BENCH_CAPTURE:-0}" = 1 ]; then
+      mkdir -p "$WORK/capture" "$BARE_HOME/.pi/agent"
+      CAP_UP=${CAP_UPSTREAM:-api.deepseek.com}
+      CAP_PORT=$(node -e 'const n=require("net");const s=n.createServer();s.listen(0,()=>{console.log(s.address().port);s.close();});')
+      python3 "$B/capture-proxy.py" --port "$CAP_PORT" --upstream "$CAP_UP" --scheme https         --out "$WORK/capture" --label "pi-$RUN" >/dev/null 2>&1 &
+      CAP_PID=$!
+      sleep 2
+      node -e '
+        const fs = require("fs");
+        const src = process.env.HOME + "/.pi/agent/models-store.json";
+        const d = JSON.parse(fs.readFileSync(src, "utf8"));
+        // metadata only — this file carries no credential (checked); the key
+        // rides in the environment, as it does without the proxy
+        for (const m of (d.deepseek && d.deepseek.models) || []) m.baseUrl = process.argv[1];
+        fs.writeFileSync(process.argv[2], JSON.stringify(d));
+      ' "http://127.0.0.1:$CAP_PORT" "$BARE_HOME/.pi/agent/models-store.json"
+      CAPTURE_DECL=".pi/agent/models-store.json"
+    fi
+    assert_bare pi "$BARE_HOME" $CAPTURE_DECL || exit 1
     for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24; do
       over_budget && break
       S=$(date +%s); _left=$(remaining)
@@ -287,6 +329,7 @@ CFG
       note_exit "turn $i" "$_rc" "$_left"
     done
     BUCKET_WALLS
+    [ -n "${CAP_PID:-}" ] && kill "$CAP_PID" 2>/dev/null
     ;;
   claude)
     CCFG="$WORK/claude-config"; mkdir -p "$CCFG"
@@ -427,7 +470,67 @@ if [ "$TOOL" = "kiso" ]; then
   process.stdout.write(edits===0?"none":(saw>0?"on":"off"));
   ' "$WORK" 2>/dev/null || echo "unknown")
   printf '%s\n' "$EDIT_ECHO_OBSERVED" > "$WORK/edit_echo"
+  # WHICH TABLE THE LEG ACTUALLY CARRIED, read from its own captured bodies
+  # rather than from what the runner was asked to do. A leg labelled A whose
+  # table still carries `delegate` is not an A leg, and the label would make
+  # both arms agree because they were the same arm.
+  if [ "${BENCH_CAPTURE:-0}" = 1 ]; then
+    node --input-type=module -e "
+      import { readCapture } from '$B/reconcile-capture.mjs';
+      import { writeFileSync } from 'node:fs';
+      const recs = readCapture('$WORK/capture').filter((r) => r.body?.tools);
+      if (recs.length === 0) { writeFileSync('$WORK/tool_table', 'unknown\n'); process.exit(0); }
+      const names = (recs[0].body.tools ?? []).map((t) => t.function?.name ?? t.name).sort();
+      writeFileSync('$WORK/tool_table', names.join(',') + '\n');
+    " 2>/dev/null || printf 'unknown\n' > "$WORK/tool_table"
+    # WHICH PROMPT THE LEG ACTUALLY CARRIED, on the same principle. The arm
+    # of the re-read round is one bullet of the system prompt, and the
+    # runner selects it by KISO_BIN — a build path, which is exactly the
+    # kind of label that can be wrong while every number still looks fine.
+    # This reads the system message off the leg's own first captured body.
+    node --input-type=module -e "
+      import { readCapture } from '$B/reconcile-capture.mjs';
+      import { writeFileSync } from 'node:fs';
+      const recs = readCapture('$WORK/capture').filter((r) => Array.isArray(r.body?.messages));
+      const sysOf = (r) => {
+        const m = r.body.messages.find((x) => x.role === 'system');
+        if (!m) return '';
+        return typeof m.content === 'string' ? m.content : (m.content ?? []).map((c) => c.text ?? '').join('');
+      };
+      const sys = recs.map(sysOf).find((t) => t.length > 0) ?? '';
+      const extended = /or one you changed\s*\n?\s*yourself through a confirmed edit/i.test(sys);
+      const published = /do not re-?read a file you already read unchanged/i.test(sys);
+      // 'unknown' when neither clause is present: a prompt that carries
+      // neither is not one of this round's two arms, whatever was launched.
+      writeFileSync('$WORK/prompt_arm', (extended ? 'exemption-extended' : published ? 'published' : 'unknown') + '\n');
+    " 2>/dev/null || printf 'unknown\n' > "$WORK/prompt_arm"
+  fi
   printf '%s\n' "${BENCH_EDIT_ECHO:-0}" > "$WORK/edit_echo_requested"
+fi
+
+# CAPTURE RECONCILIATION, both arms, before any verdict is read off this leg.
+#
+# A directory of bodies proves nothing alone: if the sink missed requests,
+# the bodies describe a DIFFERENT session from the one the usage numbers
+# came from. And the effort read from a body is the WIRE-VERIFIED level —
+# the thing this programme has never had for the arm without a durable
+# profile, which carried "requested, not verified" on every leg ever run.
+if [ "${BENCH_CAPTURE:-0}" = 1 ]; then
+  node --input-type=module -e "
+    import { readCapture, reconcile } from '$B/reconcile-capture.mjs';
+    import { readFileSync, writeFileSync } from 'node:fs';
+    let requests = null;
+    try {
+      const cfg = JSON.parse(readFileSync('$WORK/config.json', 'utf8'));
+      requests = cfg.model && typeof cfg.model.requests === 'number' ? cfg.model.requests : null;
+    } catch {}
+    const recs = readCapture('$WORK/capture');
+    const r = reconcile(recs, { requests, model: 'deepseek-flash', effort: '$BENCH_EFFORT' });
+    writeFileSync('$WORK/capture.json', JSON.stringify(r, null, 1) + '\n');
+    // the wire-verified effort is its own sidecar, beside effort_bound, so a
+    // reader never has to infer which arm's claim rests on what
+    writeFileSync('$WORK/effort_wire', (r.effortObserved ?? 'not-observed') + '\n');
+  " 2>/dev/null || { echo "reconcile-failed" > "$WORK/effort_wire"; echo '{\"ok\":false,\"problems\":[\"the reconciler did not run\"]}' > "$WORK/capture.json"; }
 fi
 
 if [ -f "$WORK/status" ]; then
