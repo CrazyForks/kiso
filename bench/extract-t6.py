@@ -59,7 +59,7 @@ def _sum_usage(events):
     return d
 
 
-def kiso(work):
+def kiso(work, buckets_n=BUCKETS):
     # The durable log orders input-then-usage: each user_input STARTS a turn
     # and the usage events that follow it belong to that turn (verified
     # against kiso-T5-1's session log). One entry per input, in log order.
@@ -74,7 +74,7 @@ def kiso(work):
             elif e["type"] == "usage":
                 turn_usage.append(e)
     buckets = []
-    for p in range(BUCKETS):
+    for p in range(buckets_n):
         slice_ = turns[p * TURNS_PER_BUCKET:(p + 1) * TURNS_PER_BUCKET]
         u = _sum_usage([u for t in slice_ for u in t])
         b = dict(fresh=u["input"] - u["cache"], cache_read=u["cache"],
@@ -88,9 +88,9 @@ def kiso(work):
     return buckets
 
 
-def pi(work):
+def pi(work, buckets_n=BUCKETS):
     buckets = []
-    for p in range(BUCKETS):
+    for p in range(buckets_n):
         u = dict(input=0, cache=0, output=0, requests=0, unknown=0)
         for i in range(p * TURNS_PER_BUCKET + 1, (p + 1) * TURNS_PER_BUCKET + 1):
             path = f"{work}/stdout-{i}.log"
@@ -155,7 +155,7 @@ def pi(work):
     return buckets
 
 
-def claude(work):
+def claude(work, buckets_n=BUCKETS):
     """Claude Code, per bucket.
 
     Like pi, one stdout-N.log per turn — so the same bucketing applies. The
@@ -167,7 +167,7 @@ def claude(work):
     contributes nothing — never read as a free turn.
     """
     buckets = []
-    for p in range(BUCKETS):
+    for p in range(buckets_n):
         u = dict(input=0, cache=0, output=0, requests=0, unknown=0)
         for i in range(p * TURNS_PER_BUCKET + 1, (p + 1) * TURNS_PER_BUCKET + 1):
             path = f"{work}/stdout-{i}.log"
@@ -212,21 +212,41 @@ def claude(work):
     return buckets
 
 
-def main(workdir):
+def _walls(work):
+    """How many buckets a leg has: its contiguous wall_1..wall_N files. A T6
+    leg has four; a concealed-set leg (run-t6.sh BENCH_INSTANCE) has
+    ceil(N turns / 6), the last one short."""
+    n = 0
+    while os.path.exists(f"{work}/wall_{n + 1}"):
+        n += 1
+    return n
+
+
+def main(workdir, pattern="T6"):
     rows = []
     # E4-e scopes a round under runs/<round>/, and this glob only ever
     # looked one level down — so every leg of every scoped round was
     # invisible to the extractor and it printed an empty list, which reads
     # exactly like "the round produced nothing".
-    legs = sorted(set(glob.glob(workdir + "/runs/*T6*")
-                      + glob.glob(workdir + "/runs/*/*T6*")))
+    legs = sorted(set(glob.glob(workdir + f"/runs/*{pattern}*")
+                      + glob.glob(workdir + f"/runs/*/*{pattern}*")))
     for work in legs:
         name = os.path.basename(work)
         tool, task, run = name.split("-", 2)
-        if not os.path.exists(f"{work}/wall_1"):
+        # a concealed leg is named <tool>-<instance id>-<run> and the id has
+        # its own dash (A-1): the leg's manifest names the task exactly
+        try:
+            with open(f"{work}/config.json") as fh:
+                cfg = json.load(fh)
+            if cfg.get("task") and cfg.get("run"):
+                task, run = str(cfg["task"]), str(cfg["run"])
+        except (OSError, ValueError):
+            pass
+        n = _walls(work)
+        if n == 0:
             continue
         try:
-            buckets = {"kiso": kiso, "pi": pi, "claude": claude}[tool](work)
+            buckets = {"kiso": kiso, "pi": pi, "claude": claude}[tool](work, n)
             m = dict(tool=tool, task=task, run=run, buckets=buckets,
                      verify=open(f"{work}/verify").read().strip())
             m["round"] = os.path.basename(os.path.dirname(work))
@@ -258,4 +278,4 @@ def main(workdir):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else ".")
+    main(sys.argv[1] if len(sys.argv) > 1 else ".", sys.argv[2] if len(sys.argv) > 2 else "T6")
