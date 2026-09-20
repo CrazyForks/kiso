@@ -26,6 +26,13 @@ import { declaredBinary } from "./declared-binary.mjs";
 /** The single-file exemption: the Chinese README edition. */
 const EXEMPT = new Set(["README.zh.md"]);
 
+/** The ONE phrase allowed outside that file: the link label README.md
+ *  points at it with, which the owner ruled (2026-09-20) must read as the
+ *  language names itself rather than in English. It is an allowance for
+ *  THIS EXACT STRING in THIS ONE FILE — every other CJK character in
+ *  README.md is still a failure, and no other file has an allowance. */
+const ALLOWED = new Map([["README.md", ["\u7b80\u4f53\u4e2d\u6587"]]]);
+
 const listed = execSync("git ls-files", { encoding: "utf8" })
 	.split("\n")
 	.filter((f) => f !== "" && !EXEMPT.has(f) && !f.includes("node_modules") && !f.endsWith(".d.ts"));
@@ -45,9 +52,12 @@ for (const file of tracked) {
 	} catch {
 		continue; // a gitlink or unreadable entry
 	}
+	const allowed = ALLOWED.get(file) ?? [];
 	const lines = text.split("\n");
 	for (let i = 0; i < lines.length; i++) {
-		if (CJK.test(lines[i])) {
+		let line = lines[i];
+		for (const phrase of allowed) line = line.split(phrase).join("");
+		if (CJK.test(line)) {
 			problems.push(`${file}:${i + 1}: CJK — the tracked tree is English (README.zh.md is the only exception)`);
 		}
 	}
