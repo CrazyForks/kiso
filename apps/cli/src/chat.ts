@@ -26,6 +26,7 @@ import {
 } from "@vincemakes/kiso-tui";
 import { askView, coldResumeLine, coldResumeView, deletionRiskHint, editFileDiff, writeFileDiff, type DiffResult, type SaferAnswer, type SaferFailure, type SaferOption } from "@vincemakes/kiso-tui";
 import { canonicalTargetPath, isProtectedPath, protectedIdentity, shellProgressPath } from "@vincemakes/kiso-tools-node";
+import { providerLabel } from "./provider-label.js";
 import { echoText } from "@vincemakes/kiso-tui-cells/render";
 import { canonicalizeUsage } from "@vincemakes/kiso-runtime";
 import { canonicalizeUsageForModel, requestBudget } from "@vincemakes/kiso-runtime/internal";
@@ -185,7 +186,13 @@ export function estimateCtxRatio(session: AgentSession): number {
  *  is the session's own (the durable profile), never the CLI's memory. */
 export function statusModelLabel(session: { readonly reasoning?: { readonly effort: string } }): string {
 	const effort = session.reasoning?.effort;
-	return effort !== undefined && effort !== "default" ? `${agentModel} · ${effort}` : agentModel;
+	// The owner, 2026-09-21: the PROVIDER rides with the model, because two
+	// profiles can name one model id and reach two accounts. `…-flash@commandcode.ai`
+	// says whose tokens the next turn spends; the other profile's row says
+	// its own host. `providerLabel` reads the base URL that `setAgentModel`
+	// set alongside the model, so the two can never drift.
+	const model = `${agentModel}${providerLabel(agentBaseUrl)}`;
+	return effort !== undefined && effort !== "default" ? `${model} · ${effort}` : model;
 }
 
 export function displayCtxRatio(session: AgentSession): number {
