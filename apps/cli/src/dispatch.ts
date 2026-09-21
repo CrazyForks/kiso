@@ -636,7 +636,7 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 					ctx.input.panelAsk(
 						modelPickView(
 							{
-								header: `model — current: ${agentModel}${providerLabel(agentBaseUrl)}`,
+								header: `model — current: ${agentModel}`,
 								options: names.map((name) => {
 									const profile = configModels[name]!;
 									// the note keeps what tells two rows apart; the levels

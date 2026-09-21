@@ -26,7 +26,6 @@ import {
 } from "@vincemakes/kiso-tui";
 import { askView, coldResumeLine, coldResumeView, deletionRiskHint, editFileDiff, writeFileDiff, type DiffResult, type SaferAnswer, type SaferFailure, type SaferOption } from "@vincemakes/kiso-tui";
 import { canonicalTargetPath, isProtectedPath, protectedIdentity, shellProgressPath } from "@vincemakes/kiso-tools-node";
-import { providerLabel } from "./provider-label.js";
 import { queuedSwitchLines } from "./state.js";
 import { echoText } from "@vincemakes/kiso-tui-cells/render";
 import { canonicalizeUsage } from "@vincemakes/kiso-runtime";
@@ -187,13 +186,13 @@ export function estimateCtxRatio(session: AgentSession): number {
  *  is the session's own (the durable profile), never the CLI's memory. */
 export function statusModelLabel(session: { readonly reasoning?: { readonly effort: string } }): string {
 	const effort = session.reasoning?.effort;
-	// The owner, 2026-09-21: the PROVIDER rides with the model, because two
-	// profiles can name one model id and reach two accounts. `…-flash@commandcode.ai`
-	// says whose tokens the next turn spends; the other profile's row says
-	// its own host. `providerLabel` reads the base URL that `setAgentModel`
-	// set alongside the model, so the two can never drift.
-	const model = `${agentModel}${providerLabel(agentBaseUrl)}`;
-	return effort !== undefined && effort !== "default" ? `${model} · ${effort}` : model;
+	// The owner's dogfood, 2026-09-21 (the second pass): the status row under
+	// the composer is the MODEL's, and only the model's — a host belongs where
+	// a choice is being made (`/model`'s rows, the switch notice) and where the
+	// identity is asked for (`/status`), not in a row that has ~40 columns and
+	// cut the host to `deepseek/d…ndcode.ai`. Unnecessary at best, misleading at
+	// worst: it read as a path, not as an account.
+	return effort !== undefined && effort !== "default" ? `${agentModel} · ${effort}` : agentModel;
 }
 
 export function displayCtxRatio(session: AgentSession): number {
