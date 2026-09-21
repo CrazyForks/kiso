@@ -225,16 +225,18 @@ export type ProfileDrift =
 	| { readonly kind: "surface-changed"; readonly notes: readonly string[] }
 	/** new tools only — every recorded tool present and identical. */
 	| { readonly kind: "compatible-additions"; readonly added: readonly string[] }
-	/** WHO ANSWERS changed — the one class that blocks without an
-	 *  explicit acknowledgement. */
+	/** WHO ANSWERS changed — NAMED, and recorded as the next revision under
+	 *  the CURRENT configuration. Owner-ruled 2026-09-21: a changed binding
+	 *  never blocks a resume — the person may simply have switched models. */
 	| { readonly kind: "material"; readonly reasons: readonly string[] };
 
 /** The drift protocol's classifier — computed from the INVENTORY diff,
  *  never from digest inequality alone: every recorded tool present with
  *  identical hashes plus new names = compatible additions (a one-line
  *  notice); a missing name, a changed hash, a provider/model divergence,
- *  or a system-prompt divergence = MATERIAL (explicit resolution; a
- *  digest mismatch is never presented as restoration). */
+ *  or a system-prompt divergence = MATERIAL (the change is NAMED and
+ *  recorded as the next revision under the CURRENT configuration — it
+ *  blocks nothing; a digest mismatch is never presented as restoration). */
 export function assessProfileDrift(
 	recorded: ExecutionProfile,
 	current: { readonly provider: ProfileModelRef | null; readonly systemPromptDigest: string; readonly tools: readonly ProfileToolRecord[] },

@@ -1170,17 +1170,22 @@ function retiredAutoCompact(merged: Parameters<typeof resolveAutoCompact>[0]): u
 function bindRestoredSession(session: {
 	readonly model: string;
 	readonly baseUrl: string | undefined;
-	readonly driftAcknowledgement?: { readonly reasoningReset: { readonly thinking: string; readonly effort: string } } | null;
+	readonly driftAcknowledgement?: {
+		readonly reasons: readonly string[];
+		readonly reasoningReset: { readonly thinking: string; readonly effort: string };
+	} | null;
 	setMicrocompactThreshold(n: number): void;
 	setContextWindow(n: number): void;
 }): void {
-	// 0.40.0: an acknowledged drift says what it did, once — including the
-	// owner-ruled reasoning reset, which was silent until now.
+	// 0.40.1 (the owner's ruling of 2026-09-21): a changed binding is neither
+	// blocked nor "acknowledged" — it is recorded as the next revision under
+	// the CURRENT configuration, and this ONE line says which binding and why
+	// (the owner-ruled reasoning reset rides with it, silently until 0.40.0).
 	const ack = session.driftAcknowledgement ?? null;
 	if (ack !== null) {
 		const was = ack.reasoningReset;
 		const prior = [was.effort !== "default" ? `effort ${was.effort}` : "", was.thinking !== "default" ? `thinking ${was.thinking}` : ""].filter((s) => s !== "").join(", ");
-		bodyLog(`drift acknowledged — now on ${session.model}; reasoning reset to defaults${prior === "" ? "" : ` (was ${prior})`}`);
+		bodyLog(`binding changed — now on ${session.model}: ${ack.reasons.join("; ")}; reasoning reset to defaults${prior === "" ? "" : ` (was ${prior})`}`);
 	}
 	setAgentModel(session.model, session.baseUrl);
 	session.setMicrocompactThreshold(
@@ -1352,6 +1357,13 @@ async function chatLoop(
 	// reload said what it did; repeating the session's opening would read
 	// as a new session, which is the one thing it is not.
 	let rebuilt = false;
+	// XP-1: the id of the session that IS open — null until the first open
+	// succeeds, and cleared by a refused switch, so one refusal can never
+	// recurse into another.
+	let opened: string | null = null;
+	// XP-1: the re-open that follows a refused switch. The session is the one
+	// already on screen, so this step prints neither banner nor tail.
+	let refused = false;
 	for (;;) {
 		// 0.40.0 (the lead's ruling): a session opens in the folder that holds
 		// it, never moved — a switch that crosses folders rebuilds the agent
@@ -1374,9 +1386,31 @@ async function chatLoop(
 			}
 			agent = next;
 		}
-		const session = await agent.session({ id, ...(acceptDrift() ? { acceptDrift: true } : {}) });
+		let session: Awaited<ReturnType<typeof agent.session>>;
+		try {
+			session = await agent.session({ id, ...(acceptDrift() ? { acceptDrift: true } : {}) });
+		} catch (err) {
+			// The profile contract's BLOCKED cases — a sidecar that cannot be
+			// read, an XP-era log without one — belong to the ENTRY: nothing is
+			// on screen yet, and the message says what to do. An in-session
+			// SWITCH is a LINE: it switches NOTHING and the session you were in
+			// stays open. The throw used to escape chatLoop, which killed the
+			// REPL and left the session that was open behind with no log at all
+			// (announced once, then empty and unopenable). Every refusal this
+			// open can throw is treated the same way — the message itself is
+			// what says what to do about it.
+			if (opened === null) throw err;
+			bodyLog(escapeTerminal((err as Error).message));
+			id = opened; // the switch is undone
+			opened = null;
+			refused = true;
+			continue;
+		}
+		opened = id;
 		if (rebuilt) {
 			rebuilt = false;
+		} else if (refused) {
+			refused = false; // back in the session that was already on screen
 		} else if (prev === null) {
 			bodyLog(`session ${id}\n`);
 			// REL-0152-D5: a session with history says what that history WAS.
