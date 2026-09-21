@@ -55,7 +55,7 @@ import { floorExtension, isDestructiveCall } from "./floor.js";
 import { protectedShellExtension } from "./protected-shell.js";
 import { breakerExtension } from "./breaker.js";
 import { builtInLayer } from "./builtin.js";
-import { agentModel, atFiles, body, bodyLog, codingToolOptions, kisoHome, workspaceRoot, projectRoot, ownSessionsDir, setOpenSessionFolder, builtInExtensions, currentFaux, dock, extensionsDir, loadedExtensions, mergedConfig, mergedTempPaths, modelChoice, projectExtensions, configModels, configuredWindow, agentBaseUrl, currentModelName, currentAgentExtensions, sessionStoreRef, sessionsDir, setAgentModel, setBody, setConfigModels, setConfiguredWindow, setCurrentAgentExtensions, setCurrentFaux, setCurrentModelName, setCurrentProfileName, setExtensionLists, setUserProtectedPaths, protectedFiles, setMergedConfig, setModelChoice, setSessionStore, setRetryShown, setNeverInherited, secretEnvNamesOf, userExtensions, VERSION, type LineInput, lastBinding, acceptDrift, setAcceptDrift, setFloorOn, floorOn, loadedSkillsCatalog } from "./state.js";
+import { agentModel, atFiles, body, bodyLog, codingToolOptions, kisoHome, workspaceRoot, projectRoot, ownSessionsDir, setOpenSessionFolder, builtInExtensions, currentFaux, dock, extensionsDir, loadedExtensions, mergedConfig, mergedTempPaths, modelChoice, projectExtensions, configModels, configuredWindow, agentBaseUrl, currentModelName, currentAgentExtensions, sessionStoreRef, sessionsDir, setAgentModel, setBody, setConfigModels, setConfiguredWindow, setCurrentAgentExtensions, setCurrentFaux, setCurrentModelName, setCurrentProfileName, setExtensionLists, setUserProtectedPaths, protectedFiles, setMergedConfig, setModelChoice, setSessionStore, setRetryShown, setNeverInherited, secretEnvNamesOf, userExtensions, VERSION, type LineInput, lastBinding, acceptDrift, setAcceptDrift, setFloorOn, floorOn, loadedSkillsCatalog, queuedSwitchLines } from "./state.js";
 import { maxRetriesFromEnv } from "./retries.js";
 import { askUi, resolveProjectTrust } from "./trust-ui.js";
 import { isFirstRun, scaffoldFirstRun } from "./first-run.js";
@@ -1407,6 +1407,20 @@ async function chatLoop(
 			// what says what to do about it.
 			if (opened === null) throw err;
 			bodyLog(escapeTerminal((err as Error).message));
+			// DC-57's other half + DC-55 (the owner's ruling of 2026-09-21,
+			// option ①): the lines that arrived WITH the refused switch were aimed
+			// at a session that EXISTS and could not be opened. They are NOT run
+			// here — a departing session never answers lines meant for the target —
+			// and not dropped in silence either: what was held is printed, so
+			// nothing vanishes without the person seeing it. (Leaving them in the
+			// queue would hand them to the old session on its next entry, which is
+			// the thing this ruling forbids.)
+			seed = [];
+			const held = queuedSwitchLines.splice(0);
+			if (held.length > 0) {
+				bodyLog(`[${held.length} line${held.length === 1 ? "" : "s"} held back — the switch was refused, so nothing was run]`);
+				for (const line of held) bodyLog(`  ${escapeTerminal(line)}`);
+			}
 			id = opened; // the switch is undone
 			opened = null;
 			refused = true;

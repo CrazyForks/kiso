@@ -15,18 +15,22 @@
  * entry. This gate asserts it on the durable logs — which session's
  * `user_input` the line became — never on the screen.
  *
- * THE BOUNDARY, pinned here so it is a decision rather than an accident: a
- * switch refused BEFORE it is ever requested (an id that does not list — a
- * typo, or a session whose sidecar cannot be read and therefore is not
- * offered) leaves the person where they are, and the rest of the batch is
- * theirs in THAT session. Ruling ① is about the other refusal — a target
- * that EXISTS and fails to open — where the line must be held back instead.
+ * THE BOUNDARY, pinned here so it is a decision rather than an accident, and
+ * it has TWO refusals with two different answers:
+ *   - the target does NOT list (a typo, or a sidecar that cannot be read and
+ *     so is never offered) — the person never left, and the rest of the batch
+ *     is theirs in the session they are in;
+ *   - the target EXISTS and cannot be OPENED (an XP-era log with scoped
+ *     continuation envelopes and no sidecar: the fail-closed integrity case) —
+ *     here the line must NOT be answered by the session being left. It is held
+ *     back and printed, so nothing vanishes in silence.
  */
 
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { SessionStore } from "@vincemakes/kiso-runtime";
 import { isolatedEnv, runCli, stripANSI } from "../../../tests/helpers/isolated-cli.mjs";
 
 function fauxScript(): string {
@@ -39,8 +43,8 @@ function fauxScript(): string {
 function said(home: string, id: string): string[] {
 	const log = join(home, "sessions", `${id}.jsonl`);
 	const out: string[] = [];
-	// A session nothing was ever said in has NO log at all — the switch left
-	// it empty — so absence is the honest answer here, not an error.
+	// A session nothing was ever said in has NO log — the switch left it empty —
+	// so absence is the honest answer here, not an error.
 	if (!existsSync(log)) return out;
 	for (const line of readFileSync(log, "utf8").split("\n")) {
 		if (!line.includes("user_input")) continue;
@@ -73,7 +77,7 @@ describe("DC-57 — a line that arrives with a switch belongs to the new session
 		const { env, dirs } = isolatedEnv({ KISO_FAUX_SCRIPT: fauxScript() });
 		expect(runCli(["-p", "hi", "alpha"], env, { timeout: 60_000 }).status).toBe(0);
 		// a sidecar that does not parse: the session is never offered, and it is
-		// also never read as absent (the fail-closed integrity rule)
+		// never read as absent either (the fail-closed integrity rule)
 		writeFileSync(join(dirs.home, "sessions", "broken.meta.json"), "{ this is not json");
 
 		const run = runCli(["chat", "fresh"], env, { input: "/resume broken\nthis line is for the person\n", timeout: 90_000 });
@@ -85,6 +89,31 @@ describe("DC-57 — a line that arrives with a switch belongs to the new session
 			"the person never left, so the line is answered where they are — NOT ①'s case (see the header)",
 		).toContain("this line is for the person");
 		expect(said(dirs.home, "broken"), "and nothing was written into the session that could not be opened").toEqual([]);
+	});
+
+	it("a target that EXISTS and cannot be OPENED: its lines are held back, never answered by the old session", async () => {
+		const { env, dirs } = isolatedEnv({ KISO_FAUX_SCRIPT: fauxScript() });
+		expect(runCli(["-p", "hi", "alpha"], env, { timeout: 60_000 }).status).toBe(0);
+		// the XP-era shape: a log whose envelopes carry a scope and NO sidecar —
+		// the fail-closed case that BLOCKS the open (and still lists, because the
+		// log is there)
+		const store = new SessionStore(join(dirs.home, "sessions"));
+		await store.append("legacy", "r1", { seq: 0, type: "user_input", content: "go" } as never);
+		await store.append("legacy", "r1", {
+			seq: 1,
+			type: "stop",
+			reason: "end_turn",
+			continuation: { scope: { providerId: "anthropic", apiId: "anthropic-messages", modelId: "m" }, entries: [] },
+		} as never);
+		store.closeAll();
+
+		const run = runCli(["chat", "fresh"], env, { input: "/resume legacy\nthis belongs to legacy\n", timeout: 90_000 });
+		const out = stripANSI(`${run.stdout}${run.stderr}`);
+		expect(run.status, "the REPL survives the refusal").toBe(0);
+		expect(out, "the integrity refusal is stated").toMatch(/integrity|missing/i);
+		expect(out, "and the held line is named, so nothing vanishes in silence").toContain("this belongs to legacy");
+		expect(out, "with the ruling's own wording").toMatch(/held back/);
+		expect(said(dirs.home, "fresh"), "the session we stayed in did NOT answer it").not.toContain("this belongs to legacy");
 	});
 
 	it("a switch with nothing after it behaves exactly as before (the control)", () => {
