@@ -482,6 +482,13 @@ export function setCurrentModelName(value: string): void {
 	currentModelName = value;
 }
 
+/** DC-57 (the owner's ruling, 2026-09-21): lines that arrived with a switch
+ *  command — a paste, a pipe, a scripted driver — belong to the session the
+ *  person asked for. The departing entry queues them here and the next
+ *  `chat()` drains them into its own replay, so no line is answered by the
+ *  session being left and none is dropped. */
+export const queuedSwitchLines: string[] = [];
+
 /** E1: the extensions loaded by makeAgent — their names feed the banner. */
 /** 0.40.0: whether the catastrophe floor is on (floor.ts) — the user
  *  config's `floor`, read where the chain is assembled. */

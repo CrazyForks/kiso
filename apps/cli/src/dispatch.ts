@@ -15,6 +15,7 @@ import { protectedBangReason, protectedShellVerdict } from "./protected-shell.js
 import { agentBaseUrl, currentModelName, agentModel, body, bodyLog, codingToolOptions, protectedFiles, kisoHome, configModels, dock, lastBinding, loadedSkillsCatalog, mergedConfig, readContextLedger, retryOnRow, sessionsDir, setAgentModel, setConfiguredWindow, setCurrentModelName, setModelChoice, setRetryShown, type LineInput , setLastBinding } from "./state.js";
 import { adapterOptionsFor } from "./auth/adapter-options.js";
 import { profileProviderLabel, providerLabel } from "./provider-label.js";
+import { queuedSwitchLines } from "./state.js";
 import { contextWindowTokens, microcompactThresholdFor, startStatusSpinner } from "./chat.js";
 import { authForProfile, directWriteProfile, profileAvailable, resolveContextWindow, unavailableReason, type ModelProfile } from "./config.js";
 import { shellTool } from "@vincemakes/kiso-tools-node";
@@ -141,6 +142,8 @@ export interface DispatchCtx {
 	/** the /resume+/clear mini-spec: end this chat() with a switch to
 	 *  another session — main re-enters chat there; the editor survives. */
 	readonly requestSwitch: (id: string) => void;
+	/** DC-57: true once this entry has been asked to leave — the guard that keeps a departing session from answering a batch's later lines. */
+	readonly leaving: () => boolean;
 	/** §2.5: end this chat() with a REBUILD of the agent on the SAME
 	 *  session — extensions, skills and config are read again. */
 	readonly requestReload: () => void;
@@ -238,6 +241,18 @@ function runBang(command: string, send: boolean, ctx: DispatchCtx): void {
 }
 
 export function dispatch(line: string, ctx: DispatchCtx): void {
+	// DC-57 (the owner's ruling, 2026-09-21): a session that is LEAVING — a
+	// switch or a reload has been requested from an earlier segment of the
+	// chain — does not answer new lines. They are queued for the session the
+	// person asked for and replayed by its `chat()` entry. The guard lives
+	// HERE, not only at the input edge: a batch that arrived before the
+	// switch was requested still runs its segments after it (the chain is
+	// FIFO), which is exactly how a pasted prompt used to land in the
+	// departing session.
+	if (ctx.leaving()) {
+		queuedSwitchLines.push(line);
+		return;
+	}
 	const trimmed = line.trim();
 	// §2.2 — the `!` gesture is the COMPOSER's alone. A piped session, `-p`
 	// and `--task-file` keep `!` as ordinary text: those lines are content,
@@ -624,7 +639,7 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 									// the model id — the id alone marked both such rows, or
 									// neither. The row's own provider rides the label, so two
 									// rows that share an id still read differently.
-									const marks = [`profile: ${name}`, ...(profileAvailable(profile) ? [] : ["unavailable"]), ...(name === currentModelName ? ["current"] : [])];
+									const marks = [`profile: ${name}`, ...(profileAvailable(profile) ? [] : ["unavailable"]), ...(name === currentModelName || (profile.model === agentModel && (profile.baseUrl ?? "") === (agentBaseUrl ?? "")) ? ["current"] : [])];
 									const host = profileProviderLabel(profile.kind, profile.baseUrl);
 									return { label: `${profile.kind}/${profile.model}${host === "" ? "" : ` ${host}`}`, note: marks.join(" · "), ...effortAxis(profile) };
 								}),
@@ -674,8 +689,9 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 				} else {
 					for (const name of names) {
 						const p = configModels[name]!;
+						const hostOf = profileProviderLabel(p.kind, p.baseUrl);
 						bodyLog(
-							`  ${name} → ${p.kind}/${p.model} · ${signInNote(p)} ${profileAvailable(p) ? "(available)" : "(unavailable)"} · ${effortNote(p)}`,
+							`  ${name} → ${p.kind}/${p.model}${hostOf === "" ? "" : ` ${hostOf}`} · ${signInNote(p)} ${profileAvailable(p) ? "(available)" : "(unavailable)"} · ${effortNote(p)}`,
 						);
 					}
 				}

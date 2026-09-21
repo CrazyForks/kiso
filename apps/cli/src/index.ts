@@ -1364,6 +1364,8 @@ async function chatLoop(
 	// XP-1: the re-open that follows a refused switch. The session is the one
 	// already on screen, so this step prints neither banner nor tail.
 	let refused = false;
+	/** DC-57: lines that arrived with a switch command belong to the session being asked for. */
+	let seed: readonly string[] = [];
 	for (;;) {
 		// 0.40.0 (the lead's ruling): a session opens in the folder that holds
 		// it, never moved — a switch that crosses folders rebuilds the agent
@@ -1477,8 +1479,11 @@ async function chatLoop(
 			route: (sessionId: string) => routeSession(sessionId),
 			...(process.stdin.isTTY ? { pick: () => pickSession(agent, input) } : {}),
 		};
-		const end = await chat(session, currentFaux, input, autoCompact, nav);
+		const end = await chat(session, currentFaux, input, autoCompact, nav, seed);
 		if (end.next === "exit") return;
+		// DC-57: the lines that arrived with the switch command ride INTO the
+		// next entry — they were aimed at the session being asked for.
+		seed = end.lines ?? [];
 		if (end.next === "reload") {
 			agent = await reloadAgent(agent, id, input);
 			rebuilt = true;
