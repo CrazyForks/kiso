@@ -12,7 +12,7 @@ import type { AgentSession } from "@vincemakes/kiso-runtime";
 import { MODES, MODE_NOTE, OFFERED_MODES, getMode, setMode } from "./mode.js";
 import { clipboardWrite, lastAnswer } from "./clipboard.js";
 import { protectedBangReason, protectedShellVerdict } from "./protected-shell.js";
-import { agentBaseUrl, currentModelName, agentModel, body, bodyLog, codingToolOptions, protectedFiles, kisoHome, configModels, dock, lastBinding, loadedSkillsCatalog, mergedConfig, readContextLedger, retryOnRow, sessionsDir, setAgentModel, setConfiguredWindow, setCurrentModelName, setModelChoice, setRetryShown, type LineInput , setLastBinding } from "./state.js";
+import { agentBaseUrl, currentProfileName, setCurrentProfileName, currentModelName, agentModel, body, bodyLog, codingToolOptions, protectedFiles, kisoHome, configModels, dock, lastBinding, loadedSkillsCatalog, mergedConfig, readContextLedger, retryOnRow, sessionsDir, setAgentModel, setConfiguredWindow, setCurrentModelName, setModelChoice, setRetryShown, type LineInput , setLastBinding } from "./state.js";
 import { adapterOptionsFor } from "./auth/adapter-options.js";
 import { profileProviderLabel, providerLabel } from "./provider-label.js";
 import { queuedSwitchLines } from "./state.js";
@@ -543,7 +543,7 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 			// claimed `profile deepseek-v4-flash` for a session that was
 			// restored, not switched. (The real fix is to stop overloading that
 			// variable; until then, a label that cannot lie.)
-			const profileOf = configModels[currentModelName] === undefined ? "" : ` · profile ${currentModelName}`;
+			const profileOf = currentProfileName === null ? "" : ` · profile ${currentProfileName}`;
 			bodyLog(`model ${agentModel}${providerLabel(agentBaseUrl)}${profileOf}`);
 			ctx.input.prompt();
 		});
@@ -648,7 +648,7 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 									// the model id — the id alone marked both such rows, or
 									// neither. The row's own provider rides the label, so two
 									// rows that share an id still read differently.
-									const marks = [`profile: ${name}`, ...(profileAvailable(profile) ? [] : ["unavailable"]), ...(name === currentModelName ? ["current"] : [])];
+									const marks = [`profile: ${name}`, ...(profileAvailable(profile) ? [] : ["unavailable"]), ...(name === currentProfileName ? ["current"] : [])];
 									const host = profileProviderLabel(profile.kind, profile.baseUrl);
 									return { label: `${profile.kind}/${profile.model}${host === "" ? "" : ` ${host}`}`, note: marks.join(" · "), ...effortAxis(profile) };
 								}),
@@ -793,6 +793,7 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 							setLastBinding(binding);
 							setAgentModel(profile.model, profile.baseUrl);
 							setCurrentModelName(arg);
+							setCurrentProfileName(direct === null ? null : profName);
 							// §2.5: the ONE source a reload reads for the model — a
 							// switch made here must survive the rebuild.
 							setModelChoice(arg);

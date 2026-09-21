@@ -482,6 +482,16 @@ export function setCurrentModelName(value: string): void {
 	currentModelName = value;
 }
 
+/** REVIEW (2026-09-21): WHO the binding came from is a different fact from
+ *  WHICH model it names, and `currentModelName` carried both — a profile alias
+ *  after `/model`, a model id after a switch, a resume or a reload. Surfaces
+ *  that want to name the PROFILE ask this one; an unknown profile is null, and
+ *  nothing guesses a credential identity out of a model name and a host. */
+export let currentProfileName: string | null = null;
+export function setCurrentProfileName(value: string | null): void {
+	currentProfileName = value;
+}
+
 /** DC-57 (the owner's ruling, 2026-09-21): lines that arrived with a switch
  *  command — a paste, a pipe, a scripted driver — belong to the session the
  *  person asked for. The departing entry queues them here and the next

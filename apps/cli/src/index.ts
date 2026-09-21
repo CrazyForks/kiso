@@ -55,7 +55,7 @@ import { floorExtension, isDestructiveCall } from "./floor.js";
 import { protectedShellExtension } from "./protected-shell.js";
 import { breakerExtension } from "./breaker.js";
 import { builtInLayer } from "./builtin.js";
-import { agentModel, atFiles, body, bodyLog, codingToolOptions, kisoHome, workspaceRoot, projectRoot, ownSessionsDir, setOpenSessionFolder, builtInExtensions, currentFaux, dock, extensionsDir, loadedExtensions, mergedConfig, mergedTempPaths, modelChoice, projectExtensions, configModels, configuredWindow, agentBaseUrl, currentModelName, currentAgentExtensions, sessionStoreRef, sessionsDir, setAgentModel, setBody, setConfigModels, setConfiguredWindow, setCurrentAgentExtensions, setCurrentFaux, setCurrentModelName, setExtensionLists, setUserProtectedPaths, protectedFiles, setMergedConfig, setModelChoice, setSessionStore, setRetryShown, setNeverInherited, secretEnvNamesOf, userExtensions, VERSION, type LineInput, lastBinding, acceptDrift, setAcceptDrift, setFloorOn, floorOn, loadedSkillsCatalog } from "./state.js";
+import { agentModel, atFiles, body, bodyLog, codingToolOptions, kisoHome, workspaceRoot, projectRoot, ownSessionsDir, setOpenSessionFolder, builtInExtensions, currentFaux, dock, extensionsDir, loadedExtensions, mergedConfig, mergedTempPaths, modelChoice, projectExtensions, configModels, configuredWindow, agentBaseUrl, currentModelName, currentAgentExtensions, sessionStoreRef, sessionsDir, setAgentModel, setBody, setConfigModels, setConfiguredWindow, setCurrentAgentExtensions, setCurrentFaux, setCurrentModelName, setCurrentProfileName, setExtensionLists, setUserProtectedPaths, protectedFiles, setMergedConfig, setModelChoice, setSessionStore, setRetryShown, setNeverInherited, secretEnvNamesOf, userExtensions, VERSION, type LineInput, lastBinding, acceptDrift, setAcceptDrift, setFloorOn, floorOn, loadedSkillsCatalog } from "./state.js";
 import { maxRetriesFromEnv } from "./retries.js";
 import { askUi, resolveProjectTrust } from "./trust-ui.js";
 import { isFirstRun, scaffoldFirstRun } from "./first-run.js";
@@ -809,9 +809,11 @@ async function makeAgent(sessionId: string | undefined, input?: LineInput, model
 		);
 		setCurrentFaux(true);
 		setCurrentModelName("faux");
+		setCurrentProfileName(null);
 	} else {
 		setCurrentFaux(false);
 		setCurrentModelName(resolved.name);
+		setCurrentProfileName(resolved.name);
 	}
 	setAgentModel(model, resolved?.profile.baseUrl); // v2b: the status bar shows it; OR-1: the endpoint rides along
 
@@ -1322,6 +1324,7 @@ async function reloadAgent(
 		setConfiguredWindow(oldCfg.window);
 		setCurrentFaux(oldCfg.faux);
 		setCurrentModelName(oldCfg.modelName);
+		setCurrentProfileName(null); // the reload snapshot carries no profile name: no mark beats a guessed one
 		setModelChoice(oldCfg.choice);
 		setAgentModel(oldCfg.agent, oldCfg.endpoint);
 		if (oldCfg.delegation === undefined) delete process.env.KISO_DELEGATION_CONFIG_JSON;
@@ -1466,6 +1469,11 @@ async function chatLoop(
 		// the threshold. One step, shared by all three entry points.
 		bindRestoredSession(session);
 		setCurrentModelName(session.model);
+		// A SWITCH knows only a model id here — nothing that names the profile —
+		// so the mark is cleared rather than guessed. A FRESH start keeps what
+		// makeAgent resolved from `--model <profile>`, which is the one place
+		// the name is known (prev is null only on the first entry).
+		if (prev !== null) setCurrentProfileName(null);
 		paintBootStatus(session);
 		// The terminal's window title, HERE for the same reason the three
 		// lines above are here: this is the one step all three entry points
