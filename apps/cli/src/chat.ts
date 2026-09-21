@@ -26,6 +26,7 @@ import {
 } from "@vincemakes/kiso-tui";
 import { askView, coldResumeLine, coldResumeView, deletionRiskHint, editFileDiff, writeFileDiff, type DiffResult, type SaferAnswer, type SaferFailure, type SaferOption } from "@vincemakes/kiso-tui";
 import { canonicalTargetPath, isProtectedPath, protectedIdentity, shellProgressPath } from "@vincemakes/kiso-tools-node";
+import { queuedSwitchLines } from "./state.js";
 import { echoText } from "@vincemakes/kiso-tui-cells/render";
 import { canonicalizeUsage } from "@vincemakes/kiso-runtime";
 import { canonicalizeUsageForModel, requestBudget } from "@vincemakes/kiso-runtime/internal";
@@ -185,6 +186,12 @@ export function estimateCtxRatio(session: AgentSession): number {
  *  is the session's own (the durable profile), never the CLI's memory. */
 export function statusModelLabel(session: { readonly reasoning?: { readonly effort: string } }): string {
 	const effort = session.reasoning?.effort;
+	// The owner's dogfood, 2026-09-21 (the second pass): the status row under
+	// the composer is the MODEL's, and only the model's — a host belongs where
+	// a choice is being made (`/model`'s rows, the switch notice) and where the
+	// identity is asked for (`/status`), not in a row that has ~40 columns and
+	// cut the host to `deepseek/d…ndcode.ai`. Unnecessary at best, misleading at
+	// worst: it read as a path, not as an account.
 	return effort !== undefined && effort !== "default" ? `${agentModel} · ${effort}` : agentModel;
 }
 
@@ -1231,12 +1238,12 @@ export async function consumeRun(
  *  mini-spec). */
 export type ChatEnd =
 	| { readonly next: "exit" }
-	| { readonly next: "switch"; readonly id: string }
+	| { readonly next: "switch"; readonly id: string; readonly lines?: readonly string[] }
 	/** §2.5: the caller REBUILDS the agent and re-enters on the same id.
 	 *  Not "switch": switching keeps the agent and only changes the id,
 	 *  which would reload nothing at all — the tool registry lives in the
 	 *  agent's constructor. */
-	| { readonly next: "reload"; readonly id: string };
+	| { readonly next: "reload"; readonly id: string; readonly lines?: readonly string[] };
 
 /** The session-navigation seam main provides: the OTHER sessions'
  *  ids, and (when a dock is up) the existing picker. */
@@ -1247,7 +1254,7 @@ export interface ChatNav {
 	readonly pick?: () => Promise<string | null>;
 }
 
-export async function chat(session: AgentSession, faux: boolean, input: LineInput, autoCompact?: AutoCompact, nav?: ChatNav): Promise<ChatEnd> {
+export async function chat(session: AgentSession, faux: boolean, input: LineInput, autoCompact?: AutoCompact, nav?: ChatNav, seed?: readonly string[]): Promise<ChatEnd> {
 	// the switch directive — set once by dispatch's /clear or /resume,
 	// resolved through the end signal so the final awaits still run
 	let switchTo: string | null = null;
@@ -1459,7 +1466,15 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 	// REPL is ready (they are never dropped).
 	const chainRef: { current: Promise<void> } = { current: Promise.resolve() };
 	let replReady = false;
-	const queuedLines: string[] = [];
+	const queuedLines: string[] = [...(seed ?? []), ...queuedSwitchLines.splice(0)];
+	// DC-57 (the owner's ruling, 2026-09-21): once the session is LEAVING —
+	// a switch or a reload has been requested — a line that arrives belongs
+	// to the session the person asked for, not to the one they are leaving.
+	// One read can carry several lines (a paste, a pipe, a scripted
+	// driver), and the departing instance used to dispatch them; they are
+	// queued here and replayed by the NEXT chat() entry, exactly as
+	// pre-ready lines are replayed by this one.
+	let leaving = false;
 	// B area: user-turn counter for the status line. /last and /think read
 	// the body (the ToolCell / ThinkingCell final states).
 	let turnNo = 0;
@@ -1644,12 +1659,18 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 		// the /resume+/clear mini-spec: the switch directive and the
 		// session-navigation seam (absent nav = the commands degrade to
 		// an honest refusal in dispatch)
+		// DC-57: the dispatch edge asks this before it answers a line, so the
+		// decision is made when the line's segment runs — not when its bytes
+		// arrived, which can be before the switch was even requested.
+		leaving: () => leaving,
 		requestSwitch: (id: string) => {
 			switchTo = id;
+			leaving = true;
 			resolveEnd();
 		},
 		requestReload: () => {
 			reloadReq = true;
+			leaving = true;
 			resolveEnd();
 		},
 		sessions: () => nav?.sessions() ?? [],
@@ -1677,7 +1698,7 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 		else dispatch(line, dispatchCtx);
 	};
 	input.onLine((line) => {
-		if (!replReady) {
+		if (!replReady || leaving) {
 			queuedLines.push(line);
 			return;
 		}
@@ -1780,8 +1801,8 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 	// runs before the exit or the chain is already settled. One level is
 	// enough: the /compact segment appends nothing of its own.
 	await chainRef.current;
-	if (switchTo !== null) return { next: "switch", id: switchTo };
+	if (switchTo !== null) return { next: "switch", id: switchTo, lines: queuedLines.slice() };
 	// a switch beats a reload: /resume and /clear are going somewhere else,
 	// and the agent they land on is rebuilt by the caller either way.
-	return reloadReq ? { next: "reload", id: session.id } : { next: "exit" };
+	return reloadReq ? { next: "reload", id: session.id, lines: queuedLines.slice() } : { next: "exit" };
 }

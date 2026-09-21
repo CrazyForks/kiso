@@ -55,7 +55,7 @@ import { floorExtension, isDestructiveCall } from "./floor.js";
 import { protectedShellExtension } from "./protected-shell.js";
 import { breakerExtension } from "./breaker.js";
 import { builtInLayer } from "./builtin.js";
-import { agentModel, atFiles, body, bodyLog, codingToolOptions, kisoHome, workspaceRoot, projectRoot, ownSessionsDir, setOpenSessionFolder, builtInExtensions, currentFaux, dock, extensionsDir, loadedExtensions, mergedConfig, mergedTempPaths, modelChoice, projectExtensions, configModels, configuredWindow, agentBaseUrl, currentModelName, currentAgentExtensions, sessionStoreRef, sessionsDir, setAgentModel, setBody, setConfigModels, setConfiguredWindow, setCurrentAgentExtensions, setCurrentFaux, setCurrentModelName, setExtensionLists, setUserProtectedPaths, protectedFiles, setMergedConfig, setModelChoice, setSessionStore, setRetryShown, setNeverInherited, secretEnvNamesOf, userExtensions, VERSION, type LineInput, lastBinding, acceptDrift, setAcceptDrift, setFloorOn, floorOn, loadedSkillsCatalog } from "./state.js";
+import { agentModel, atFiles, body, bodyLog, codingToolOptions, kisoHome, workspaceRoot, projectRoot, ownSessionsDir, setOpenSessionFolder, builtInExtensions, currentFaux, dock, extensionsDir, loadedExtensions, mergedConfig, mergedTempPaths, modelChoice, projectExtensions, configModels, configuredWindow, agentBaseUrl, currentModelName, currentAgentExtensions, sessionStoreRef, sessionsDir, setAgentModel, setBody, setConfigModels, setConfiguredWindow, setCurrentAgentExtensions, setCurrentFaux, setCurrentModelName, setCurrentProfileName, setExtensionLists, setUserProtectedPaths, protectedFiles, setMergedConfig, setModelChoice, setSessionStore, setRetryShown, setNeverInherited, secretEnvNamesOf, userExtensions, VERSION, type LineInput, lastBinding, acceptDrift, setAcceptDrift, setFloorOn, floorOn, loadedSkillsCatalog, queuedSwitchLines } from "./state.js";
 import { maxRetriesFromEnv } from "./retries.js";
 import { askUi, resolveProjectTrust } from "./trust-ui.js";
 import { isFirstRun, scaffoldFirstRun } from "./first-run.js";
@@ -482,6 +482,7 @@ function makeLineInput(): LineInput {
 		// the panel's option rows, so the compositor is what the editor asks
 		// where they are. Neither side computes the other's geometry.
 		editor.bindPanelRows(() => dock.panelOptionRows());
+		editor.bindPickWindow(() => dock.visiblePickWindow());
 		dock.bindMenu(() => editor.menuState()); // v3 §04: the slash-command menu
 		editor.bindAtItems(atFiles); // KC3 §5: the file source — listed per OPEN
 		dock.bindAt(() => editor.atState()); // KC3 §4: the picker's band
@@ -809,9 +810,11 @@ async function makeAgent(sessionId: string | undefined, input?: LineInput, model
 		);
 		setCurrentFaux(true);
 		setCurrentModelName("faux");
+		setCurrentProfileName(null);
 	} else {
 		setCurrentFaux(false);
 		setCurrentModelName(resolved.name);
+		setCurrentProfileName(resolved.name);
 	}
 	setAgentModel(model, resolved?.profile.baseUrl); // v2b: the status bar shows it; OR-1: the endpoint rides along
 
@@ -1322,6 +1325,7 @@ async function reloadAgent(
 		setConfiguredWindow(oldCfg.window);
 		setCurrentFaux(oldCfg.faux);
 		setCurrentModelName(oldCfg.modelName);
+		setCurrentProfileName(null); // the reload snapshot carries no profile name: no mark beats a guessed one
 		setModelChoice(oldCfg.choice);
 		setAgentModel(oldCfg.agent, oldCfg.endpoint);
 		if (oldCfg.delegation === undefined) delete process.env.KISO_DELEGATION_CONFIG_JSON;
@@ -1364,6 +1368,8 @@ async function chatLoop(
 	// XP-1: the re-open that follows a refused switch. The session is the one
 	// already on screen, so this step prints neither banner nor tail.
 	let refused = false;
+	/** DC-57: lines that arrived with a switch command belong to the session being asked for. */
+	let seed: readonly string[] = [];
 	for (;;) {
 		// 0.40.0 (the lead's ruling): a session opens in the folder that holds
 		// it, never moved — a switch that crosses folders rebuilds the agent
@@ -1401,6 +1407,20 @@ async function chatLoop(
 			// what says what to do about it.
 			if (opened === null) throw err;
 			bodyLog(escapeTerminal((err as Error).message));
+			// DC-57's other half + DC-55 (the owner's ruling of 2026-09-21,
+			// option ①): the lines that arrived WITH the refused switch were aimed
+			// at a session that EXISTS and could not be opened. They are NOT run
+			// here — a departing session never answers lines meant for the target —
+			// and not dropped in silence either: what was held is printed, so
+			// nothing vanishes without the person seeing it. (Leaving them in the
+			// queue would hand them to the old session on its next entry, which is
+			// the thing this ruling forbids.)
+			seed = [];
+			const held = queuedSwitchLines.splice(0);
+			if (held.length > 0) {
+				bodyLog(`[${held.length} line${held.length === 1 ? "" : "s"} held back — the switch was refused, so nothing was run]`);
+				for (const line of held) bodyLog(`  ${escapeTerminal(line)}`);
+			}
 			id = opened; // the switch is undone
 			opened = null;
 			refused = true;
@@ -1464,6 +1484,11 @@ async function chatLoop(
 		// the threshold. One step, shared by all three entry points.
 		bindRestoredSession(session);
 		setCurrentModelName(session.model);
+		// A SWITCH knows only a model id here — nothing that names the profile —
+		// so the mark is cleared rather than guessed. A FRESH start keeps what
+		// makeAgent resolved from `--model <profile>`, which is the one place
+		// the name is known (prev is null only on the first entry).
+		if (prev !== null) setCurrentProfileName(null);
 		paintBootStatus(session);
 		// The terminal's window title, HERE for the same reason the three
 		// lines above are here: this is the one step all three entry points
@@ -1477,8 +1502,11 @@ async function chatLoop(
 			route: (sessionId: string) => routeSession(sessionId),
 			...(process.stdin.isTTY ? { pick: () => pickSession(agent, input) } : {}),
 		};
-		const end = await chat(session, currentFaux, input, autoCompact, nav);
+		const end = await chat(session, currentFaux, input, autoCompact, nav, seed);
 		if (end.next === "exit") return;
+		// DC-57: the lines that arrived with the switch command ride INTO the
+		// next entry — they were aimed at the session being asked for.
+		seed = end.lines ?? [];
 		if (end.next === "reload") {
 			agent = await reloadAgent(agent, id, input);
 			rebuilt = true;

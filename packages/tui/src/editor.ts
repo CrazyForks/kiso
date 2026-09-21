@@ -339,6 +339,12 @@ export class Editor {
 	 *  frame (absolute 1-based screen rows). The editor owns no geometry —
 	 *  it asks the surface that placed them. */
 	#panelRows: (() => { top: number; count: number; first?: number } | null) | null = null;
+	/** B (review of this round): the pick panel's window, published by the
+	 *  surface that DREW it — the frame's budget decides the size, so the
+	 *  editor PULLS it here instead of letting the input layer re-derive one
+	 *  (two derivations are two sizes, and on a short terminal the digits named
+	 *  rows nobody could see). */
+	#pickWin: (() => { first: number; size: number } | null) | null = null;
 	#lineCb: ((line: string) => void) | null = null;
 	#pendingLines: string[] = []; // submits before onLine is wired (startup) — never dropped
 	#sigintCb: (() => void) | null = null;
@@ -1767,6 +1773,12 @@ export class Editor {
 		this.#panelRows = fn;
 	}
 
+	/** B: the pick window the last frame drew — the Dock's value, not the
+	 *  editor's guess. Same pull-on-demand shape as `bindPanelRows`. */
+	bindPickWindow(fn: (() => { first: number; size: number } | null) | null): void {
+		this.#pickWin = fn;
+	}
+
 	/** TMUX-F1 ②: `run` identical arrow sequences arrived in ONE read. Every
 	 *  surface but one gets every press — a wheel over the transcript viewer,
 	 *  a panel, a multi-row draft scrolls, as a wheel should. The HISTORY
@@ -1979,6 +1991,7 @@ export class Editor {
 			reflow: () => this.#reflow(),
 			render: () => this.#onRender(),
 			syncMouse: () => this.#syncMouse(),
+			pickWindow: () => this.#pickWin?.() ?? null,
 			closeBands: () => {
 				this.#menuOpen = false;
 				this.#menuSel = 0;

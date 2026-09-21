@@ -53,6 +53,7 @@ import { leadWidth } from "./width.js"; // W23: the ONE width authority (the edi
 // for four reads, so an ask can never render half as an approval.
 import { panelFrameOf, panelLeadOf, panelStatusOf } from "./ask-panel.js";
 import { MOUSE_OFF } from "./editor.js";
+import { pickWindowOf } from "./approval-panel.js";
 import type { PanelState } from "./approval-panel.js";
 import { atPanelRows, bandHeader, type AtMatch } from "./at-picker.js";
 // TUI2-R2 ②: the session picker's rows — the band's third occupant.
@@ -1369,6 +1370,14 @@ export class Body {
 		return this.#panelRowSpan;
 	}
 
+	/** B (review of this round): the pick panel's window for the frame last
+	 *  drawn — the renderer's own value, not a second derivation. `null` when
+	 *  no pick panel was on screen. */
+	#pickWin: { first: number; size: number } | null = null;
+	visiblePickWindow(): { first: number; size: number } | null {
+		return this.#pickWin;
+	}
+
 	/** SIGWINCH: clear the OLD live area (recorded geometry, ED only —
 	 *  zero LF, zero \x1b[3J — the shell history untouched), then the
 	 *  full-redraw path at the NEW geometry (O(height), zero replay).
@@ -1987,6 +1996,7 @@ export class Body {
 		// at when they clicked, which is this one.
 		this.#panelRowSpan =
 			live.panelSpan === null ? null : { top: liveTop + live.panelSpan.offset, count: live.panelSpan.count, first: live.panelSpan.first };
+		this.#pickWin = live.pickWin ?? null;
 		// 5. the frame bytes.
 		this.#paint(W, H, liveTop, liveLines, liveRowsTotal, chrome);
 	}
@@ -2080,7 +2090,7 @@ export class Body {
 	 *  that placed the rows). Otherwise the projection of the live
 	 *  cells. render() paints this and
 	 *  liveCount() measures it — the same rows, by construction. */
-	#liveRows(W: number, ctx: FrameCtx, cap: number): { lines: string[]; panelSpan: { offset: number; count: number; first: number } | null } {
+	#liveRows(W: number, ctx: FrameCtx, cap: number): { lines: string[]; panelSpan: { offset: number; count: number; first: number } | null; pickWin?: { first: number; size: number } | null } {
 		const capped = Math.max(1, cap);
 		if (this.#viewer !== null) return { lines: this.#viewerBand(W).slice(0, capped), panelSpan: null };
 		if (this.#sheetState?.() === true) return { lines: keysSheetRows(W).slice(0, capped), panelSpan: null };
@@ -2090,7 +2100,11 @@ export class Body {
 			// fires on it. W22: the queue band sits below the panel — the
 			// cap shrinks by it.
 			const frame = panelFrameOf(panel, W, capped);
-			return { lines: frame.rows, panelSpan: frame.options };
+			// B (review of this round): the pick window THIS frame draws. The size
+			// depends on the budget, so the renderer is the only producer — the
+			// digit keys are handed this value instead of deriving a second one.
+			const pick = panel.pick ?? null;
+			return { lines: frame.rows, panelSpan: frame.options, pickWin: pick === null ? null : pickWindowOf(panel.view, pick.cursor, pick.phase, capped) };
 		}
 		return { lines: this.#liveProjection(W, ctx, cap), panelSpan: null };
 	}
@@ -2999,6 +3013,12 @@ export class Dock {
 	 *  arithmetic of its own. */
 	panelOptionRows(): { top: number; count: number; first: number } | null {
 		return compositorRef?.panelOptionRows() ?? null;
+	}
+
+	/** B (review of this round): the pick panel's window for the frame last
+	 *  drawn — what the digit keys must name. */
+	visiblePickWindow(): { first: number; size: number } | null {
+		return compositorRef?.visiblePickWindow() ?? null;
 	}
 	setStatus(text: string, hint?: string | null): void {
 		compositorRef?.setStatus(text, hint ?? null);

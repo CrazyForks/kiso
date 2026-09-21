@@ -19,6 +19,7 @@
 import {
 	PICK_MAX,
 	panelOptions,
+	pickWindow,
 	saferDegradedNote,
 	type AskRuntime,
 	type PanelPhase,
@@ -49,6 +50,11 @@ export interface BandHost {
 	line(): string;
 	/** The buffer with its paste capsules expanded — the text that would leave the editor. */
 	expandPastes(line: string): string;
+	/** The pick panel's window as the RENDERER drew it (review of this round):
+	 *  the size depends on the frame's budget, so the digit keys must be handed
+	 *  the value instead of deriving it again from PICK_MAX. Absent → the input
+	 *  layer falls back to its own derivation. */
+	pickWindow?(): { first: number; size: number } | null;
 	/** Empty the buffer: chars, cursor and the ↑↓ goal column. */
 	clear(): void;
 	/** Type one code point at the cursor. */
@@ -284,7 +290,11 @@ export class PanelInput {
 		const panel = this.#panel;
 		if (panel === null) return false;
 		if (panel.pick !== null && panel.pick.phase === "options") {
-			const n = Math.min(panel.view.pick!.options.length, PICK_MAX);
+			// DC-58: EVERY option is reachable by ↑↓ — the window follows the
+			// cursor (`pickWindow`) and PICK_MAX is only how many rows one
+			// screen holds. This bound used to be `min(count, PICK_MAX)`, which
+			// is what left a 60-profile config with nine reachable rows.
+			const n = panel.view.pick!.options.length;
 			const cur = panel.pick.cursor;
 			const next = dir === "up" ? Math.max(0, cur - 1) : Math.min(Math.max(0, n - 1), cur + 1);
 			// OR-7: the second axis belongs to the highlighted option, so it
@@ -511,8 +521,16 @@ export class PanelInput {
 	#pickPanelDigit(index: number): void {
 		const panel = this.#panel;
 		if (panel === null || panel.pick === null) return;
-		if (index < 0 || index >= Math.min(panel.view.pick!.options.length, PICK_MAX)) return;
-		panel.pick = { cursor: index, phase: "options", level: startLevel(panel.view.pick!.options[index]) };
+		const count = panel.view.pick!.options.length;
+		// DC-58: a digit names the row ON SCREEN. The window's origin is what
+		// turns a visible position into an option index — the same
+		// `pickWindow` the renderer drew the rows with, so what the row says
+		// and what the key does cannot drift apart.
+		const { first, size } = this.host.pickWindow?.() ?? pickWindow(panel.pick.cursor, count, PICK_MAX);
+		if (index < 0 || index >= size) return;
+		const target = first + index;
+		if (target >= count) return;
+		panel.pick = { cursor: target, phase: "options", level: startLevel(panel.view.pick!.options[target]) };
 		this.host.render();
 	}
 

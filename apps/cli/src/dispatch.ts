@@ -12,8 +12,10 @@ import type { AgentSession } from "@vincemakes/kiso-runtime";
 import { MODES, MODE_NOTE, OFFERED_MODES, getMode, setMode } from "./mode.js";
 import { clipboardWrite, lastAnswer } from "./clipboard.js";
 import { protectedBangReason, protectedShellVerdict } from "./protected-shell.js";
-import { agentModel, body, bodyLog, codingToolOptions, protectedFiles, kisoHome, configModels, dock, lastBinding, loadedSkillsCatalog, mergedConfig, readContextLedger, retryOnRow, sessionsDir, setAgentModel, setConfiguredWindow, setCurrentModelName, setModelChoice, setRetryShown, type LineInput , setLastBinding } from "./state.js";
+import { agentBaseUrl, currentProfileName, setCurrentProfileName, currentModelName, agentModel, body, bodyLog, codingToolOptions, protectedFiles, kisoHome, configModels, dock, lastBinding, loadedSkillsCatalog, mergedConfig, readContextLedger, retryOnRow, sessionsDir, setAgentModel, setConfiguredWindow, setCurrentModelName, setModelChoice, setRetryShown, type LineInput , setLastBinding } from "./state.js";
 import { adapterOptionsFor } from "./auth/adapter-options.js";
+import { profileProviderLabel, providerLabel } from "./provider-label.js";
+import { queuedSwitchLines } from "./state.js";
 import { contextWindowTokens, microcompactThresholdFor, startStatusSpinner } from "./chat.js";
 import { authForProfile, directWriteProfile, profileAvailable, resolveContextWindow, unavailableReason, type ModelProfile } from "./config.js";
 import { shellTool } from "@vincemakes/kiso-tools-node";
@@ -140,6 +142,8 @@ export interface DispatchCtx {
 	/** the /resume+/clear mini-spec: end this chat() with a switch to
 	 *  another session — main re-enters chat there; the editor survives. */
 	readonly requestSwitch: (id: string) => void;
+	/** DC-57: true once this entry has been asked to leave — the guard that keeps a departing session from answering a batch's later lines. */
+	readonly leaving: () => boolean;
 	/** §2.5: end this chat() with a REBUILD of the agent on the SAME
 	 *  session — extensions, skills and config are read again. */
 	readonly requestReload: () => void;
@@ -237,6 +241,18 @@ function runBang(command: string, send: boolean, ctx: DispatchCtx): void {
 }
 
 export function dispatch(line: string, ctx: DispatchCtx): void {
+	// DC-57 (the owner's ruling, 2026-09-21): a session that is LEAVING — a
+	// switch or a reload has been requested from an earlier segment of the
+	// chain — does not answer new lines. They are queued for the session the
+	// person asked for and replayed by its `chat()` entry. The guard lives
+	// HERE, not only at the input edge: a batch that arrived before the
+	// switch was requested still runs its segments after it (the chain is
+	// FIFO), which is exactly how a pasted prompt used to land in the
+	// departing session.
+	if (ctx.leaving()) {
+		queuedSwitchLines.push(line);
+		return;
+	}
 	const trimmed = line.trim();
 	// §2.2 — the `!` gesture is the COMPOSER's alone. A piped session, `-p`
 	// and `--task-file` keep `!` as ordinary text: those lines are content,
@@ -514,6 +530,21 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 			bodyLog(`session ${ctx.session.id}`);
 			bodyLog(`${ctx.session.log.all.length} events`);
 			bodyLog(`ctx ${ctxPct}`);
+			// The owner, 2026-09-21: /status is where "what am I actually
+			// running on" is answered, so the identity is spelled out HERE —
+			// the model, the host the request goes to, the profile it came
+			// from and the key it spends. The status row stays short; this
+			// line is the disambiguation two same-named profiles need.
+			//
+			// REVIEW (2026-09-21): the profile is named only when what is in
+			// hand IS a profile key. `currentModelName` holds whatever the
+			// resolution produced — a profile alias after `/model`, a MODEL ID
+			// after a switch or a resume — so printing it unconditionally
+			// claimed `profile deepseek-v4-flash` for a session that was
+			// restored, not switched. (The real fix is to stop overloading that
+			// variable; until then, a label that cannot lie.)
+			const profileOf = currentProfileName === null ? "" : ` · profile ${currentProfileName}`;
+			bodyLog(`model ${agentModel}${providerLabel(agentBaseUrl)}${profileOf}`);
 			ctx.input.prompt();
 		});
 		return;
@@ -611,8 +642,20 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 									// the note keeps what tells two rows apart; the levels
 									// left it for the axis below (they were being cut off
 									// the end of the note column at 100 columns).
-									const marks = [`profile: ${name}`, ...(profileAvailable(profile) ? [] : ["unavailable"]), ...(profile.model === agentModel ? ["current"] : [])];
-									return { label: `${profile.kind}/${profile.model}`, note: marks.join(" · "), ...effortAxis(profile) };
+									// The owner, 2026-09-21: two profiles can name ONE model
+									// id and reach two accounts, so the current mark follows
+									// the PROFILE the session is on (`currentModelName`), not
+									// the model id — the id alone marked both such rows, or
+									// neither. The row's own provider rides the label, so two
+									// rows that share an id still read differently.
+									// 0.40.1 (the owner's dogfood, 2026-09-21): the `profile: <key>` prefix
+									// is gone — the row already names the model and its endpoint, and the
+									// profile key is what `/model <name>` takes, not what a chooser
+									// reading a list needs. What remains is what the chooser CANNOT
+									// infer: availability, and which one is live.
+									const marks = [...(profileAvailable(profile) ? [] : ["unavailable"]), ...(name === currentProfileName ? ["current"] : [])];
+									const host = profileProviderLabel(profile.kind, profile.baseUrl);
+									return { label: `${profile.kind}/${profile.model}${host === "" ? "" : ` ${host}`}`, note: marks.join(" · "), ...effortAxis(profile) };
 								}),
 								// PH-1a (finding PH-F4): the example must be a syntax
 								// directWriteProfile actually ACCEPTS — the old
@@ -660,8 +703,9 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 				} else {
 					for (const name of names) {
 						const p = configModels[name]!;
+						const hostOf = profileProviderLabel(p.kind, p.baseUrl);
 						bodyLog(
-							`  ${name} → ${p.kind}/${p.model} · ${signInNote(p)} ${profileAvailable(p) ? "(available)" : "(unavailable)"} · ${effortNote(p)}`,
+							`  ${name} → ${p.kind}/${p.model}${hostOf === "" ? "" : ` ${hostOf}`} · ${signInNote(p)} ${profileAvailable(p) ? "(available)" : "(unavailable)"} · ${effortNote(p)}`,
 						);
 					}
 				}
@@ -754,6 +798,7 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 							setLastBinding(binding);
 							setAgentModel(profile.model, profile.baseUrl);
 							setCurrentModelName(arg);
+							setCurrentProfileName(direct === null ? null : profName);
 							// §2.5: the ONE source a reload reads for the model — a
 							// switch made here must survive the rebuild.
 							setModelChoice(arg);
@@ -773,7 +818,7 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 							// (and the owner's) read `gpt-6-astra · CH 92%`, the new
 							// model beside the previous model's figure.
 							ctx.modelSwitched();
-							body.notice(`model → ${profName} (${profile.model}${effortTok !== undefined ? ` · ${effortTok}` : ""}) — takes effect on the next turn`);
+							body.notice(`model → ${profName} (${profile.model}${providerLabel(profile.baseUrl) === "" ? "" : ` ${providerLabel(profile.baseUrl)}`}${effortTok !== undefined ? ` · ${effortTok}` : ""}) — takes effect on the next turn`);
 						}
 					}
 				} catch (err) {
