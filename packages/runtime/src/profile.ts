@@ -225,19 +225,28 @@ export type ProfileDrift =
 	| { readonly kind: "surface-changed"; readonly notes: readonly string[] }
 	/** new tools only — every recorded tool present and identical. */
 	| { readonly kind: "compatible-additions"; readonly added: readonly string[] }
-	/** WHO ANSWERS changed — the one class that blocks without an
-	 *  explicit acknowledgement. */
+	/** WHO ANSWERS changed — NAMED, and recorded as the next revision under
+	 *  the CURRENT configuration. Owner-ruled 2026-09-21: a changed binding
+	 *  never blocks a resume — the person may simply have switched models. */
 	| { readonly kind: "material"; readonly reasons: readonly string[] };
 
 /** The drift protocol's classifier — computed from the INVENTORY diff,
  *  never from digest inequality alone: every recorded tool present with
  *  identical hashes plus new names = compatible additions (a one-line
  *  notice); a missing name, a changed hash, a provider/model divergence,
- *  or a system-prompt divergence = MATERIAL (explicit resolution; a
- *  digest mismatch is never presented as restoration). */
+ *  or a system-prompt divergence = MATERIAL (the change is NAMED and
+ *  recorded as the next revision under the CURRENT configuration — it
+ *  blocks nothing; a digest mismatch is never presented as restoration). */
 export function assessProfileDrift(
 	recorded: ExecutionProfile,
-	current: { readonly provider: ProfileModelRef | null; readonly systemPromptDigest: string; readonly tools: readonly ProfileToolRecord[] },
+	current: {
+		readonly provider: ProfileModelRef | null;
+		/** The model THIS process would run — needed because an unscoped binding
+		 *  has no provider ref to carry it. */
+		readonly modelId: string;
+		readonly systemPromptDigest: string;
+		readonly tools: readonly ProfileToolRecord[];
+	},
 ): ProfileDrift {
 	const reasons: string[] = [];
 	const notes: string[] = [];
@@ -245,8 +254,25 @@ export function assessProfileDrift(
 	const c = current.provider;
 	if ((r === null) !== (c === null)) {
 		reasons.push(`the recorded binding is ${r === null ? "unscoped" : `${r.providerId}/${r.modelId}`} but the current process serves ${c === null ? "an unscoped adapter" : `${c.providerId}/${c.modelId}`}`);
-	} else if (r !== null && c !== null && r.providerId !== c.providerId) {
-		reasons.push(`the recorded provider is ${r.providerId} but the current process serves ${c.providerId}`);
+	} else if (r !== null && c !== null) {
+		// WHO ANSWERS is an identity, and `providerId` alone is not one:
+		// `custom` names a CLASS — two custom endpoints are two different
+		// places to spend — so an endpoint (or API flavour) that moved is a
+		// changed binding like any other. Found in review of this round.
+		if (r.providerId !== c.providerId) reasons.push(`the recorded provider is ${r.providerId} but the current process serves ${c.providerId}`);
+		if (r.apiId !== c.apiId) reasons.push(`the recorded API is ${r.apiId} but the current process serves ${c.apiId}`);
+		if ((r.endpoint ?? null) !== (c.endpoint ?? null)) reasons.push(`the recorded endpoint is ${r.endpoint ?? "(none)"} but the current process serves ${c.endpoint ?? "(none)"}`);
+	}
+	// THE MODEL TOO — the owner's ruling of 2026-09-21, taken on review: the
+	// CONFIGURATION wins, including a model switch inside one provider (`--model`
+	// and the config are never silently ignored on a resume). This is compared
+	// even when BOTH sides are unscoped, where there is no provider ref to carry
+	// it, and it covers the ref's own `modelId` as well (the same fact, stamped
+	// by the same builder).
+	if (r !== null && c !== null && (r.modelId !== c.modelId || recorded.modelId !== current.modelId)) {
+		reasons.push(`the recorded model is ${recorded.modelId} but the current process serves ${current.modelId}`);
+	} else if (r === null && c === null && recorded.modelId !== current.modelId) {
+		reasons.push(`the recorded model is ${recorded.modelId} but the current process serves ${current.modelId} (both bindings are unscoped)`);
 	}
 	if (recorded.systemPromptDigest !== current.systemPromptDigest) {
 		notes.push(`the composed system prompt differs from the recorded one (${recorded.systemPromptDigest.slice(0, 12)}… → ${current.systemPromptDigest.slice(0, 12)}…)`);

@@ -126,7 +126,12 @@ export class AgentRuntime {
 		this.#definition.store.closeAll();
 	}
 
-	/** Load an existing session from disk, or create a fresh one. */
+	/** Load an existing session from disk, or create a fresh one.
+	 *
+	 *  `acceptDrift` is accepted and INERT — the CLI's historical
+	 *  `--accept-drift`, kept so the flag keeps parsing. Since the owner's
+	 *  ruling of 2026-09-21 a changed binding never needs an
+	 *  acknowledgement: the current configuration wins and is recorded. */
 	async session(options: { id: string; acceptDrift?: boolean }): Promise<AgentSession> {
 		const store = this.#definition.store;
 		const records = store.load(options.id);
@@ -162,20 +167,26 @@ export class AgentRuntime {
 		if (meta.kind === "ok") {
 			const drift = assessProfileDrift(meta.profile, {
 				provider: startupScope ?? null,
+				modelId: this.#definition.model,
 				systemPromptDigest: candidate.systemPromptDigest,
 				tools: candidate.tools,
 			});
-			if (drift.kind === "material" && options.acceptDrift !== true) {
-				const listed = drift.reasons.map((r) => `- ${r}`).join("\n");
-				throw new Error(
-					`the recorded execution profile no longer matches this process:\n${listed}\nre-open with acceptDrift (the CLI's --accept-drift flag) to proceed under the CURRENT configuration — the acknowledgement is recorded as a new revision; silently rebuilding is forbidden`,
-				);
-			}
 			if (drift.kind === "material") {
-				// acknowledged: the current configuration wins, DURABLY. The
-				// reasoning resets to defaults (owner-ruled: the recorded effort
-				// was a choice for the model that no longer answers) — and the
-				// session says so, through `driftAcknowledgement`.
+				// 0.40.1 (the owner's ruling of 2026-09-21): a DIFFERENT BINDING
+				// never blocks. A person may simply have switched models, so the
+				// CURRENT configuration wins — DURABLY, as the next revision —
+				// and the session says so. It used to refuse without an explicit
+				// `acceptDrift`, which turned "I moved to another provider"
+				// into an error the resume could not pass at all.
+				//
+				// Nothing provider-specific crosses the change: every adapter
+				// withholds foreign reasoning/continuation (MG-1 A5), so a new
+				// binding loses cache state, never correctness. The reasoning
+				// resets to defaults (owner-ruled: the recorded effort was a
+				// choice for the model that no longer answers) — and the session
+				// says so through `driftAcknowledgement`. The field's NAME is
+				// history: nothing is acknowledged any more, the change is
+				// recorded and stated.
 				driftAcknowledgement = { reasons: drift.reasons, reasoningReset: meta.profile.reasoning };
 				writeProfile(store.root, options.id, {
 					...buildProfile({

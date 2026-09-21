@@ -122,6 +122,7 @@
   "apps/cli/tests/update-first-frame-pty.test.ts",
   "apps/cli/tests/update-line-onscreen-pty.test.ts",
   "apps/cli/tests/user-invoked-skills-pty.test.ts",
+  "apps/cli/tests/xp1-binding-change.test.ts",
   "apps/cli/tests/xp1-status-truth-pty.test.ts",
   "apps/cli/tests/zombie-resume-gate.test.ts",
   "extensions/mcp/tests/dispose-e2e.test.ts",

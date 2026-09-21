@@ -70,10 +70,11 @@ describe("0.40.0 — every declared field survives all three writers", () => {
 		expect(r2.profileName).toBe("deep");
 		a.close();
 
-		// revision 3 — another process, started ELSEWHERE, acknowledges drift
+		// revision 3 — another process, started ELSEWHERE, with a DIFFERENT
+		// binding: it never blocks (owner-ruled 2026-09-21), the CURRENT
+		// configuration is what gets recorded, and the change is named
 		const c = createAgent({ model: "faux-z", store: new SessionStore(dir), tools: [], adapter: DONE, workspace: "/somewhere/else", profileName: "local" });
-		await expect(c.session({ id: "s" })).rejects.toThrow(/accept-drift/);
-		const s3 = await c.session({ id: "s", acceptDrift: true });
+		const s3 = await c.session({ id: "s" });
 		const r3 = profileOf(dir, "s");
 		keysPresent(r3);
 		expect(r3.revision).toBe(3);

@@ -12,8 +12,8 @@
  *     the next explicit selection;
  *   a RECORDED profile is RESTORED: the session runs the recorded model,
  *     not the process default (the truthfulness core);
- *   material drift refuses without an explicit acknowledgement and
- *   proceeds with one;
+ *   a CHANGED BINDING never blocks (owner-ruled 2026-09-21): the CURRENT
+ *     configuration wins, records the next revision, and says so;
  *   /model (setModelBinding) records the next revision durably.
  *
  * RED on the pre-XP-1b tree: no sidecar exists, nothing restores.
@@ -90,20 +90,38 @@ describe("XP-1 — the sidecar's fail-closed lifecycle", () => {
 	});
 });
 
-describe("XP-1 — restoration: the recorded profile wins over the process default", () => {
-	it("the session runs the RECORDED model, and says so", async () => {
+describe("XP-1 — the model is part of the binding (re-ruled by the owner, 2026-09-21, on review)", () => {
+	it("the SAME model: nothing moved, so the record stands and no revision is written", async () => {
 		const dir = freshDir();
 		const store = new SessionStore(dir);
 		await store.append("s5", "r1", { seq: 0, type: "user_input", content: "hi" } as never);
 		await store.append("s5", "r1", { seq: 1, type: "stop", reason: "end_turn" } as never);
 		store.closeAll();
 		writeProfile(dir, "s5", buildProfile({ revision: 3, modelId: "recorded-x", provider: null, registry: new ToolRegistry() }));
-		const agent = createAgent({ model: "process-default-y", store: new SessionStore(dir), tools: [], adapter: DONE });
+		const agent = createAgent({ model: "recorded-x", store: new SessionStore(dir), tools: [], adapter: DONE });
 		const session = await agent.session({ id: "s5" });
-		expect(session.model, "the truthfulness core: what will answer the next request").toBe("recorded-x");
+		expect(session.model, "the row and the request agree").toBe("recorded-x");
+		const meta = readProfile(dir, "s5");
+		expect(meta.kind === "ok" && meta.profile.revision, "nothing moved, nothing rewritten").toBe(3);
+		expect(session.driftAcknowledgement).toBeNull();
 	});
 
-	it("material drift REFUSES without acknowledgement, proceeds with it — and records the acknowledged revision", async () => {
+	it("a DIFFERENT model, both bindings unscoped: the CURRENT configuration wins, durably, and says so", async () => {
+		const dir = freshDir();
+		const store = new SessionStore(dir);
+		await store.append("s5b", "r1", { seq: 0, type: "user_input", content: "hi" } as never);
+		await store.append("s5b", "r1", { seq: 1, type: "stop", reason: "end_turn" } as never);
+		store.closeAll();
+		writeProfile(dir, "s5b", buildProfile({ revision: 3, modelId: "recorded-x", provider: null, registry: new ToolRegistry() }));
+		const agent = createAgent({ model: "process-default-y", store: new SessionStore(dir), tools: [], adapter: DONE });
+		const session = await agent.session({ id: "s5b" });
+		expect(session.model, "the configuration is the authority").toBe("process-default-y");
+		const meta = readProfile(dir, "s5b");
+		expect(meta.kind === "ok" && meta.profile.revision, "recorded as the next revision").toBe(4);
+		expect(session.driftAcknowledgement?.reasons.join("; "), "and it names what moved").toMatch(/recorded model is recorded-x/);
+	});
+
+	it("a CHANGED BINDING never blocks: the current binding wins, records revision N+1, and says so", async () => {
 		const dir = freshDir();
 		const store = new SessionStore(dir);
 		await store.append("s6", "r1", { seq: 0, type: "user_input", content: "hi" } as never);
@@ -119,11 +137,14 @@ describe("XP-1 — restoration: the recorded profile wins over the process defau
 			}),
 		);
 		const agent = createAgent({ model: "faux-y", store: new SessionStore(dir), tools: [], adapter: DONE });
-		await expect(agent.session({ id: "s6" })).rejects.toThrow(/accept-drift/);
-		const session = await agent.session({ id: "s6", acceptDrift: true });
-		expect(session.model).toBe("faux-y");
+		// the owner's ruling of 2026-09-21: no acknowledgement, no flag, no
+		// refusal — the person may simply have switched models. (RED pre-patch:
+		// this open threw, and the refusal took the whole REPL down with it.)
+		const session = await agent.session({ id: "s6" });
+		expect(session.model, "the CURRENT binding runs").toBe("faux-y");
 		const meta = readProfile(dir, "s6");
-		expect(meta.kind === "ok" && meta.profile.revision).toBe(3);
+		expect(meta.kind === "ok" && meta.profile.revision, "the change is durable history").toBe(3);
+		expect(session.driftAcknowledgement?.reasons[0], "and the session names what changed").toMatch(/deepseek/);
 	});
 });
 
