@@ -14,6 +14,13 @@
  * is leaving, further lines are queued and replayed by the NEXT `chat()`
  * entry. This gate asserts it on the durable logs — which session's
  * `user_input` the line became — never on the screen.
+ *
+ * THE BOUNDARY, pinned here so it is a decision rather than an accident: a
+ * switch refused BEFORE it is ever requested (an id that does not list — a
+ * typo, or a session whose sidecar cannot be read and therefore is not
+ * offered) leaves the person where they are, and the rest of the batch is
+ * theirs in THAT session. Ruling ① is about the other refusal — a target
+ * that EXISTS and fails to open — where the line must be held back instead.
  */
 
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -60,6 +67,24 @@ describe("DC-57 — a line that arrives with a switch belongs to the new session
 		expect(out, "the switch itself still happens").toContain("session alpha (switched");
 		expect(said(dirs.home, "alpha"), "the prompt is the NEW session's turn").toContain("tell me about widgets");
 		expect(said(dirs.home, "fresh"), "and NEVER the departing session's").not.toContain("tell me about widgets");
+	});
+
+	it("a target that does not LIST: the refusal is stated, and the batch stays with the person where they are", () => {
+		const { env, dirs } = isolatedEnv({ KISO_FAUX_SCRIPT: fauxScript() });
+		expect(runCli(["-p", "hi", "alpha"], env, { timeout: 60_000 }).status).toBe(0);
+		// a sidecar that does not parse: the session is never offered, and it is
+		// also never read as absent (the fail-closed integrity rule)
+		writeFileSync(join(dirs.home, "sessions", "broken.meta.json"), "{ this is not json");
+
+		const run = runCli(["chat", "fresh"], env, { input: "/resume broken\nthis line is for the person\n", timeout: 90_000 });
+		const out = stripANSI(`${run.stdout}${run.stderr}`);
+		expect(run.status, "the REPL survives a refused in-session switch").toBe(0);
+		expect(out, "the refusal says which id was not found").toContain("no such session: broken");
+		expect(
+			said(dirs.home, "fresh"),
+			"the person never left, so the line is answered where they are — NOT ①'s case (see the header)",
+		).toContain("this line is for the person");
+		expect(said(dirs.home, "broken"), "and nothing was written into the session that could not be opened").toEqual([]);
 	});
 
 	it("a switch with nothing after it behaves exactly as before (the control)", () => {
