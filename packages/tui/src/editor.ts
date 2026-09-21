@@ -47,13 +47,20 @@ import { PickInput } from "./pick-input.js";
 // "you>" text is gone (the brick IS the prompt; the pipe path's readline
 // prompt keeps its own "you> " — v2a line mode, byte-for-byte).
 /**
- * TUI2-R3v2 ② — the mouse-mode bytes, stated once.
+ * TUI2-R3v2 ②, corrected by the owner's ruling of 2026-09-21 (finding
+ * DC-56) — the mouse-mode bytes, stated once.
  *
  * ?1000 is the button-event report and ?1006 is the SGR encoding that
  * makes it parseable past column 95 (the legacy X10 encoding packs the
- * coordinate into one byte and simply breaks on a wide terminal). Both
- * go on together and come off together; a terminal left with either one
- * set is a terminal that prints escape bytes at the shell prompt.
+ * coordinate into one byte and simply breaks on a wide terminal). kiso
+ * still RESETS them — on entry (a previous process may have died with
+ * reporting left on) and on exit — but it no longer ENABLES them, because
+ * a terminal that is reporting stops scrolling its own scrollback: a
+ * surface that takes the mouse takes the history with it. kiso's
+ * transcript lives in that scrollback by design, and the first version of
+ * this feature locked it exactly where a person most wants to read back —
+ * under a blocking question. The history wins: no surface claims the
+ * mouse, and every surface keeps its keys.
  */
 /**
  * R5 — the viewer's key table, as a pure function of the input chunk.
@@ -108,7 +115,6 @@ const ALT_WORD = new Map<string, "left" | "right" | "killBack" | "killFwd">([
 	["\x08", "killBack"],
 ]);
 
-export const MOUSE_ON = "\x1b[?1000h\x1b[?1006h";
 export const MOUSE_OFF = "\x1b[?1000l\x1b[?1006l";
 
 export const PROMPT = "▌ ";
@@ -329,8 +335,6 @@ export class Editor {
 	/** TUI2-R3v2 ①: one-shot — a panel that just closed swallows the
 	 *  habitual trailing enter rather than submitting the restored draft. */
 	#swallowEnter = false;
-	/** TUI2-R3v2 ②: whether SGR 1006 reporting is currently enabled. */
-	#mouseOn = false;
 	/** TUI2-R3v2 ②: where the compositor put the panel's option rows this
 	 *  frame (absolute 1-based screen rows). The editor owns no geometry —
 	 *  it asks the surface that placed them. */
@@ -558,7 +562,6 @@ export class Editor {
 			// the human has no way to ask for it back.
 			process.stdin.setRawMode(true);
 			process.stdout.write(MOUSE_OFF);
-			this.#mouseOn = false;
 			process.stdout.write("\x1b[?2004h");
 			process.stdin.on("data", this.#onData);
 		}
@@ -1085,7 +1088,6 @@ export class Editor {
 		// chance this process gets, and emitting six harmless bytes twice
 		// is not a cost worth reasoning about.
 		process.stdout.write(MOUSE_OFF);
-		this.#mouseOn = false;
 		process.stdout.write("\x1b[?2004l"); // bracketed paste OFF
 		// REL-0161: the hardware cursor was hidden for the session's whole
 		// life (the compositor's entry reset); this is the one place kiso
@@ -1098,29 +1100,20 @@ export class Editor {
 	}
 
 	/**
-	 * TUI2-R3v2 ② — mouse reporting follows the SELECTION SURFACES and
-	 * nothing else.
+	 * TUI2-R3v2 ②, corrected by the owner's ruling of 2026-09-21 (finding
+	 * DC-56) — the bands still tell their host when a selection surface
+	 * opens or closes, and the host's answer is now "leave the terminal
+	 * alone".
 	 *
-	 * While it is on, the terminal's own text selection changes behaviour
-	 * (shift+drag still selects on every terminal that matters, but plain
-	 * drag-to-copy does not), so leaving it on for the whole session would
-	 * tax every copy-paste in the product to pay for a gesture that only
-	 * means something while a list is up. It goes on when one opens and
-	 * off when it closes — and both calls are idempotent, because the
-	 * surfaces nest (a panel can open over a picker) and the bytes must
-	 * not depend on the order they unwind in.
+	 * The bands' contract is unchanged — a band reports that it has taken
+	 * the composer — but the mouse is not a thing kiso hands out: reporting
+	 * on means the terminal stops scrolling its own scrollback, and every
+	 * band kiso has (the approval/ask/pick panel, the session picker, the @
+	 * picker) is a keyboard surface — digits, arrows, enter, esc, a filter.
+	 * The call sites stay so a future surface that DOES want the mouse has
+	 * one place to ask, and the ruling is written at that place.
 	 */
-	#setMouse(on: boolean): void {
-		if (this.#mouseOn === on) return;
-		this.#mouseOn = on;
-		if (this.#entered) process.stdout.write(on ? MOUSE_ON : MOUSE_OFF);
-	}
-
-	/** The surfaces that own a selection — the approval/ask/pick panel, the
-	 *  session picker and the @ picker. Any one of them up = reporting on. */
-	#syncMouse(): void {
-		this.#setMouse(this.#panelInput.up() || this.#pickInput.up() || this.#atUp());
-	}
+	#syncMouse(): void {}
 
 	/** OR-11 (a) — the lead the composer's row is DRAWN with, which is not
 	 *  always the brick. The CLI binds the compositor's input lead as `""`
@@ -1753,6 +1746,13 @@ export class Editor {
 	 * and context-menu everywhere else and would mean "approve" here.
 	 * The stakes are a side effect the human did not ask for, and an
 	 * ambiguous mouse event is not consent.
+	 *
+	 * 2026-09-21 (finding DC-56): kiso no longer ENABLES reporting, so on a
+	 * terminal this path is reached only when something else left the mouse
+	 * on — and then a click still answers the panel. The wheel stays
+	 * dropped either way (a scroll past a panel is not a choice), which is
+	 * the other half of why the settled rule is "no surface takes the
+	 * mouse": a terminal that is reporting cannot scroll its own history.
 	 */
 	#mouseEvent(params: string, press: boolean): void {
 		if (!press) return; // the press already decided; the release is noise
