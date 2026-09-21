@@ -1,6 +1,6 @@
 <p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/hero-dark.png"><img src="assets/hero.png" width="100%" alt="kiso — the durable runtime for AI agents"></picture></p>
 
-<p align="center"><b>v0.40.0</b> · MIT · Node ≥ 22 · <a href="https://kiso.work">kiso.work</a> · <a href="README.zh.md">简体中文</a></p>
+<p align="center"><b>v0.40.1</b> · MIT · Node ≥ 22 · <a href="https://kiso.work">kiso.work</a> · <a href="README.zh.md">简体中文</a></p>
 
 **kiso** is a durable runtime for AI agents. Every
 approval, tool result and event is written to disk as it happens, so an agent
@@ -87,10 +87,13 @@ as the message has always said.
 
 ## Models and effort
 
-`/model` lists your profiles, each annotated available or unavailable, and
-switches the session's adapter for the turns that follow; with no argument it
-opens a picker. Legal effort levels are shown per profile and refused by name —
-at `/model` and again by the run — when the endpoint lacks them.
+`/model` lists your profiles — each row names the model id, the endpoint it
+will spend (`@api.deepseek.com`), whether it is available and which one is
+live — and switches the session's adapter for the turns that follow. With no
+argument it opens a picker, and the picker SCROLLS (`↕ 1-9 / 73`), so ↑↓ reach
+every profile however many you define. Legal effort levels are shown per
+profile and refused by name — at `/model` and again by the run — when the
+endpoint lacks them.
 
 Profiles live in `~/.kiso/config.json` (ADR-0045). **Credentials are never
 inside it** — a profile only NAMES the environment variable holding its key, or

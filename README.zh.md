@@ -1,6 +1,6 @@
 <p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/hero-dark.png"><img src="assets/hero.png" width="100%" alt="kiso — the durable runtime for AI agents"></picture></p>
 
-<p align="center"><b>v0.40.0</b> · MIT · Node ≥ 22 · <a href="https://kiso.work">kiso.work</a> · <a href="README.md">English edition</a></p>
+<p align="center"><b>v0.40.1</b> · MIT · Node ≥ 22 · <a href="https://kiso.work">kiso.work</a> · <a href="README.md">English edition</a></p>
 
 **kiso** 是一个可靠续跑的 AI agent 运行时。每一次审批、每一个工具结果、每一条事件都在发生的当下写进磁盘,所以一个被打断、崩溃或被强杀的 agent 会**从已提交的持久前缀**接着跑——审批还在、结果还在——而不是从头再来。崩溃时仍在生成中的内容可能被重新生成;结果不明的副作用交给人来裁定。内核**上限**是 2,200 行 TypeScript,事件溯源,每个设计决策都随附一份 ADR,写明为什么,以及何时推翻它。
 
@@ -46,7 +46,7 @@ kiso logout deepseek    # 删除
 
 ## 模型与 effort
 
-`/model` 列出你的 profile,逐条标注可用 / 不可用,并为之后的回合切换会话的适配器;不带参数时打开选择器。每个 profile 的合法 effort 档位都会显示,端点没有的档位在 `/model` 和 run 侧都按名拒绝。
+`/model` 列出你的 profile —— 每行写明模型 id、将要花钱的端点(`@api.deepseek.com`)、是否可用、以及哪一个是当前在跑的 —— 并为之后的回合切换会话的适配器。不带参数时打开选择器,选择器**可以滚动**(`↕ 1-9 / 73`),所以无论你定义多少 profile,↑↓ 都能走到最后一个。每个 profile 的合法 effort 档位都会显示,端点没有的档位在 `/model` 和 run 侧都按名拒绝。
 
 Profile 存在 `~/.kiso/config.json`(ADR-0045)。**凭据永远不在里面**——profile 只**命名**持有密钥的环境变量,或者交给 `kiso login`。优先级:**flag > env > 项目配置 > 用户配置 > 默认**;配置文件坏掉会响亮失败并指名文件。
 
