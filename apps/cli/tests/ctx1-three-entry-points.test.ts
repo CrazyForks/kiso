@@ -15,22 +15,46 @@ import { SessionStore } from "@vincemakes/kiso-runtime";
  * recorded on a 1M model, resumed from a 200k start, cleared its tool
  * results at 100,000 through two doors and at 500,000 through the third.
  *
- * THE GATE DRIVES THE REAL CLI, three times, on the same state. Testing the
- * setter proves the setter; it was never the setter that was wrong.
+ * THE INVARIANT, re-stated by the owner's ruling of 2026-09-21 (`XP-1`: the
+ * CONFIGURATION wins a changed binding, model included): the window and the
+ * tiers follow the EFFECTIVE LIVE BINDING — the model that will actually
+ * answer. Anything else is the mixed binding the ruling exists to prevent:
+ * requests to a 200k model compacted as if it were 1M, where the window is
+ * already too small and kiso still believes it is not.
  *
- * A CONTROL RUNS TOO, and it is the reason the main assertion means
- * anything. The defect's signature is "no boundary was written", and a
- * boundary can be absent for many uninteresting reasons — the session did
- * not run, the history was too small, the faux adapter never took a turn.
- * So the control flips exactly one field, the recorded model id, to one the
- * registry does not know: at the 200k fallback the same history MUST
- * compact. Absence only counts as evidence when presence is also shown.
+ * So the gate has THREE arms, and their names say which binding is live:
+ *   - the CONTROL: the recorded model is one the registry does not know
+ *     (200k fallback) — it drifts, and the same history MUST compact;
+ *   - the SAME binding (the record left exactly as the process wrote it): no
+ *     drift is reported at all, and the window that decides is the process's
+ *     own — the same history compacts for the same reason;
+ *   - a CHANGED binding (recorded 1M, process 200k): the current
+ *     configuration wins, the change is SAID out loud, and the window that
+ *     decides is the live one.
+ *
+ * THE GATE DRIVES THE REAL CLI, three times per arm, on the same state.
+ * Testing the setter proves the setter; it was never the setter that was
+ * wrong.
+ *
+ * A CONTROL RUNS TOO, and it is the reason the assertions mean anything.
+ * The defect's signature is "no boundary was written", and a boundary can be
+ * absent for many uninteresting reasons — the session did not run, the
+ * history was too small, the faux adapter never took a turn. So the control
+ * flips exactly one field, the recorded model id, to one the registry does
+ * not know: at the 200k fallback the same history MUST compact. Absence only
+ * counts as evidence when presence is also shown.
  *
  * ADR-0055 Amendment 1 (A1b): the standing microcompact at half the window
  * is gone (A4). What travels with the model now is the WINDOW the in-run
  * tiers are drawn from, and the observable is the tiers' summary: at 200k
  * ~180k is over every tier, so the door fires whatever the phase; at 1M
  * the soft tier is 400k, and the same history stays whole.
+ *
+ * (The 1M arm cannot run a TURN here: an isolated home has no credentials,
+ * and a model that resolves to 1M comes with a provider that would 401. The
+ * arms above therefore assert the ruling where it is observable without a
+ * network — the drift statement and the boundary count — rather than
+ * pretending a faux adapter serves 1M.)
  */
 
 const CLI = join(new URL("../..", import.meta.url).pathname, "cli", "dist", "index.js");
@@ -100,8 +124,10 @@ async function seedHistory(home: string): Promise<void> {
 
 /** Rewrite ONLY the recorded model id. Everything the drift check looks at —
  *  the provider, the system prompt digest, the tool hashes — is left exactly
- *  as the CLI wrote it, so the session restores rather than being rebuilt. */
-function recordModel(home: string, modelId: string): void {
+ *  as the CLI wrote it, so the session restores rather than being rebuilt.
+ *  `null` leaves the record alone: the SAME-binding arm. */
+function recordModel(home: string, modelId: string | null): void {
+	if (modelId === null) return;
 	const dir = join(home, "sessions");
 	const metaName = readdirSync(dir).find((f) => f.endsWith(".meta.json"));
 	const path = join(dir, metaName!);
@@ -117,7 +143,7 @@ function boundaries(home: string): number {
 }
 
 /** One door, from a clean isolated home: create, seed, record, reopen. */
-async function openThrough(args: readonly string[], modelId: string): Promise<number> {
+async function openThrough(args: readonly string[], modelId: string | null): Promise<{ boundaries: number; out: string }> {
 	const { env, dirs } = isolatedEnv({ KISO_FAUX_SCRIPT: fauxScript() });
 
 	// F34-R1: EVERY step is asserted to have worked before the boundary
@@ -141,10 +167,10 @@ async function openThrough(args: readonly string[], modelId: string): Promise<nu
 		`${args.join(" ")} produced no NEW completed terminal — it did not actually run a turn`,
 	).toBeGreaterThan(before);
 
-	return boundaries(dirs.home);
+	return { boundaries: boundaries(dirs.home), out: `${reopened.stdout}${reopened.stderr}` };
 }
 
-describe("CTX-1 F34-1: every entry point binds the restored session's threshold", () => {
+describe("CTX-1 F34-1: every entry point binds the EFFECTIVE session model's window", () => {
 	const doors: readonly (readonly [string, readonly string[]])[] = [
 		["kiso -p", ["-p", "continue", SESSION]],
 		["kiso resume", ["resume", SESSION, "continue"]],
@@ -152,10 +178,23 @@ describe("CTX-1 F34-1: every entry point binds the restored session's threshold"
 	];
 
 	it.each(doors)("%s: the CONTROL compacts — an unknown model falls back to 200k, so ~180k is over its tiers", async (_name, args) => {
-		expect(await openThrough(args, "no-such-model-the-registry-knows")).toBeGreaterThanOrEqual(1);
+		const r = await openThrough(args, "no-such-model-the-registry-knows");
+		expect(r.out, "and the change is said out loud").toContain("binding changed");
+		expect(r.boundaries).toBeGreaterThanOrEqual(1);
 	}, 60_000);
 
-	it.each(doors)("%s: a session recorded on a 1M model does NOT compact at the startup window", async (_name, args) => {
-		expect(await openThrough(args, "claude-sonnet-5")).toBe(0);
+	it.each(doors)("%s: the SAME binding (the record untouched): no drift is claimed, and the window is the live one", async (_name, args) => {
+		const r = await openThrough(args, null);
+		expect(r.out, "nothing moved, so nothing is announced").not.toContain("binding changed");
+		expect(r.boundaries, "and the ~180k history is still over the 200k window's tiers").toBeGreaterThanOrEqual(1);
+	}, 60_000);
+
+	it.each(doors)("%s: a CHANGED binding (recorded 1M, process 200k): the CURRENT binding wins and IS the window", async (_name, args) => {
+		// The mixed binding this arm forbids: requests to the 200k model while
+		// the 1M window decided when to compact. The ruling of 2026-09-21 made
+		// the live binding the subject, so the window moves with it.
+		const r = await openThrough(args, "claude-sonnet-5");
+		expect(r.out, "the change is stated, not silent").toContain("binding changed");
+		expect(r.boundaries, "the LIVE window decides, never the recorded model's").toBeGreaterThanOrEqual(1);
 	}, 60_000);
 });
