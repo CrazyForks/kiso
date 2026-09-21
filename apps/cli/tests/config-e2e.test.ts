@@ -111,7 +111,7 @@ describe("merge round B — /model on a real PTY (dual profiles)", () => {
 		const out = stripANSI(raw);
 		expect(out).toContain("model — current: faux"); // the panel's header, where "model: faux" used to print
 		expect(out).toContain("openai-compat/deepseek-v4-flash");
-		expect(out).toContain("profile: ds");
+		expect(out, "the row is its LABEL — the profile key is not repeated per row any more (the owner's dogfood)").not.toContain("profile: ds");
 		expect(out).toContain("anthropic/claude-sonnet-5");
 		expect(out).toContain("unavailable"); // the qualifier rides the row, as (unavailable) rode the line
 		// the picker's CLI half: each row shows the model's LEGAL effort levels with the default bracketed
@@ -175,7 +175,7 @@ describe("merge round B — the project config rides the E3 trust gate", () => {
 		// on the panel's header and option row instead of two printed lines
 		expect(out).toContain("model — current: proj-model-x"); // the project's model drives the session
 		expect(out).toContain("openai-compat/proj-model-x");
-		expect(out).toContain("profile: proj-model");
+		expect(out, "nor here: a row's note is `current`/`unavailable` only").not.toContain("profile: proj-model");
 	});
 
 	it("projectTrust \"never\" (user config) → no ask, nothing loads", () => {
