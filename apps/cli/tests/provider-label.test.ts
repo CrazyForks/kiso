@@ -13,7 +13,7 @@ import { profileProviderLabel, providerHost, providerLabel } from "../src/provid
 describe("providerHost — the one label worth spending columns on", () => {
 	it("reads the host out of a real endpoint, dropping scheme and path", () => {
 		expect(providerHost("https://api.commandcode.ai/provider/v1")).toBe("api.commandcode.ai");
-		expect(providerHost("http://localhost:11434/v1")).toBe("localhost");
+		expect(providerHost("http://localhost:11434/v1"), "the PORT is part of where the request goes").toBe("localhost:11434");
 		expect(providerHost("https://api.deepseek.com")).toBe("api.deepseek.com");
 	});
 

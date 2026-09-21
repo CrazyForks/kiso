@@ -28,7 +28,11 @@ export function providerHost(baseUrl?: string): string | null {
 	if (baseUrl === undefined || baseUrl.trim() === "") return null;
 	try {
 		const url = new URL(baseUrl);
-		const host = url.hostname;
+		// REVIEW (2026-09-21): `host`, not `hostname` — the PORT is part of the
+		// answer this label exists to give (`localhost:11434` and
+		// `localhost:8000` are two different places to spend, and both read as
+		// `@localhost` under `hostname`).
+		const host = url.host;
 		return host === "" ? null : host;
 	} catch {
 		return null;

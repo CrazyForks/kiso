@@ -535,7 +535,16 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 			// the model, the host the request goes to, the profile it came
 			// from and the key it spends. The status row stays short; this
 			// line is the disambiguation two same-named profiles need.
-			bodyLog(`model ${agentModel}${providerLabel(agentBaseUrl)}${currentModelName === "faux" ? "" : ` · profile ${currentModelName}`}`);
+			//
+			// REVIEW (2026-09-21): the profile is named only when what is in
+			// hand IS a profile key. `currentModelName` holds whatever the
+			// resolution produced — a profile alias after `/model`, a MODEL ID
+			// after a switch or a resume — so printing it unconditionally
+			// claimed `profile deepseek-v4-flash` for a session that was
+			// restored, not switched. (The real fix is to stop overloading that
+			// variable; until then, a label that cannot lie.)
+			const profileOf = configModels[currentModelName] === undefined ? "" : ` · profile ${currentModelName}`;
+			bodyLog(`model ${agentModel}${providerLabel(agentBaseUrl)}${profileOf}`);
 			ctx.input.prompt();
 		});
 		return;
@@ -639,7 +648,7 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 									// the model id — the id alone marked both such rows, or
 									// neither. The row's own provider rides the label, so two
 									// rows that share an id still read differently.
-									const marks = [`profile: ${name}`, ...(profileAvailable(profile) ? [] : ["unavailable"]), ...(name === currentModelName || (profile.model === agentModel && (profile.baseUrl ?? "") === (agentBaseUrl ?? "")) ? ["current"] : [])];
+									const marks = [`profile: ${name}`, ...(profileAvailable(profile) ? [] : ["unavailable"]), ...(name === currentModelName ? ["current"] : [])];
 									const host = profileProviderLabel(profile.kind, profile.baseUrl);
 									return { label: `${profile.kind}/${profile.model}${host === "" ? "" : ` ${host}`}`, note: marks.join(" · "), ...effortAxis(profile) };
 								}),
