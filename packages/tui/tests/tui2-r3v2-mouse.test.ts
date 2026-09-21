@@ -81,26 +81,40 @@ describe("TUI2-R3v2 ② — the mouse never leaks", () => {
 		expect(out()).toContain(MOUSE_OFF);
 	});
 
-	it("a panel OPENS mouse reporting and CLOSES it — never a byte wider than the surface", () => {
+	it("no surface TAKES the mouse — a panel opens and closes without one reporting byte", () => {
+		// 2026-09-21 (finding DC-56): reporting on means the terminal stops
+		// scrolling its own scrollback, so a blocking question used to lock
+		// the history exactly when a person wants to read it back. The
+		// panel is answered by keys; the wheel stays the terminal's.
 		const { editor, out, clear } = captured();
 		editor.enter();
 		clear();
 		editor.beginPanel(view, () => {});
-		expect(out(), "opening a selection surface enables SGR 1006").toContain(MOUSE_ON);
+		expect(out(), "opening a panel must not enable SGR 1006").not.toContain(MOUSE_ON);
 		clear();
 		editor.feed(enc("\r")); // confirm — the panel closes
-		expect(out(), "closing it disables SGR 1006").toContain(MOUSE_OFF);
+		expect(out(), "and the close has nothing to undo").not.toContain(MOUSE_OFF);
 		editor.exit();
 	});
 
-	it("a CANCELLED panel disables it too — every close is a close", () => {
+	it("every close path holds the same ruling — cancelled included", () => {
 		const { editor, out, clear } = captured();
 		editor.enter();
 		editor.beginPanel(view, () => {});
 		clear();
 		editor.cancelPanel();
-		expect(out()).toContain(MOUSE_OFF);
+		expect(out()).not.toContain(MOUSE_ON);
+		expect(out(), "nothing was ever on, so nothing is switched off").not.toContain(MOUSE_OFF);
 		editor.exit();
+	});
+
+	it("exit() with a panel STILL OPEN disables it — the crash-exit path", () => {
+		const { editor, out, clear } = captured();
+		editor.enter();
+		editor.beginPanel(view, () => {});
+		clear();
+		editor.exit();
+		expect(out()).toContain(MOUSE_OFF);
 	});
 
 	it("exit() with a panel STILL OPEN disables it — the crash-exit path", () => {
