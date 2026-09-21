@@ -27,6 +27,7 @@ import { describe, expect, it } from "vitest";
 import type { Adapter } from "@vincemakes/kiso-core";
 import { ToolRegistry } from "@vincemakes/kiso-core";
 import { createAgent, SessionStore } from "../src/index.js";
+import { resolveContinuationScope } from "../src/provider/manifest.js";
 import { buildProfile, profilePath, readProfile, writeProfile } from "../src/profile.js";
 
 const DONE: Adapter = {
@@ -101,6 +102,78 @@ describe("XP-1 — the recorded binding is history, never a gate", () => {
 		expect(meta.kind === "ok" && meta.profile.revision).toBe(3);
 		expect(meta.kind === "ok" && meta.profile.provider?.providerId).toBe("custom");
 		expect(session.driftAcknowledgement?.reasons[0]).toMatch(/deepseek/);
+	});
+
+	// REVIEW (2026-09-21): `providerId` alone is not an identity. Two CUSTOM
+	// endpoints are two places to spend, and before this case existed the
+	// classifier waved them through — the session then ran the RECORDED model
+	// against the CURRENT endpoint (the binding's passengers from two
+	// different sources).
+	it("two CUSTOM endpoints are two places to spend — a moved endpoint is a changed binding", async () => {
+		const dir = freshDir();
+		await loggedSession("g2b", dir);
+		writeProfile(
+			dir,
+			"g2b",
+			buildProfile({
+				revision: 2,
+				modelId: "deepseek-flash",
+				provider: { providerId: "custom", apiId: "openai-chat", modelId: "deepseek-flash", endpoint: "https://gateway-a.example.com" },
+				registry: new ToolRegistry(),
+			}),
+		);
+		const agent = createAgent({
+			model: "deepseek/deepseek-v4-flash",
+			provider: "openai-compat",
+			baseUrl: "https://gateway-b.example.com",
+			store: new SessionStore(dir),
+			tools: [],
+			adapter: DONE,
+		});
+		const session = await agent.session({ id: "g2b" });
+		expect(session.model, "the current configuration runs").toBe("deepseek/deepseek-v4-flash");
+		const meta = readProfile(dir, "g2b");
+		expect(meta.kind === "ok" && meta.profile.revision, "and the change is durable history").toBe(3);
+		expect(meta.kind === "ok" && meta.profile.provider?.endpoint, "what will answer the next request").toBe("https://gateway-b.example.com");
+		expect(session.driftAcknowledgement?.reasons.join("; "), "what moved is the ENDPOINT — `custom` said so on both sides").toMatch(/gateway-a\.example\.com/);
+	});
+
+	// The owner's ruling of 2026-09-21, pinned so a later "the current binding
+	// always wins" reading cannot quietly overwrite it: with the SAME provider
+	// identity a model switch still restores the session's own model and
+	// reasoning. The current binding wins where the recorded one cannot be
+	// SERVED (provider, API, endpoint) — never in the model's name alone.
+	it("the owner's ruling: with the SAME provider a model switch still restores the session's OWN model", async () => {
+		const dir = freshDir();
+		await loggedSession("g2c", dir);
+		// The recorded binding is built by the SAME resolver the process uses,
+		// with only the model changed: a known origin carries no endpoint field
+		// (the provider id IS the endpoint), so this case isolates the model.
+		const recordedScope = resolveContinuationScope("openai-compat", "deepseek-flash", "https://api.deepseek.com");
+		expect(recordedScope, "a known origin resolves to a scope").toBeDefined();
+		writeProfile(
+			dir,
+			"g2c",
+			buildProfile({
+				revision: 2,
+				modelId: "deepseek-flash",
+				provider: recordedScope!,
+				registry: new ToolRegistry(),
+			}),
+		);
+		const agent = createAgent({
+			model: "gpt-6-astra",
+			provider: "openai-compat",
+			baseUrl: "https://api.deepseek.com",
+			store: new SessionStore(dir),
+			tools: [],
+			adapter: DONE,
+		});
+		const session = await agent.session({ id: "g2c" });
+		expect(session.model, "the session's own model is the truthfulness core").toBe("deepseek-flash");
+		const meta = readProfile(dir, "g2c");
+		expect(meta.kind === "ok" && meta.profile.revision, "nothing was rewritten: the record still answers").toBe(2);
+		expect(session.driftAcknowledgement, "and there is nothing to acknowledge").toBeNull();
 	});
 
 	it("the INTEGRITY cases are still BLOCKED — a binding ruling is not an integrity ruling", async () => {

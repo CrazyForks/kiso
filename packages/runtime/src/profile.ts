@@ -247,8 +247,21 @@ export function assessProfileDrift(
 	const c = current.provider;
 	if ((r === null) !== (c === null)) {
 		reasons.push(`the recorded binding is ${r === null ? "unscoped" : `${r.providerId}/${r.modelId}`} but the current process serves ${c === null ? "an unscoped adapter" : `${c.providerId}/${c.modelId}`}`);
-	} else if (r !== null && c !== null && r.providerId !== c.providerId) {
-		reasons.push(`the recorded provider is ${r.providerId} but the current process serves ${c.providerId}`);
+	} else if (r !== null && c !== null) {
+		// WHO ANSWERS is an identity, and `providerId` alone is not one:
+		// `custom` names a CLASS — two custom endpoints are two different
+		// places to spend — so an endpoint (or API flavour) that moved is a
+		// changed binding like any other. Found in review of this round.
+		//
+		// The MODEL is deliberately not compared here, and that is the owner's
+		// ruling of 2026-09-21, not an omission: with the same provider a
+		// model switch still restores the session's own model and reasoning
+		// (the truthfulness core). The current binding wins where the recorded
+		// one cannot be SERVED by this process — the provider, the API and the
+		// endpoint are exactly that surface; the model's name is not.
+		if (r.providerId !== c.providerId) reasons.push(`the recorded provider is ${r.providerId} but the current process serves ${c.providerId}`);
+		if (r.apiId !== c.apiId) reasons.push(`the recorded API is ${r.apiId} but the current process serves ${c.apiId}`);
+		if ((r.endpoint ?? null) !== (c.endpoint ?? null)) reasons.push(`the recorded endpoint is ${r.endpoint ?? "(none)"} but the current process serves ${c.endpoint ?? "(none)"}`);
 	}
 	if (recorded.systemPromptDigest !== current.systemPromptDigest) {
 		notes.push(`the composed system prompt differs from the recorded one (${recorded.systemPromptDigest.slice(0, 12)}… → ${current.systemPromptDigest.slice(0, 12)}…)`);
