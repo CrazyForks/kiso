@@ -50,6 +50,11 @@ export interface BandHost {
 	line(): string;
 	/** The buffer with its paste capsules expanded — the text that would leave the editor. */
 	expandPastes(line: string): string;
+	/** The pick panel's window as the RENDERER drew it (review of this round):
+	 *  the size depends on the frame's budget, so the digit keys must be handed
+	 *  the value instead of deriving it again from PICK_MAX. Absent → the input
+	 *  layer falls back to its own derivation. */
+	pickWindow?(): { first: number; size: number } | null;
 	/** Empty the buffer: chars, cursor and the ↑↓ goal column. */
 	clear(): void;
 	/** Type one code point at the cursor. */
@@ -521,7 +526,7 @@ export class PanelInput {
 		// turns a visible position into an option index — the same
 		// `pickWindow` the renderer drew the rows with, so what the row says
 		// and what the key does cannot drift apart.
-		const { first, size } = pickWindow(panel.pick.cursor, count, PICK_MAX);
+		const { first, size } = this.host.pickWindow?.() ?? pickWindow(panel.pick.cursor, count, PICK_MAX);
 		if (index < 0 || index >= size) return;
 		const target = first + index;
 		if (target >= count) return;

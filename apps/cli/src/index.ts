@@ -482,6 +482,7 @@ function makeLineInput(): LineInput {
 		// the panel's option rows, so the compositor is what the editor asks
 		// where they are. Neither side computes the other's geometry.
 		editor.bindPanelRows(() => dock.panelOptionRows());
+		editor.bindPickWindow(() => dock.visiblePickWindow());
 		dock.bindMenu(() => editor.menuState()); // v3 §04: the slash-command menu
 		editor.bindAtItems(atFiles); // KC3 §5: the file source — listed per OPEN
 		dock.bindAt(() => editor.atState()); // KC3 §4: the picker's band
