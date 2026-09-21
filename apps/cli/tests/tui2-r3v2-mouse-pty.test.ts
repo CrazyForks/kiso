@@ -45,19 +45,22 @@ describe("TUI2-R3v2 ② — the mouse never leaks (real PTY, byte-asserted)", ()
 		expect(raw, "the defensive reset runs regardless").toContain(OFF_1006);
 	});
 
-	it("the panel turns it ON, and the answer turns it OFF — in that order", () => {
+	it("a PANEL does not turn reporting on — the terminal keeps its wheel, and the history stays readable", () => {
+		// the owner's ruling (2026-09-21, finding DC-56): a terminal that is
+		// reporting mouse events does not scroll its own scrollback, so a
+		// blocking question used to lock the history. kiso enables reporting
+		// for NO surface now; the panel is answered by its keys.
 		const { env } = isolatedEnv({ KISO_FAUX_SCRIPT: script(), KISO_MODE: "default" });
-		const raw = ptyRun(["--mode", "default", "r3v2-mouse"], env as NodeJS.ProcessEnv, {
+		const raw = ptyRun(["--mode", "default", "r3v2-nomouse"], env as NodeJS.ProcessEnv, {
 			feeds: [
 				["▌ ", "go\r"],
 				["all done.", "exit\r"],
 			],
 			delays: [[2, "\r"]],
 		});
-		const on = raw.indexOf(ON_1006);
-		expect(on, "the panel must enable SGR 1006").toBeGreaterThan(-1);
-		expect(raw.indexOf(ON_1000), "?1000 rides with it").toBeGreaterThan(-1);
-		expect(raw.indexOf(OFF_1006, on), "the close must disable it").toBeGreaterThan(on);
+		expect(raw, "no surface enables SGR 1006").not.toContain(ON_1006);
+		expect(raw, "nor ?1000").not.toContain(ON_1000);
+		expect(raw, "the defensive reset still rides entry and exit").toContain(OFF_1006);
 	});
 
 	it("THE INVARIANT: the stream's LAST mouse-mode word is always the disable", () => {
@@ -82,9 +85,13 @@ describe("TUI2-R3v2 ② — the mouse never leaks (real PTY, byte-asserted)", ()
 		expect(raw.lastIndexOf(OFF_1006)).toBeGreaterThan(raw.lastIndexOf(ON_1006));
 	});
 
-	it("a CLICK on an option row confirms it — the injected SGR press runs the tool", () => {
-		// the panel's option rows sit near the bottom of the live region; the
-		// gate finds the bar's own row by asking the terminal, then clicks it.
+	it("a CLICK still answers the panel when something else left the mouse on", () => {
+		// kiso no longer ENABLES reporting (DC-56), but reporting is process
+		// state the TERMINAL keeps: a terminal left reporting by another
+		// program still delivers the press, and the panel's one gesture must
+		// still work — the panel's rows sit near the bottom of the live
+		// region; the gate finds the bar's own row by asking the terminal,
+		// then clicks it.
 		const { env } = isolatedEnv({ KISO_FAUX_SCRIPT: script(), KISO_MODE: "default" });
 		const raw = ptyRun(["--mode", "default", "r3v2-click"], env as NodeJS.ProcessEnv, {
 			feeds: [
