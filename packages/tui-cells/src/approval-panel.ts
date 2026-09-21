@@ -880,14 +880,18 @@ export function pickBlockRows(view: PanelView, state: PickRuntime, W: number, ma
 		// which it already spends on `profile: <name>`. A second axis that
 		// truncates on a normal terminal is not a second axis.
 		const strip = spec.options[state.cursor]?.levels !== undefined && state.phase === "options" ? 1 : 0;
-		const chrome = 5 + strip + (spec.options.length > Math.min(Math.max(1, maxRows - 5 - strip), PICK_MAX) ? 1 : 0);
-		const budget = Math.max(1, maxRows - chrome);
 		// 2026-09-21 (finding DC-58, the owner's report): the window FOLLOWS the
 		// cursor instead of being pinned to the top. It used to be
 		// `slice(0, min(budget, PICK_MAX))`, so with a 60-profile config the
 		// keyboard reached the first nine and the rest were reachable only by
-		// typing the name — which is what `/model` exists to replace.
-		const win = pickWindow(state.cursor, spec.options.length, Math.min(budget, PICK_MAX));
+		// typing the name.
+		//
+		// REVIEW of this round: the SIZE depends on the frame's budget, so the
+		// renderer and the digit keys used to disagree on a short terminal
+		// (drawn rows 1-2, keys computing against nine). `pickWindowOf` is the
+		// one derivation both sides use — the renderer draws it, the input layer
+		// is HANDED it (`visiblePickWindow`).
+		const win = pickWindowOf(view, state.cursor, state.phase, maxRows);
 		const shown = spec.options.slice(win.first, win.first + win.size);
 		// R2: the note takes a COLUMN, not three spaces after a label of
 		// whatever length this row happened to have, and the cursor row
@@ -975,6 +979,23 @@ export const PICK_MAX = 9;
  *  Pure, and the ONE copy: the renderer, the digit keys and the click
  *  hit-test all ask this function rather than each deriving an offset.
  */
+/** The pick panel's window for THIS frame's budget — the one derivation the
+ *  renderer and the input layer share (review of this round).
+ *
+ *  The renderer draws it; `Dock.visiblePickWindow` hands the SAME value to the
+ *  digit keys, because a size derived twice is a size that can disagree — and
+ *  on a short terminal it did (two rows drawn, nine assumed, so `1` could mean
+ *  a row nobody could see). `phase` is compared as a string so this module
+ *  keeps its zero-dependency contract.
+ */
+export function pickWindowOf(view: PanelView, cursor: number, phase: string, maxRows: number): { first: number; size: number } {
+	const count = view.pick?.options.length ?? 0;
+	const strip = view.pick?.options[cursor]?.levels !== undefined && phase === "options" ? 1 : 0;
+	const chrome = 5 + strip + (count > Math.min(Math.max(1, maxRows - 5 - strip), PICK_MAX) ? 1 : 0);
+	const budget = Math.max(1, maxRows - chrome);
+	return pickWindow(cursor, count, Math.min(budget, PICK_MAX));
+}
+
 export function pickWindow(cursor: number, count: number, size: number): { first: number; size: number } {
 	const win = Math.max(1, Math.min(size, count));
 	if (count <= win) return { first: 0, size: win };
