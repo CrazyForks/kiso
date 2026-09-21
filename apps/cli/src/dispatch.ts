@@ -12,8 +12,9 @@ import type { AgentSession } from "@vincemakes/kiso-runtime";
 import { MODES, MODE_NOTE, OFFERED_MODES, getMode, setMode } from "./mode.js";
 import { clipboardWrite, lastAnswer } from "./clipboard.js";
 import { protectedBangReason, protectedShellVerdict } from "./protected-shell.js";
-import { agentModel, body, bodyLog, codingToolOptions, protectedFiles, kisoHome, configModels, dock, lastBinding, loadedSkillsCatalog, mergedConfig, readContextLedger, retryOnRow, sessionsDir, setAgentModel, setConfiguredWindow, setCurrentModelName, setModelChoice, setRetryShown, type LineInput , setLastBinding } from "./state.js";
+import { agentBaseUrl, currentModelName, agentModel, body, bodyLog, codingToolOptions, protectedFiles, kisoHome, configModels, dock, lastBinding, loadedSkillsCatalog, mergedConfig, readContextLedger, retryOnRow, sessionsDir, setAgentModel, setConfiguredWindow, setCurrentModelName, setModelChoice, setRetryShown, type LineInput , setLastBinding } from "./state.js";
 import { adapterOptionsFor } from "./auth/adapter-options.js";
+import { profileProviderLabel, providerLabel } from "./provider-label.js";
 import { contextWindowTokens, microcompactThresholdFor, startStatusSpinner } from "./chat.js";
 import { authForProfile, directWriteProfile, profileAvailable, resolveContextWindow, unavailableReason, type ModelProfile } from "./config.js";
 import { shellTool } from "@vincemakes/kiso-tools-node";
@@ -514,6 +515,12 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 			bodyLog(`session ${ctx.session.id}`);
 			bodyLog(`${ctx.session.log.all.length} events`);
 			bodyLog(`ctx ${ctxPct}`);
+			// The owner, 2026-09-21: /status is where "what am I actually
+			// running on" is answered, so the identity is spelled out HERE —
+			// the model, the host the request goes to, the profile it came
+			// from and the key it spends. The status row stays short; this
+			// line is the disambiguation two same-named profiles need.
+			bodyLog(`model ${agentModel}${providerLabel(agentBaseUrl)}${currentModelName === "faux" ? "" : ` · profile ${currentModelName}`}`);
 			ctx.input.prompt();
 		});
 		return;
@@ -605,14 +612,21 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 					ctx.input.panelAsk(
 						modelPickView(
 							{
-								header: `model — current: ${agentModel}`,
+								header: `model — current: ${agentModel}${providerLabel(agentBaseUrl)}`,
 								options: names.map((name) => {
 									const profile = configModels[name]!;
 									// the note keeps what tells two rows apart; the levels
 									// left it for the axis below (they were being cut off
 									// the end of the note column at 100 columns).
-									const marks = [`profile: ${name}`, ...(profileAvailable(profile) ? [] : ["unavailable"]), ...(profile.model === agentModel ? ["current"] : [])];
-									return { label: `${profile.kind}/${profile.model}`, note: marks.join(" · "), ...effortAxis(profile) };
+									// The owner, 2026-09-21: two profiles can name ONE model
+									// id and reach two accounts, so the current mark follows
+									// the PROFILE the session is on (`currentModelName`), not
+									// the model id — the id alone marked both such rows, or
+									// neither. The row's own provider rides the label, so two
+									// rows that share an id still read differently.
+									const marks = [`profile: ${name}`, ...(profileAvailable(profile) ? [] : ["unavailable"]), ...(name === currentModelName ? ["current"] : [])];
+									const host = profileProviderLabel(profile.kind, profile.baseUrl);
+									return { label: `${profile.kind}/${profile.model}${host === "" ? "" : ` ${host}`}`, note: marks.join(" · "), ...effortAxis(profile) };
 								}),
 								// PH-1a (finding PH-F4): the example must be a syntax
 								// directWriteProfile actually ACCEPTS — the old
@@ -773,7 +787,7 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 							// (and the owner's) read `gpt-6-astra · CH 92%`, the new
 							// model beside the previous model's figure.
 							ctx.modelSwitched();
-							body.notice(`model → ${profName} (${profile.model}${effortTok !== undefined ? ` · ${effortTok}` : ""}) — takes effect on the next turn`);
+							body.notice(`model → ${profName} (${profile.model}${providerLabel(profile.baseUrl) === "" ? "" : ` ${providerLabel(profile.baseUrl)}`}${effortTok !== undefined ? ` · ${effortTok}` : ""}) — takes effect on the next turn`);
 						}
 					}
 				} catch (err) {
