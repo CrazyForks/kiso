@@ -648,7 +648,12 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 									// the model id — the id alone marked both such rows, or
 									// neither. The row's own provider rides the label, so two
 									// rows that share an id still read differently.
-									const marks = [`profile: ${name}`, ...(profileAvailable(profile) ? [] : ["unavailable"]), ...(name === currentProfileName ? ["current"] : [])];
+									// 0.40.1 (the owner's dogfood, 2026-09-21): the `profile: <key>` prefix
+									// is gone — the row already names the model and its endpoint, and the
+									// profile key is what `/model <name>` takes, not what a chooser
+									// reading a list needs. What remains is what the chooser CANNOT
+									// infer: availability, and which one is live.
+									const marks = [...(profileAvailable(profile) ? [] : ["unavailable"]), ...(name === currentProfileName ? ["current"] : [])];
 									const host = profileProviderLabel(profile.kind, profile.baseUrl);
 									return { label: `${profile.kind}/${profile.model}${host === "" ? "" : ` ${host}`}`, note: marks.join(" · "), ...effortAxis(profile) };
 								}),

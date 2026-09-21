@@ -898,7 +898,11 @@ export function pickBlockRows(view: PanelView, state: PickRuntime, W: number, ma
 		// wears the bar and the arrow like every other list in the
 		// product. This panel was the last one still saying "selected"
 		// with bold alone.
-		const lead = (o: PickOption, i: number, cursor: boolean): string => `${cursor ? "\u2192" : " "} ${i + 1} ${escapeTerminal(o.label)}`;
+		// 0.40.1 (the owner's dogfood, 2026-09-21): the row NUMBER is gone. The
+		// digits still pick by visible position (the keys sheet documents them),
+		// but a number the person reads as decoration is noise the label pays
+		// for at every width — and the owner picks with ↑↓ and the mouse.
+		const lead = (o: PickOption, _i: number, cursor: boolean): string => `${cursor ? "\u2192" : " "} ${escapeTerminal(o.label)}`;
 		const widest = Math.max(...shown.map((o, i) => visibleWidth(lead(o, i, false))));
 		const stop = shown.some((o) => o.note !== undefined) && widest + 2 <= Math.floor(room / 2) && room - widest - 2 >= 18 ? widest + 2 : 0;
 		for (let i = 0; i < shown.length; i += 1) {

@@ -13,7 +13,13 @@
  *   - the window follows the cursor (`pickWindow`) and the block says which
  *     rows are on screen (`↕ A-B / N — ↑↓ scrolls`);
  *   - a digit names the row ON SCREEN, so what the row shows and what the
- *     key does are the same number.
+ *     key does are the same position.
+ *
+ * 0.40.1 (the owner's dogfood, the same day): the rows carry NO number and no
+ * `profile: <key>` note. The labels are what a chooser reads; the digits are
+ * still a shortcut by visible position, which is why the position assertions
+ * below stay (they are what the keys mean) while the row assertions are about
+ * labels.
  */
 
 import { describe, expect, it } from "vitest";
@@ -41,17 +47,17 @@ function rows(cursor: number, n = 60): string[] {
 	return panelRowsOf({ view, phase: "options", cursor, pick: { cursor, phase: "options", level: null } }, 80, 24).map(strip);
 }
 
-/** The `→` row's option label, and the numbered option rows in order. */
-function drawn(rs: readonly string[]): { numbered: string[]; cursorRow: string | null } {
-	const numbered: string[] = [];
+/** The option rows as drawn: their labels in order, and the cursor's row. */
+function drawn(rs: readonly string[]): { labels: string[]; cursorRow: string | null } {
+	const labels: string[] = [];
 	let cursorRow: string | null = null;
 	for (const r of rs) {
-		const m = /(\d+) (model-\d+)/.exec(r);
+		const m = /(model-\d+)/.exec(r);
 		if (m === null) continue;
-		numbered.push(m[2]!);
+		labels.push(m[1]!);
 		if (r.includes("\u2192")) cursorRow = r;
 	}
-	return { numbered, cursorRow };
+	return { labels, cursorRow };
 }
 
 describe("DC-58 — pickWindow: the window follows the cursor", () => {
@@ -75,9 +81,9 @@ describe("DC-58 — pickWindow: the window follows the cursor", () => {
 });
 
 describe("DC-58 — the block draws the window and names the rows on screen", () => {
-	it("sixty profiles: the first screen is rows 1-9, and the block SAYS so", () => {
+	it("sixty profiles: the first screen is the first nine rows, and the block SAYS so", () => {
 		const d = drawn(rows(0));
-		expect(d.numbered).toEqual(["model-1", "model-2", "model-3", "model-4", "model-5", "model-6", "model-7", "model-8", "model-9"]);
+		expect(d.labels).toEqual(["model-1", "model-2", "model-3", "model-4", "model-5", "model-6", "model-7", "model-8", "model-9"]);
 		expect(rows(0).join("\n"), "the range names the window, and the gesture that moves it").toContain("↕ 1-9 / 60 — ↑↓ scrolls");
 		expect(rows(0).join("\n"), "the old sentence sent you to type the name; the list scrolls now").not.toContain("takes any of them");
 	});
@@ -85,19 +91,32 @@ describe("DC-58 — the block draws the window and names the rows on screen", ()
 	it("walking past the ninth row scrolls the window — and the cursor row is never off screen", () => {
 		const d = drawn(rows(12)); // the thirteenth option
 		expect(d.cursorRow, "the cursor's option is DRAWN").toContain("model-13");
-		expect(d.numbered).toEqual(["model-5", "model-6", "model-7", "model-8", "model-9", "model-10", "model-11", "model-12", "model-13"]);
+		expect(d.labels).toEqual(["model-5", "model-6", "model-7", "model-8", "model-9", "model-10", "model-11", "model-12", "model-13"]);
 		expect(rows(12).join("\n")).toContain("↕ 5-13 / 60 — ↑↓ scrolls");
 	});
 
 	it("the last screen is full and the cursor sits on the last option", () => {
 		const d = drawn(rows(59));
-		expect(d.numbered).toEqual(["model-52", "model-53", "model-54", "model-55", "model-56", "model-57", "model-58", "model-59", "model-60"]);
+		expect(d.labels).toEqual(["model-52", "model-53", "model-54", "model-55", "model-56", "model-57", "model-58", "model-59", "model-60"]);
 		expect(d.cursorRow).toContain("model-60");
 	});
 
 	it("a list that fits shows no range line at all", () => {
 		expect(rows(0, 9).join("\n")).not.toContain("↕");
-		expect(drawn(rows(0, 3)).numbered).toEqual(["model-1", "model-2", "model-3"]);
+		expect(drawn(rows(0, 3)).labels).toEqual(["model-1", "model-2", "model-3"]);
+	});
+
+	it("0.40.1: a row is its LABEL — no number in front, no profile note behind", () => {
+		const bare: PickSpec = {
+			header: "model — current: x",
+			options: Array.from({ length: 3 }, (_, i) => ({ label: `openai-compat/model-${i + 1} @api.example.com` })),
+			typeHint: "type provider/model directly",
+		};
+		const rs = panelRowsOf({ view: modelPickView(bare, "▸ idle"), phase: "options", cursor: 0, pick: { cursor: 0, phase: "options", level: null } }, 80, 24).map(strip);
+		const text = rs.join("\n");
+		expect(text, "the label, not `1 <label>`").toContain("openai-compat/model-1 @api.example.com");
+		expect(text, "no digit column").not.toMatch(/\d+ openai-compat/);
+		expect(text, "and no per-row profile key").not.toContain("profile:");
 	});
 });
 

@@ -25,7 +25,7 @@ const strip = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "");
 
 function many(n: number): PickSpec {
 	return {
-		header: "model — current: model-1 (openai-compat)",
+		header: "model — current: deepseek-v4-flash (openai-compat)",
 		options: Array.from({ length: n }, (_, i) => ({ label: `model-${i + 1}`, note: `profile: p${i + 1}` })),
 		typeHint: "type provider/model directly",
 	};
@@ -36,7 +36,7 @@ function drawnLabels(cursor: number, maxRows: number, n = 60): string[] {
 	const view = modelPickView(many(n), "▸ idle");
 	return panelRowsOf({ view, phase: "options", cursor, pick: { cursor, phase: "options", level: null } }, 80, maxRows)
 		.map(strip)
-		.map((r) => /(\d+) (model-\d+)/.exec(r)?.[2] ?? null)
+		.map((r) => /(model-\d+)/.exec(r)?.[1] ?? null)
 		.filter((x): x is string => x !== null);
 }
 
