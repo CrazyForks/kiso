@@ -167,6 +167,7 @@ export class AgentRuntime {
 		if (meta.kind === "ok") {
 			const drift = assessProfileDrift(meta.profile, {
 				provider: startupScope ?? null,
+				modelId: this.#definition.model,
 				systemPromptDigest: candidate.systemPromptDigest,
 				tools: candidate.tools,
 			});

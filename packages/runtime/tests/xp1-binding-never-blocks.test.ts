@@ -138,12 +138,12 @@ describe("XP-1 — the recorded binding is history, never a gate", () => {
 		expect(session.driftAcknowledgement?.reasons.join("; "), "what moved is the ENDPOINT — `custom` said so on both sides").toMatch(/gateway-a\.example\.com/);
 	});
 
-	// The owner's ruling of 2026-09-21, pinned so a later "the current binding
-	// always wins" reading cannot quietly overwrite it: with the SAME provider
-	// identity a model switch still restores the session's own model and
-	// reasoning. The current binding wins where the recorded one cannot be
-	// SERVED (provider, API, endpoint) — never in the model's name alone.
-	it("the owner's ruling: with the SAME provider a model switch still restores the session's OWN model", async () => {
+	// REVIEW of this round, re-ruled by the owner (2026-09-21): the
+	// configuration wins HERE TOO — a model switch inside one provider is a
+	// changed binding, so `--model` and the config are never silently ignored
+	// on a resume. (This case pinned the opposite rule for one afternoon; it
+	// is the record of the reversal.)
+	it("the configuration wins a same-provider MODEL switch too — model included in the identity", async () => {
 		const dir = freshDir();
 		await loggedSession("g2c", dir);
 		// The recorded binding is built by the SAME resolver the process uses,
@@ -170,10 +170,10 @@ describe("XP-1 — the recorded binding is history, never a gate", () => {
 			adapter: DONE,
 		});
 		const session = await agent.session({ id: "g2c" });
-		expect(session.model, "the session's own model is the truthfulness core").toBe("deepseek-flash");
+		expect(session.model, "the configuration wins, model included").toBe("gpt-6-astra");
 		const meta = readProfile(dir, "g2c");
-		expect(meta.kind === "ok" && meta.profile.revision, "nothing was rewritten: the record still answers").toBe(2);
-		expect(session.driftAcknowledgement, "and there is nothing to acknowledge").toBeNull();
+		expect(meta.kind === "ok" && meta.profile.revision, "and the change is durable history").toBe(3);
+		expect(session.driftAcknowledgement?.reasons.join("; "), "which names the model that moved").toMatch(/recorded model is deepseek-flash/);
 	});
 
 	it("the INTEGRITY cases are still BLOCKED — a binding ruling is not an integrity ruling", async () => {

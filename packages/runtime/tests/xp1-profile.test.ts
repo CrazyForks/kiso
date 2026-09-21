@@ -90,17 +90,35 @@ describe("XP-1 — the sidecar's fail-closed lifecycle", () => {
 	});
 });
 
-describe("XP-1 — restoration: the recorded profile wins over the process default", () => {
-	it("the session runs the RECORDED model, and says so", async () => {
+describe("XP-1 — the model is part of the binding (re-ruled by the owner, 2026-09-21, on review)", () => {
+	it("the SAME model: nothing moved, so the record stands and no revision is written", async () => {
 		const dir = freshDir();
 		const store = new SessionStore(dir);
 		await store.append("s5", "r1", { seq: 0, type: "user_input", content: "hi" } as never);
 		await store.append("s5", "r1", { seq: 1, type: "stop", reason: "end_turn" } as never);
 		store.closeAll();
 		writeProfile(dir, "s5", buildProfile({ revision: 3, modelId: "recorded-x", provider: null, registry: new ToolRegistry() }));
-		const agent = createAgent({ model: "process-default-y", store: new SessionStore(dir), tools: [], adapter: DONE });
+		const agent = createAgent({ model: "recorded-x", store: new SessionStore(dir), tools: [], adapter: DONE });
 		const session = await agent.session({ id: "s5" });
-		expect(session.model, "the truthfulness core: what will answer the next request").toBe("recorded-x");
+		expect(session.model, "the row and the request agree").toBe("recorded-x");
+		const meta = readProfile(dir, "s5");
+		expect(meta.kind === "ok" && meta.profile.revision, "nothing moved, nothing rewritten").toBe(3);
+		expect(session.driftAcknowledgement).toBeNull();
+	});
+
+	it("a DIFFERENT model, both bindings unscoped: the CURRENT configuration wins, durably, and says so", async () => {
+		const dir = freshDir();
+		const store = new SessionStore(dir);
+		await store.append("s5b", "r1", { seq: 0, type: "user_input", content: "hi" } as never);
+		await store.append("s5b", "r1", { seq: 1, type: "stop", reason: "end_turn" } as never);
+		store.closeAll();
+		writeProfile(dir, "s5b", buildProfile({ revision: 3, modelId: "recorded-x", provider: null, registry: new ToolRegistry() }));
+		const agent = createAgent({ model: "process-default-y", store: new SessionStore(dir), tools: [], adapter: DONE });
+		const session = await agent.session({ id: "s5b" });
+		expect(session.model, "the configuration is the authority").toBe("process-default-y");
+		const meta = readProfile(dir, "s5b");
+		expect(meta.kind === "ok" && meta.profile.revision, "recorded as the next revision").toBe(4);
+		expect(session.driftAcknowledgement?.reasons.join("; "), "and it names what moved").toMatch(/recorded model is recorded-x/);
 	});
 
 	it("a CHANGED BINDING never blocks: the current binding wins, records revision N+1, and says so", async () => {

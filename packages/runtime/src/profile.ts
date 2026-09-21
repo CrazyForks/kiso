@@ -239,7 +239,14 @@ export type ProfileDrift =
  *  blocks nothing; a digest mismatch is never presented as restoration). */
 export function assessProfileDrift(
 	recorded: ExecutionProfile,
-	current: { readonly provider: ProfileModelRef | null; readonly systemPromptDigest: string; readonly tools: readonly ProfileToolRecord[] },
+	current: {
+		readonly provider: ProfileModelRef | null;
+		/** The model THIS process would run — needed because an unscoped binding
+		 *  has no provider ref to carry it. */
+		readonly modelId: string;
+		readonly systemPromptDigest: string;
+		readonly tools: readonly ProfileToolRecord[];
+	},
 ): ProfileDrift {
 	const reasons: string[] = [];
 	const notes: string[] = [];
@@ -252,16 +259,20 @@ export function assessProfileDrift(
 		// `custom` names a CLASS — two custom endpoints are two different
 		// places to spend — so an endpoint (or API flavour) that moved is a
 		// changed binding like any other. Found in review of this round.
-		//
-		// The MODEL is deliberately not compared here, and that is the owner's
-		// ruling of 2026-09-21, not an omission: with the same provider a
-		// model switch still restores the session's own model and reasoning
-		// (the truthfulness core). The current binding wins where the recorded
-		// one cannot be SERVED by this process — the provider, the API and the
-		// endpoint are exactly that surface; the model's name is not.
 		if (r.providerId !== c.providerId) reasons.push(`the recorded provider is ${r.providerId} but the current process serves ${c.providerId}`);
 		if (r.apiId !== c.apiId) reasons.push(`the recorded API is ${r.apiId} but the current process serves ${c.apiId}`);
 		if ((r.endpoint ?? null) !== (c.endpoint ?? null)) reasons.push(`the recorded endpoint is ${r.endpoint ?? "(none)"} but the current process serves ${c.endpoint ?? "(none)"}`);
+	}
+	// THE MODEL TOO — the owner's ruling of 2026-09-21, taken on review: the
+	// CONFIGURATION wins, including a model switch inside one provider (`--model`
+	// and the config are never silently ignored on a resume). This is compared
+	// even when BOTH sides are unscoped, where there is no provider ref to carry
+	// it, and it covers the ref's own `modelId` as well (the same fact, stamped
+	// by the same builder).
+	if (r !== null && c !== null && (r.modelId !== c.modelId || recorded.modelId !== current.modelId)) {
+		reasons.push(`the recorded model is ${recorded.modelId} but the current process serves ${current.modelId}`);
+	} else if (r === null && c === null && recorded.modelId !== current.modelId) {
+		reasons.push(`the recorded model is ${recorded.modelId} but the current process serves ${current.modelId} (both bindings are unscoped)`);
 	}
 	if (recorded.systemPromptDigest !== current.systemPromptDigest) {
 		notes.push(`the composed system prompt differs from the recorded one (${recorded.systemPromptDigest.slice(0, 12)}… → ${current.systemPromptDigest.slice(0, 12)}…)`);
