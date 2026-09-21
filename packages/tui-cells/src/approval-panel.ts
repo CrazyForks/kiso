@@ -882,7 +882,13 @@ export function pickBlockRows(view: PanelView, state: PickRuntime, W: number, ma
 		const strip = spec.options[state.cursor]?.levels !== undefined && state.phase === "options" ? 1 : 0;
 		const chrome = 5 + strip + (spec.options.length > Math.min(Math.max(1, maxRows - 5 - strip), PICK_MAX) ? 1 : 0);
 		const budget = Math.max(1, maxRows - chrome);
-		const shown = spec.options.slice(0, Math.min(budget, PICK_MAX));
+		// 2026-09-21 (finding DC-58, the owner's report): the window FOLLOWS the
+		// cursor instead of being pinned to the top. It used to be
+		// `slice(0, min(budget, PICK_MAX))`, so with a 60-profile config the
+		// keyboard reached the first nine and the rest were reachable only by
+		// typing the name — which is what `/model` exists to replace.
+		const win = pickWindow(state.cursor, spec.options.length, Math.min(budget, PICK_MAX));
+		const shown = spec.options.slice(win.first, win.first + win.size);
 		// R2: the note takes a COLUMN, not three spaces after a label of
 		// whatever length this row happened to have, and the cursor row
 		// wears the bar and the arrow like every other list in the
@@ -893,7 +899,10 @@ export function pickBlockRows(view: PanelView, state: PickRuntime, W: number, ma
 		const stop = shown.some((o) => o.note !== undefined) && widest + 2 <= Math.floor(room / 2) && room - widest - 2 >= 18 ? widest + 2 : 0;
 		for (let i = 0; i < shown.length; i += 1) {
 			const o = shown[i]!;
-			const mark = i === state.cursor && state.phase === "options";
+			// DC-58: `i` is the row's position in the WINDOW, the cursor is an
+			// option index — the mark lands on the cursor's own row after any
+			// scroll only when the window's origin is added back.
+			const mark = win.first + i === state.cursor && state.phase === "options";
 			const plain = lead(o, i, mark);
 			const head = `${mark ? p.bold : ""}${plain}${mark ? p.reset : ""}`;
 			const note =
@@ -911,9 +920,10 @@ export function pickBlockRows(view: PanelView, state: PickRuntime, W: number, ma
 			rows.push(mark ? selectionBar(text, visibleWidth(text), W) : ` ${text}`);
 		}
 		if (spec.options.length > shown.length) {
-			rows.push(`  ${cutLine(`${p.dim} \u2514 +${spec.options.length - shown.length} more \u2014 /model <name> takes any of them${p.reset}`, room)}`);
+			const to = win.first + shown.length;
+			rows.push(`  ${cutLine(`${p.dim} \u2195 ${win.first + 1}-${to} / ${spec.options.length} \u2014 \u2191\u2193 scrolls${p.reset}`, room)}`);
 		}
-		const axis = shown[state.cursor];
+		const axis = shown[state.cursor - win.first];
 		if (strip === 1 && axis?.levels !== undefined) {
 			const off = new Set(axis.disabled ?? []);
 			// the RUNTIME cursor, not the option's starting index: the option
@@ -945,10 +955,32 @@ export function pickBlockRows(view: PanelView, state: PickRuntime, W: number, ma
 	return rows;
 }
 
-/** The digits are the keys, so the list the panel offers is bounded by
- *  the digits there are. Beyond it, `/model <name>` still takes any
- *  profile — the panel says so rather than paginating. */
+/** The digits are the keys, so what one SCREEN offers is still bounded by
+ *  the digits there are — but the list itself is no longer bounded by it.
+ *
+ *  Finding DC-58 (the owner, 2026-09-21): this constant used to cap what the
+ *  KEYBOARD could reach (`/model` on a 60-profile config offered nine and
+ *  said `/model <name>` for the rest). The window now follows the cursor —
+ *  `pickWindow` — so PICK_MAX is only how many rows one screen shows, and
+ *  ↑↓ walks every option.
+ */
 export const PICK_MAX = 9;
+
+/** The option window the pick panel draws and the digits name: `size` rows
+ *  starting at `first`, with `first` derived from the cursor so it cannot
+ *  drift from it. Edge-following (the window starts moving only when the
+ *  cursor leaves it) and clamped at both ends, so the last page is full
+ *  rather than short.
+ *
+ *  Pure, and the ONE copy: the renderer, the digit keys and the click
+ *  hit-test all ask this function rather than each deriving an offset.
+ */
+export function pickWindow(cursor: number, count: number, size: number): { first: number; size: number } {
+	const win = Math.max(1, Math.min(size, count));
+	if (count <= win) return { first: 0, size: win };
+	const first = Math.max(0, Math.min(cursor - win + 1, count - win));
+	return { first, size: win };
+}
 
 /** The input row's lead: the digit range while picking, the named
  *  prompt while typing one out. */
