@@ -80,9 +80,10 @@ describe("A2 — the long-session gate: thirty-two fires in one run, the context
 		const store = new SessionStore(dir);
 		await seed(store);
 		// every round billed past hard (160k on a 200k window): every settled round fires
-		const script: FauxScript = [];
-		for (let i = 0; i < FIRES; i++) script.push(round(i, 170_000), say(checkpoint(i)));
-		script.push(say("done"));
+		const turns: FauxScript[number][] = [];
+		for (let i = 0; i < FIRES; i++) turns.push(round(i, 170_000), say(checkpoint(i)));
+		turns.push(say("done"));
+		const script: FauxScript = turns;
 		const faux = createFauxProvider(script);
 		const requests: StreamOptions[] = [];
 		const adapter = { stream: (opts: StreamOptions) => (requests.push(opts), faux.stream(opts)) } as Adapter;
