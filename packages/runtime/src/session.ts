@@ -44,6 +44,7 @@ import {
 	type RetryInfo,
 } from "@vincemakes/kiso-core";
 import { executionLedger } from "./ledger.js";
+import { overflowBelt, type OverflowMeasure } from "./overflow-belt.js";
 import { assessTasks, type TaskAssessment } from "./task-assessment.js";
 
 /** TV-1A — the session-level evidence policy: the PURE projection defaults
@@ -438,7 +439,11 @@ export class AgentSession {
 			...(args.onProgress !== undefined ? { onProgress: args.onProgress } : {}),
 		};
 		try {
-			const result = await summarizeConversation({ ...common, messages: args.messages, inBand: args.inBand, ...(args.reasoning !== undefined ? { reasoning: args.reasoning } : {}) });
+			// The in-band call carries the run's whole context, so the overflow
+			// belt applies to it; the serialised fallback below is small, and
+			// its failures keep their own classification.
+			const inBandAdapter = overflowBelt(this.#adapter, () => this.overflowMeasure());
+			const result = await summarizeConversation({ ...common, adapter: inBandAdapter, messages: args.messages, inBand: args.inBand, ...(args.reasoning !== undefined ? { reasoning: args.reasoning } : {}) });
 			return { result, path: "in-band" };
 		} catch (err) {
 			// Only a REJECTED reply earns the second call: a transport failure
@@ -604,6 +609,16 @@ export class AgentSession {
 	 */
 	setMicrocompactThreshold(thresholdTokens: number): void {
 		this.#microcompact = { thresholdTokens };
+	}
+
+	/** ADR-0055 Amendment 2 (decision 3): the overflow belt's measure at send
+	 *  time — null unless a window is STATED and a bill anchors the context. */
+	overflowMeasure(): OverflowMeasure | null {
+		const tiers = this.#config.contextPolicy?.tiers;
+		if (tiers === undefined) return null;
+		const window = tiers.statedWindow !== undefined ? tiers.statedWindow() : (this.#tiersWindow ?? tiers.windowTokens);
+		const used = this.contextAnchor();
+		return window === null || used === undefined ? null : { used, window, reserve: this.#outputReserve() };
 	}
 
 	/** ADR-0055 Amendment 2 (decision 4): the emergency reserve — what the
@@ -1340,6 +1355,12 @@ export interface ContextPolicy {
 		/** ADR-0055 Amendment 2: told when a checkpoint is discarded because it
 		 *  did not shrink the context — chars/4 estimates only, never text. */
 		readonly onDiscard?: (info: { readonly reason: string; readonly pre: number; readonly post: number; readonly summary: number }) => void;
+
+		/** ADR-0055 Amendment 2 (decision 3): the window someone STATED for the
+		 *  live binding, or null when the tiers run on a fallback. Absent, the
+		 *  caller's own windowTokens counts as stated. Only a stated window
+		 *  arms the overflow belt. */
+		readonly statedWindow?: () => number | null;
 	};
 }
 

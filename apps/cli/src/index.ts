@@ -896,6 +896,10 @@ async function makeAgent(sessionId: string | undefined, input?: LineInput, model
 				isCheck: (command: string) => runsACheck(command, Object.values(merged.checks ?? {})),
 				// ADR-0055 Amendment 2: a discarded checkpoint says so, in sizes only.
 				onDiscard: (d) => body.notice(compactionDiscardedNotice(d)),
+				// ADR-0055 Amendment 2 (decision 3): only a window someone stated
+				// arms the overflow belt — read from the LIVE binding, so it moves
+				// with /model and /resume; the 200K fallback reads as null.
+				statedWindow: () => knownContextWindow(),
 			},
 		},
 		// R3e (owner ruling, 2026-08-28): NO turn limit on an interactive

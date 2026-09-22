@@ -61,6 +61,9 @@ interface RunOptions {
 	/** Sets the emergency reserve explicitly (the faux model has no registry row). */
 	readonly maxTokens?: number;
 	readonly seedRounds?: number;
+	readonly maxRetries?: number;
+	/** The CLI's statedWindow: null = the tiers run on a fallback. Absent = windowTokens is stated. */
+	readonly statedWindow?: number | null;
 }
 
 async function runWith(script: FauxScript, options: RunOptions = {}) {
@@ -78,7 +81,14 @@ async function runWith(script: FauxScript, options: RunOptions = {}) {
 		adapter,
 		systemPrompt: "you are a test agent",
 		...(options.maxTokens !== undefined ? { maxTokens: options.maxTokens } : {}),
-		contextPolicy: { tiers: { windowTokens: options.windowTokens ?? 200_000, onDiscard: (info) => discards.push(info) } },
+		...(options.maxRetries !== undefined ? { maxRetries: options.maxRetries } : {}),
+		contextPolicy: {
+			tiers: {
+				windowTokens: options.windowTokens ?? 200_000,
+				onDiscard: (info) => discards.push(info),
+				...(options.statedWindow !== undefined ? { statedWindow: () => options.statedWindow ?? null } : {}),
+			},
+		},
 	});
 	const session = await agent.session({ id: "s" });
 	for await (const _ of session.run("continue")) {
@@ -152,5 +162,44 @@ describe("A2 decision 4 — the emergency reserve is what the endpoint may grant
 		// 0.40.1 reserved 32K here — emergency 1,016,576 — and called this `hard`.
 		const { ledger } = await runWith([call("c1", 920_000), say(VALID_SUMMARY), say("done")], { windowTokens: 1_048_576, seedRounds: 15 });
 		expect(ledger.filter((l) => l.kind === "summary")).toEqual([expect.objectContaining({ reason: "emergency", path: "in-band" })]);
+	});
+});
+
+/** d7aa's last failure, verbatim: a 500 with no text anyone could classify. */
+const FAIL_500 = { events: [{ type: "fail" as const, code: "api_5xx", status: 500, retryable: true, message: "[deepseek] request failed: 500 Internal server error" }] };
+const terminalError = (events: readonly { type: string }[]) =>
+	(events.filter((e) => e.type === "terminal").at(-1) as { outcome: { kind: string; error?: { code: string; message: string } } } | undefined)?.outcome;
+
+describe("A2 decision 3 — the overflow belt: kiso's own measure, on a STATED window only", () => {
+	it("d7aa's shape: a bare 500 on a request past the stated window's limit is context_overflow, not retried", async () => {
+		// anchored ~1.05M against 1,048,576 − 131,072 = 917,504
+		const { requests, events } = await runWith([call("c1", 1_040_000), FAIL_500, FAIL_500, FAIL_500, say("done")], {
+			windowTokens: 1_048_576,
+			seedRounds: 0,
+			maxRetries: 2,
+		});
+		const outcome = terminalError(events);
+		expect(outcome?.kind).toBe("error");
+		expect(outcome?.error?.code).toBe("context_overflow");
+		expect(outcome?.error?.message).toContain("could not fit");
+		// the failing request was sent once — no retry of what cannot fit
+		expect(requests).toHaveLength(2);
+	});
+
+	it("the 200K fallback never arms it: with no stated window the same 500 keeps its retries", async () => {
+		const { requests, events } = await runWith([call("c1", 1_040_000), FAIL_500, FAIL_500, FAIL_500], {
+			windowTokens: 1_048_576,
+			statedWindow: null,
+			seedRounds: 0,
+			maxRetries: 2,
+		});
+		expect(terminalError(events)?.error?.code).toBe("api_5xx");
+		expect(requests).toHaveLength(4);
+	});
+
+	it("below the limit a bare 5xx keeps its retries", async () => {
+		const { requests, events } = await runWith([call("c1", 500_000), FAIL_500, FAIL_500, FAIL_500], { windowTokens: 1_048_576, seedRounds: 0, maxRetries: 2 });
+		expect(terminalError(events)?.error?.code).toBe("api_5xx");
+		expect(requests).toHaveLength(4);
 	});
 });
