@@ -175,7 +175,7 @@
  "exempt": [
   {
    "file": "packages/tui/tests/dc48-invariant-fallback.test.ts",
-   "reason": "spawns nothing and drives the compositor in process. The classifier reads SOURCE TEXT, and this file's comments name isolated-cli.mjs to say where KISO_INVARIANTS=throw is set for PTY children \u2014 prose about a helper, not an import of one. Verified: no child_process, no spawn, no pty helper."
+   "reason": "spawns nothing and drives the compositor in process. The classifier reads SOURCE TEXT, and this file's comments name isolated-cli.mjs to say where KISO_INVARIANTS=throw is set for PTY children — prose about a helper, not an import of one. Verified: no child_process, no spawn, no pty helper."
   },
   {
    "file": "apps/cli/tests/pr1d-clause-pins.test.ts",
@@ -188,6 +188,10 @@
   {
    "file": "apps/cli/tests/known-context-window.test.ts",
    "reason": "spawns nothing. It calls knownContextWindow, contextWindowTokens and resolveContextWindow and asserts their values. The classifier follows its import of ../src/state.js, which carries one execFileSync(\"git\", [\"ls-files\"]) for @-file completion; this test calls only setConfiguredWindow, an assignment that cannot reach it. Verified: no child_process, no spawn, no pty helper in the file."
+  },
+  {
+   "file": "apps/cli/tests/a2-cli-surfaces.test.ts",
+   "reason": "spawns nothing. It calls compactionDiscardedNotice, unknownWindowNotice and statusModelLabel and asserts the strings they return. The classifier follows its import of ../src/state.js, which carries one execFileSync(\"git\", [\"ls-files\"]) for @-file completion; this test calls only setAgentModel, an assignment that cannot reach it. Verified: no child_process, no spawn, no pty helper in the file."
   }
  ]
 }

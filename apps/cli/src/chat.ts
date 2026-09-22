@@ -19,6 +19,7 @@ import {
 	toolTarget,
 	verifyOfferView,
 	STATUS_GLYPHS,
+	kUnit,
 	type PanelArgs,
 	type PanelView,
 	type RenderInput,
@@ -192,7 +193,25 @@ export function statusModelLabel(session: { readonly reasoning?: { readonly effo
 	// identity is asked for (`/status`), not in a row that has ~40 columns and
 	// cut the host to `deepseek/d…ndcode.ai`. Unnecessary at best, misleading at
 	// worst: it read as a path, not as an account.
-	return effort !== undefined && effort !== "default" ? `${agentModel} · ${effort}` : agentModel;
+	// The owner, 2026-09-22: the row shows the MODEL's name only — a vendor
+	// prefix (`deepseek/deepseek-v4.1-flash`) cost the row its tail. The full
+	// id stays in `/status` and `/model`, where identity is asked for.
+	const name = agentModel.slice(agentModel.lastIndexOf("/") + 1) || agentModel;
+	return effort !== undefined && effort !== "default" ? `${name} · ${effort}` : name;
+}
+
+/** ADR-0055 Amendment 2 (ruling 6): with no stated window the status row
+ *  shows `ctx ?`, yet the compaction tiers still assume the 200K fallback
+ *  — the assumption is said out loud once, at agent build. */
+export function unknownWindowNotice(model: string): string {
+	return `[kiso] context window unknown for ${model} at this endpoint — compaction assumes ${DEFAULT_CONTEXT_WINDOW / 1000}K; set contextWindow on the profile to state it`;
+}
+
+/** ADR-0055 Amendment 2: the notice for a checkpoint the shrink invariant
+ *  discarded — chars/4 sizes only; the checkpoint's text is the owner's
+ *  work and never reaches the screen. */
+export function compactionDiscardedNotice(d: { readonly pre: number; readonly post: number; readonly summary: number }): string {
+	return `✦ compaction discarded — the checkpoint did not shrink the context (~${kUnit(d.pre)} → ~${kUnit(d.post)}; it wrote ~${kUnit(d.summary)})`;
 }
 
 export function displayCtxRatio(session: AgentSession): number {
