@@ -200,7 +200,7 @@ export function statusModelLabel(session: { readonly reasoning?: { readonly effo
 	return effort !== undefined && effort !== "default" ? `${name} · ${effort}` : name;
 }
 
-/** ADR-0055 Amendment 2 (ruling 6): with no stated window the status row
+/** ADR-0055 Amendment 2 (decision 5): with no stated window the status row
  *  shows `ctx ?`, yet the compaction tiers still assume the 200K fallback
  *  — the assumption is said out loud once, at agent build. */
 export function unknownWindowNotice(model: string): string {

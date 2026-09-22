@@ -26,6 +26,21 @@ export interface Tiers {
 	readonly tail: number;
 }
 
+/** ADR-0055 Amendment 2 (decision 4): the output an endpoint may grant when
+ *  neither kiso nor the registry states one. kiso sends no `max_tokens`
+ *  where it sends none today, so the endpoint's own default applies — and
+ *  the one default observed is 131,072 (the op gateway's refusal on
+ *  2026-09-22: "you requested 131072 output tokens" with no max_tokens
+ *  sent). Reserving 32K there put the emergency tier 99K too high. */
+export const UNKNOWN_MAX_OUTPUT = 131_072;
+
+/** The emergency reserve: what the request asks for when kiso sends a
+ *  `max_tokens`, else the registry's max output for the served endpoint,
+ *  else UNKNOWN_MAX_OUTPUT — never below the summary budget. */
+export function outputReserve(maxTokens: number | undefined, registryMaxOutput: number | null | undefined, floor: number): number {
+	return Math.max(maxTokens ?? registryMaxOutput ?? UNKNOWN_MAX_OUTPUT, floor);
+}
+
 export function tiersFor(windowTokens: number, reserve: number): Tiers {
 	return {
 		soft: Math.min(0.5 * windowTokens, 400_000),

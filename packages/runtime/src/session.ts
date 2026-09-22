@@ -77,7 +77,7 @@ import { estimateTokens } from "@vincemakes/kiso-core";
 import { StaleWriterError, type SessionStore } from "./store.js";
 import { composeHooks, composeSystemPrompt, microcompactFor, runBasePrompt } from "./compose.js";
 import { checkpointBoundarySeq } from "./checkpoint.js";
-import { breakEvenFactor, guardedPruneSeq, KEEP_COMPACTABLE_RESULTS, microcompactBoundarySeq, phaseEnd, runsACheck, tierReason, tiersFor } from "./compaction-policy.js";
+import { breakEvenFactor, guardedPruneSeq, KEEP_COMPACTABLE_RESULTS, microcompactBoundarySeq, outputReserve, phaseEnd, runsACheck, tierReason, tiersFor } from "./compaction-policy.js";
 import { Run } from "./run.js";
 // TUI2-R3v2 ③ — the side query rides the SAME tracer the runs ride; that
 // sameness is the whole point (one ledger, one shape, no second path).
@@ -388,8 +388,7 @@ export class AgentSession {
 				return beforeSeq === undefined ? [] : [{ type: "microcompacted", beforeSeq }];
 			}
 			const window = this.#tiersWindow ?? tiersPolicy.windowTokens;
-			const maxOutput = this.#config.maxTokens ?? lookupModelMetadata(this.#model, this.#baseUrl)?.capabilities.maxOutputTokens ?? 0;
-			const t = tiersFor(window, Math.max(maxOutput, MANUAL_SUMMARY_BUDGET));
+			const t = tiersFor(window, this.#outputReserve());
 			const isCheck = tiersPolicy.isCheck ?? ((command: string) => runsACheck(command));
 			const reason = tierReason(used, t, why, () => phaseEnd(events, lastSummaryPoint(events), isCheck));
 			if (reason === null) return [];
@@ -605,6 +604,12 @@ export class AgentSession {
 	 */
 	setMicrocompactThreshold(thresholdTokens: number): void {
 		this.#microcompact = { thresholdTokens };
+	}
+
+	/** ADR-0055 Amendment 2 (decision 4): the emergency reserve — what the
+	 *  endpoint may grant for this binding (compaction-policy.ts). */
+	#outputReserve(): number {
+		return outputReserve(this.#config.maxTokens, lookupModelMetadata(this.#model, this.#baseUrl)?.capabilities.maxOutputTokens, MANUAL_SUMMARY_BUDGET);
 	}
 
 	/** The raw tail a manual cut at a settled round keeps: the tiers' tail
