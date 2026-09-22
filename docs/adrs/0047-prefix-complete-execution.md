@@ -323,3 +323,49 @@ shapes.
 - The crash matrix (11 rows, the four effect boundaries before/after +
   the repair-write crashes) is permanent in `npm run check`; the real
   SIGKILL e2e (scripts/demo-kill9.sh) stays the OS-layer evidence.
+
+## Amendment 3 (2026-09-22): a committed call an abort stranded is answered by the next run
+
+- **Status:** Accepted — ruled by the lead on 2026-09-22 (placement R: the
+  runtime's recovery, zero core); the owner said go the same day.
+- **Round:** 0.40.2, patch — its own PR.
+
+**The finding.** Pair atomicity (Amendment 1, sentence 1) was argued for
+UNCOMMITTED turns: an abort before EC-1's Turn Commit abandons the draft
+whole, so no `tool_use` survives without its result. An abort that lands
+AFTER the commit — after the `stop` — but before a call's
+`tool_execution_started` left that call's `tool_call_end` on disk with no
+started, no receipt and no result: the kernel's abort sentinel is
+swallowed at the launch (loop.ts, "no started, no receipt, never
+uncertain" — right for an uncommitted turn). The run's `aborted` terminal
+is written, so the recovery plan answers TERMINAL and nothing completes
+the call. The projection keeps the `tool_use`, drops nothing (pair
+atomicity only drops a result without its declaration), and every later
+request is a provider 400. The owner's session
+`2026-09-22T01-58-27-0027`: three committed shell calls, two results,
+five consecutive 400s on every model and endpoint. The window is not only
+the pre-started check: an abort in `decideCall` or in a post-commit
+approval pause strands a committed call the same way.
+
+**Decision.** When a run starts — fresh or resumed — and when `/compact`
+starts, the runtime answers every committed `tool_call_end` that has
+neither a started event nor a result, in a run whose terminal is
+`aborted`, with ONE durable `tool_result`: "aborted before execution", a
+`precondition` error — the result the kernel itself writes when the same
+esc lands one step later, after the started event. The result rides the
+run that owns the call, as `permission_expired` already does for a dead
+run's approval, so no new open run appears. It never writes a started
+event: that would make the call `uncertain` and ask a human about work
+that provably never began.
+
+This is a durable FACT, not a projection change: the call did not run,
+and now the log says so. It is idempotent per invocation — a crash
+between two repairs leaves the rest for the next run (crash-matrix row
+R3) — and it heals the already-poisoned logs with no migration: their
+next run repairs them.
+
+**Consequences.** Every path that projects a session into a request
+starts from a paired history. A stranded call whose approval request was
+still pending keeps that request pending, as today (a dead run's request
+is expired on the next resume); its result now exists, so nothing is sent
+unpaired.

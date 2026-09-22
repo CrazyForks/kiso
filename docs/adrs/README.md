@@ -64,7 +64,7 @@ not another recalibration)
 - 0045 — The config surface: credentials never on disk, project config
   in the trust package, no "always" — Accepted
 - 0046 — The one-compositor — Accepted
-- 0047 — Prefix-Complete Execution: the durable recovery law — Accepted (Amendment 2: the α ruling — the receipted execution is an outcome, the α-gap row closed)
+- 0047 — Prefix-Complete Execution: the durable recovery law — Accepted (Amendment 2: the α ruling — the receipted execution is an outcome, the α-gap row closed; Amendment 3: a committed call an abort stranded is answered by the next run)
 - 0048 — Recovery as a pure projection: the plan, the thin driver, the EffectGate — Accepted
 - 0049 — The diet-micro rider — VOID as written (the 0.1.47 void
   adjudication, the review, 2026-08-11); corrected record: A/B/C
