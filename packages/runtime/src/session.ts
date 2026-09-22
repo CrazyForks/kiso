@@ -31,6 +31,7 @@
 import {
 	EventLog,
 	projectMessages,
+	SUMMARY_FRAMING,
 	type AbortSignalLike,
 	type Adapter,
 	type Event,
@@ -393,8 +394,13 @@ export class AgentSession {
 			const reason = tierReason(used, t, why, () => phaseEnd(events, lastSummaryPoint(events), isCheck));
 			if (reason === null) return [];
 			const urgent = reason === "overflow" || reason === "emergency";
-			if (!urgent && this.#summaryFailures >= (tiersPolicy.maxFailures ?? MAX_SUMMARY_FAILURES)) return [];
-			const summarized = await this.#summarizeInRun(events, messages, t.tail, reason, run);
+			// ADR-0055 Amendment 2: the breaker stands at every tier but
+			// overflow (once per request by construction). An urgent tier that
+			// meets it skips the summary call and keeps the prune fallback — a
+			// session whose checkpoints cannot shrink it stops paying for them.
+			const breakerOpen = reason !== "overflow" && this.#summaryFailures >= (tiersPolicy.maxFailures ?? MAX_SUMMARY_FAILURES);
+			if (breakerOpen && !urgent) return [];
+			const summarized = breakerOpen ? null : await this.#summarizeInRun(events, messages, t.tail, reason, run, tiersPolicy.onDiscard);
 			if (summarized !== null) return [summarized];
 			if (!urgent) return [];
 			const pricing = lookupModelMetadata(this.#model, this.#baseUrl)?.pricing ?? null;
@@ -458,6 +464,7 @@ export class AgentSession {
 		tail: number,
 		reason: string,
 		run: Parameters<AgentSession["compactionPoint"]>[0],
+		onDiscard?: (info: { readonly reason: string; readonly pre: number; readonly post: number; readonly summary: number }) => void,
 	): Promise<EventInput | null> {
 		const boundary = checkpointBoundarySeq(events, { keepTokens: tail });
 		if (boundary === undefined) return null;
@@ -477,19 +484,41 @@ export class AgentSession {
 			if (run.signal?.aborted !== true) this.#summaryFailures += 1;
 			return null;
 		}
-		this.#summaryFailures = 0;
+		// ADR-0055 Amendment 2 (the shrink invariant): a fire is kept only if
+		// it removes at least what it writes — post ≤ pre − summary, all by
+		// the chars/4 estimate over the SAME projection (never the bill
+		// against an estimate). A checkpoint that fails it is discarded:
+		// nothing is appended, the run goes on as before, and the failure
+		// counts toward the breaker.
+		const fire: EventInput = { type: "summarized", coversToSeq: boundary, summary: result.text };
+		const pre = estimateTokens(projectMessages(events));
+		const post = estimateTokens(projectMessages([...events, { ...fire, seq: (events.at(-1)?.seq ?? -1) + 1 } as Event]));
+		const written = estimateTokens([{ role: "user", content: `${SUMMARY_FRAMING}\n\n${result.text}` }]);
+		const shrinks = pre - post >= written;
 		// Every in-run fire is recorded — its reason and path are what the
-		// measurement counts — and its usage when the provider reported one.
+		// measurement counts — and its usage when the provider reported one;
+		// a discarded one too (it was paid for), marked so.
 		{
 			try {
 				const canonical = result.usage === null ? null : canonicalizeUsageForModel(this.#model, this.#baseUrl, this.#provider ?? "adapter", result.usage);
 				mkdirSync(join(this.#store.root, "traces"), { recursive: true, mode: 0o700 });
-				appendFileSync(join(this.#store.root, "traces", `${this.id}.jsonl`), `${JSON.stringify({ kind: "summary", canonical, reason, path })}\n`, { mode: 0o600 });
+				appendFileSync(join(this.#store.root, "traces", `${this.id}.jsonl`), `${JSON.stringify({ kind: "summary", canonical, reason, path, ...(shrinks ? {} : { discarded: "no-shrink" }) })}\n`, { mode: 0o600 });
 			} catch (err) {
 				console.error(`[kiso] summary usage ledger degraded (${err instanceof Error ? err.message : String(err)}); the summary call's cost is not recorded`);
 			}
 		}
-		return { type: "summarized", coversToSeq: boundary, summary: result.text };
+		if (!shrinks) {
+			this.#summaryFailures += 1;
+			// sizes only — the checkpoint's text is the owner's work
+			try {
+				onDiscard?.({ reason, pre, post, summary: written });
+			} catch {
+				// observation only — a notice that cannot be shown changes nothing
+			}
+			return null;
+		}
+		this.#summaryFailures = 0;
+		return fire;
 	}
 
 	/**
@@ -1299,7 +1328,14 @@ export interface ContextPolicy {
 	 * and the standing microcompact above do not apply. `isCheck` is the
 	 * phase detector's rule 1 (default: the runner table).
 	 */
-	readonly tiers?: { readonly windowTokens: number; readonly isCheck?: (command: string) => boolean; readonly maxFailures?: number };
+	readonly tiers?: {
+		readonly windowTokens: number;
+		readonly isCheck?: (command: string) => boolean;
+		readonly maxFailures?: number;
+		/** ADR-0055 Amendment 2: told when a checkpoint is discarded because it
+		 *  did not shrink the context — chars/4 estimates only, never text. */
+		readonly onDiscard?: (info: { readonly reason: string; readonly pre: number; readonly post: number; readonly summary: number }) => void;
+	};
 }
 
 export interface SessionConfig {
