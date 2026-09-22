@@ -741,3 +741,144 @@ prints one notice line; 0.41.0 removes it.
   round.
 - If a price table moves the break-even constant enough that pruning
   never pays, A4(b) is removed.
+
+## Amendment 2 (2026-09-22) — a checkpoint replaces every earlier one
+
+- **Status:** Accepted — ruled by the lead on 2026-09-22 from the owner's
+  triage; the owner said go on the same day. P0 in the published 0.40.1.
+- **Round:** 0.40.2, patch. Plan: kiso-doc
+  `compaction-replaces-round-0402-2026-09-22.md`.
+
+### What went wrong
+
+ADR-0044 made every `summarized` event cover a DISJOINT range — from just
+past the previous event's `coversToSeq` — and render its own message. E6
+(d), the order's R4, told the serialised summariser to leave the older
+summaries alone: "[retained context — do not re-summarize]". Amendment 1
+(A2) then asked the model for a checkpoint of "the conversation above",
+which, once a summary exists, includes every earlier summary. The model
+restated the whole task each time, and the projection kept every earlier
+summary beside the new one as if the new one tiled.
+
+The owner's disk, read on 2026-09-22 (sizes and seqs only):
+
+| session | summaries | summary chars | last billed input |
+|---|---|---|---|
+| flowpix2 `2026-09-21T04-41-27-d7aa` | 70 | 3,342,559 | 1,047,981 (then `500`) |
+| flowpix2 `2026-09-22T07-47-36-d4fc` | 66 | ~3.2M | ~1.02M (then a streamed `400`) |
+| uooki `2026-09-21T02-26-26-d2ce` | 68 | 3,255,280 | 1,021,188 |
+| reelfo `2026-09-21T04-45-25-a9ea` | 40 | 1,482,974 | 477,750 |
+| kiso `2026-09-21T06-32-54-121f` (stated 1M window) | 3 | 53,361 | peak 423,510 |
+
+In d7aa, from the moment the summaries alone passed the firing tier, every
+settled round fired and every fire made the context LARGER: 140,214 →
+149,711 → 156,631 → 165,797 → 175,757 → … → 294,365 → … → 1,047,981,
+about +13K per fire. Each checkpoint was a full restatement (17,183 →
+73,449 chars) while `coversToSeq` advanced a few hundred seqs. The
+`emergency` tier is urgent, so the failure breaker never engaged. The op
+profile's unknown window (the 200K policy fallback, hard at 160K) only
+brought the wall forward; the last row shows the same shape under a
+stated 1M window. A1B-M2 above ("the tiers fire again within a few
+requests of each summary") was this defect at a 12K scale, read as a
+small-window effect.
+
+### Decision
+
+1. **A checkpoint REPLACES.** A new `summarized` event supersedes every
+   earlier one: its covered range is `(−1, coversToSeq]` — ranges nest,
+   they never tile. The projection renders exactly ONE summary, the one
+   with the greatest `coversToSeq`, plus the raw tail after it.
+   Superseded events stay in the log, durable and replayable (the TUI's
+   replay, `/last` and the raw log still reach them), and are never
+   projected. The in-band instruction says the checkpoint replaces every
+   earlier summary and therefore restates the whole task; the serialised
+   input shows the latest prior checkpoint as material to fold in, not as
+   retained context to leave alone. This retires ADR-0044's covered-range
+   sentence ("from just past the previous `summarized` event's
+   coversToSeq") and E6 (d)'s "do not re-summarize".
+
+   A session with ONE summary projects byte-identically before and after
+   (its range already starts at −1). This is a change to the model-request
+   projection of an existing fact shape — legal only as a declared
+   supersession (ADR-0051 Amendment 3 (b)): red test first, the moved
+   golden (`packages/core/tests/summarize.test.ts`, the two-summary case)
+   updated in the same change, the ADR-0051 gate row annotated.
+
+2. **A compaction must shrink.** A fire is kept only if it removes at
+   least what it writes: `post ≤ pre − summary`, all three by the chars/4
+   estimate — estimate against estimate, never the bill against an
+   estimate (at the end of d7aa chars/4 read 907,965 against a bill of
+   1,047,936). The margin is the summary itself: scale-free, and it names
+   the harm directly — a harmful fire writes more than it removes. A fire
+   that fails it appends nothing: the run continues on the pre-compaction
+   context, the failure counts toward the breaker at EVERY tier but
+   `overflow` (overflow is once per request by construction), and the
+   notice says why in sizes only — never the summary's text, which is the
+   owner's work.
+
+3. **Overflow is recognised by what it says, and by what we know.** The
+   context-too-long wording classifies as `context_overflow` whatever the
+   status — a streamed `400` arrives with none (d4fc). And when a request
+   was sent with the anchored context at or above a STATED window minus
+   the reserve, any provider error is `context_overflow`, not retryable:
+   ten retries of a request known not to fit is the twelve-minute freeze
+   of d7aa, whose `500` carried no text at all. The 200K policy fallback
+   never arms this rule — keyed on the fallback, a session at 170K on a
+   real 1M model would lose its retries to every transient 5xx. Below the
+   window a bare 5xx keeps today's retries. This rule is a belt; 1, 2 and
+   4 are the cure.
+
+4. **The reserve is what the endpoint may grant.** The emergency reserve
+   is `maxTokens` when kiso sends one, else the registry's max output for
+   the served endpoint, else 131,072 — the one default observed (d4fc's
+   refusal names it). kiso still sends no `max_tokens` where it sends none
+   today, so no request changes. On a stated 1,048,576 window the
+   emergency tier sits at 917,504, exactly d4fc's limit; the first-party
+   DeepSeek row (384K) keeps emergency at hard, as today.
+
+5. **An assumed window is said out loud.** When no window is stated, the
+   agent build prints once that compaction assumes 200K and that
+   `contextWindow` states it.
+
+### Consequences
+
+- A session whose checkpoints cannot shrink it stops compacting after
+  `MAX_SUMMARY_FAILURES` consecutive failures and then ends at the wall
+  with a named reason, instead of paying a summary call before every
+  request. The prune fallback for the urgent tiers stays.
+- Every session with ≥ 2 summaries projects differently from 0.40.2 on.
+  The stacked sessions recover with no migration — the projection is a
+  pure function of the log. Measured on the four logs with the 0.40.1
+  projection over the log with all but the latest `summarized` event
+  dropped (the new rule, exactly): summary messages 70→1, 66→1, 68→1,
+  40→1; projected estimate −97%, −98%, −96%, −94%; every non-summary
+  message identical.
+- A pre-0.40 session compacted twice or more under tiling loses its older
+  summaries from the projection (they stay on disk). One such session is
+  on the owner's disk (2 summaries, 23,765 chars). Each affected session
+  pays one prompt-cache miss at its first 0.40.2 request.
+- The summary CALL's bytes move (the instruction and the serialised
+  input); the run's requests on the bench path do not (the bench never
+  compacts, and a single summary projects identically).
+
+### How it is gated (BM-1 §3, the compaction/context tier)
+
+The paired bench never crosses a tier (the CTX-1 finding) and cannot see
+this defect or its fix; it runs as the non-regression half only. The
+blockers are the ones that can:
+
+- a deterministic long-session gate — a faux provider, ≥ 30 fires in one
+  run, every checkpoint restating the last: the projected context stays
+  bounded by (summary budget + tail + fixed) and never grows across fires;
+- the replay gate — the stacked shape as a CI fixture, and the four real
+  logs through a local script whose output is sizes and seqs only;
+- the request-byte gates, the crash matrix, and the shrink invariant's
+  red (a bloated checkpoint is discarded).
+
+### When to overturn this amendment
+
+If a model cannot restate a long task within the summary budget — a
+checkpoint that ends on `max_tokens` when asked to restate — replacement
+loses what tiling kept. The evidence would be the `SummaryBudgetExhausted`
+rate on long sessions; the answer would be a larger budget or a two-level
+checkpoint, not stacking.
