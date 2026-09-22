@@ -156,17 +156,19 @@ export interface SerializeCoveredOptions {
 export function serializeCovered(options: SerializeCoveredOptions): string {
 	const { events, prevPoint, boundary } = options;
 	const lines: string[] = ["<conversation>"];
-	// E6 (d) (the order's R4): the old summary texts are RETAINED CONTEXT —
-	// the durable record of the earlier ranges. They render first, labeled
-	// do-not-re-summarize: the summarizer must know what the earlier
-	// summaries covered, but never fold them into the new checkpoint.
-	const retained = events.filter(
-		(e): e is Event & { type: "summarized" } => e.type === "summarized" && e.coversToSeq <= prevPoint,
-	);
-	if (retained.length > 0) {
-		lines.push("[retained context — do not re-summarize]");
-		for (const r of retained) lines.push(`[summary covers to seq ${r.coversToSeq}] ${r.summary}`);
-		lines.push("[end retained context]");
+	// ADR-0055 Amendment 2 (E6 (d)'s "do not re-summarize" retired): the
+	// new checkpoint REPLACES the previous one, so the summariser is given
+	// exactly the checkpoint the projection shows — the latest at or before
+	// prevPoint — as material to fold in. The superseded ones are not shown:
+	// the latest already restates them.
+	let previous: (Event & { type: "summarized" }) | undefined;
+	for (const e of events) {
+		if (e.type === "summarized" && e.coversToSeq <= prevPoint && (previous === undefined || e.coversToSeq >= previous.coversToSeq)) previous = e;
+	}
+	if (previous !== undefined) {
+		lines.push("[previous checkpoint — the new checkpoint replaces it: carry forward everything in it that is still true]");
+		lines.push(previous.summary);
+		lines.push("[end previous checkpoint]");
 	}
 	for (const ev of events) {
 		if (ev.seq <= prevPoint || ev.seq > boundary || ev.type === "summarized") continue;
@@ -209,8 +211,11 @@ export const SUMMARY_PROMPT = `${SUMMARY_GUARD}
 You are the conversation summarizer of the kiso agent framework.
 
 Summarize the covered conversation into a single structured checkpoint
-that will REPLACE it in the model's context. The next turn must be able
-to continue the work without reading the originals.
+that will REPLACE it — and every earlier checkpoint — in the model's
+context. The next turn must be able to continue the work without reading
+the originals. If the conversation includes an earlier checkpoint, it is
+being replaced too: carry forward everything in it that is still true,
+so that this checkpoint restates the whole task.
 
 Produce the checkpoint with exactly these sections, in this order:
 
@@ -221,8 +226,9 @@ The user's goal and the acceptance criterion, in one or two sentences.
 The constraints, requirements, and rulings the work must honor.
 
 ## User requests
-Every user message in the covered range, enumerated one by one, each
-with what it asked for and what was done about it.
+Every user request of the task — those an earlier checkpoint lists and
+those in the covered range — enumerated one by one, each with what it
+asked for and what was done about it.
 
 ## Files and changes
 Every file touched — exact paths, what changed, and why. Include the

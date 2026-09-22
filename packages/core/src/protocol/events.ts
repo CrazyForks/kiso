@@ -394,15 +394,16 @@ export interface MicroCompactEvent {
 
 /**
  * ADR-0044 — a model-generated summary replaced the covered conversation
- * range. `coversToSeq` is the seq of the LAST covered event; the covered
- * range runs from just past the previous `summarized` event's coversToSeq
- * (or the trajectory's start for the first) up to coversToSeq. The
- * projection replaces exactly those events with ONE USER message carrying
- * the summary behind a fixed framing line (E6's boundary honesty: the
- * model reads compressed history as CONTEXT, never as a reply it produced
- * — see SUMMARY_FRAMING in kernel/project.ts). It is not an assistant
- * message; every `summarized` event always renders its own message. Byte-stable: a summarized event is a persisted fact, so the
- * same events derive the same messages on every replay.
+ * range. `coversToSeq` is the seq of the LAST covered event. ADR-0055
+ * Amendment 2: a checkpoint REPLACES every earlier one — the covered range
+ * is (−1, coversToSeq], ranges nest, and only the summarized event with the
+ * greatest coversToSeq renders; superseded ones stay durable and render
+ * nothing. The projection replaces the covered events with ONE USER
+ * message carrying the summary behind a fixed framing line (E6's boundary
+ * honesty: the model reads compressed history as CONTEXT, never as a reply
+ * it produced — see SUMMARY_FRAMING in kernel/project.ts). Byte-stable: a
+ * summarized event is a persisted fact, so the same events derive the
+ * same messages on every replay.
  *
  * The summary is generated OFF-LOOP through the session's own adapter —
  * the summary request itself never enters the log, and a failed summary
@@ -412,7 +413,7 @@ export interface MicroCompactEvent {
 export interface SummarizedEvent {
 	readonly seq: number;
 	readonly type: "summarized";
-	/** The last covered event's seq; the range is (previous coversToSeq, coversToSeq]. */
+	/** The last covered event's seq; the range is (−1, coversToSeq] — the latest checkpoint replaces the earlier ones. */
 	readonly coversToSeq: number;
 	/** The model's compression — replaces the covered range in the projection. */
 	readonly summary: string;

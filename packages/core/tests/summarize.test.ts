@@ -73,11 +73,11 @@ describe("projection: a summarized event replaces its covered range", () => {
 		expect(projectMessages(messagesToEvents(first))).toEqual(first);
 	});
 
-	it("two summaries each render their own message, in order, before the kept rounds", () => {
-		// 7 rounds (inputs 0,3,6,9,12,15,18); s1 covers rounds 1-2 (0..5),
-		// s2 covers rounds 3-4 (6..11), rounds 5-7 kept. The summarized
-		// EVENTS sit at the log's end — after the kept rounds — yet their
-		// messages render at their boundaries, in reading order.
+	it("ADR-0055 A2: a newer summary REPLACES the earlier one — only the latest renders, covering from the start", () => {
+		// Declared supersession (ADR-0051 Amendment 3 (b)): this golden read
+		// [S1][S2][rounds 5-7] while ranges tiled. A checkpoint now restates
+		// the whole task, so S2 covers (−1, 11] and S1 renders nothing — it
+		// stays in the log, durable, and is never projected again.
 		const events: Event[] = [
 			...roundEvents("r1", "a1", 0),
 			...roundEvents("r2", "a2", 3),
@@ -90,7 +90,6 @@ describe("projection: a summarized event replaces its covered range", () => {
 			ev(22, { type: "summarized", coversToSeq: 11, summary: "S2" }),
 		];
 		const msgs = projectMessages(events);
-		// [S1][S2][rounds 5-7] — each summary at its covered range's position.
 		const texts = msgs.map((m) => {
 			if (m.role === "assistant") {
 				const text = m.blocks.filter((b) => b.type === "text").map((b) => (b.type === "text" ? b.text : ""));
@@ -98,13 +97,29 @@ describe("projection: a summarized event replaces its covered range", () => {
 			}
 			return m.role === "user" ? `u:${m.content}` : "t";
 		});
-		// E6 (e): each summary is a user message — the framing prefix + the
-		// text — read by the map below as "u:<framing>\n\nS1".
-		expect(texts[0]).toContain("S1");
-		expect(texts[1]).toContain("S2");
-		expect(texts.slice(2)).toEqual(["u:r5", "a5", "u:r6", "a6", "u:r7", "a7"]);
-		// The covered content is absent entirely.
+		expect(texts[0]).toContain("compressed into the summary below");
+		expect(texts[0]!.endsWith("S2")).toBe(true);
+		expect(texts.slice(1)).toEqual(["u:r5", "a5", "u:r6", "a6", "u:r7", "a7"]);
+		// The superseded summary and everything the latest covers are absent.
+		expect(texts.some((t) => t.endsWith("S1"))).toBe(false);
 		expect(texts.some((t) => t.includes("r1") || t.includes("r3"))).toBe(false);
+	});
+
+	it("ADR-0055 A2: the summary with the greatest coversToSeq is the one that projects", () => {
+		// Boundaries only move forward, so append order and coverage agree in
+		// any log kiso writes; the rule is stated on coverage so that the
+		// projection and lastSummaryPoint can never disagree about the tail.
+		const events: Event[] = [
+			...roundEvents("r1", "a1", 0),
+			...roundEvents("r2", "a2", 3),
+			...roundEvents("r3", "a3", 6),
+			ev(9, { type: "summarized", coversToSeq: 5, summary: "LATER" }),
+			ev(10, { type: "summarized", coversToSeq: 2, summary: "EARLIER" }),
+		];
+		const users = projectMessages(events).filter((m) => m.role === "user").map((m) => String((m as { content: unknown }).content));
+		expect(users).toHaveLength(2);
+		expect(users[0]!.endsWith("LATER")).toBe(true);
+		expect(users[1]).toBe("r3");
 	});
 
 	it("a summary whose log ends right after it still renders (the crash-then-resume shape)", () => {
