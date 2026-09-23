@@ -109,16 +109,12 @@ describe("XP-1 — the row and the request agree, per session", () => {
 			),
 		);
 
-		// ── the durable half ──
+		// ── the durable half, DC-60 (declared): the session /clear made never
+		// received a turn — /model switched it, then /resume left it — so
+		// nothing of it is on disk; a selection lands with a session's first
+		// durable event (packages/runtime/tests/dc60-no-empty-sessions). ──
 		const metas = readdirSync(join(dirs.home, "sessions")).filter((f) => f.endsWith(".meta.json"));
-		expect(metas.length).toBeGreaterThanOrEqual(2);
-		const freshMeta = metas.find((f) => f !== "conv-a.meta.json")!;
-		const fresh = JSON.parse(readFileSync(join(dirs.home, "sessions", freshMeta), "utf8")) as {
-			profile: { modelId: string; revision: number };
-		};
-		// /model on the fresh session RECORDED the switch durably.
-		expect(fresh.profile.modelId).toBe("visible-x");
-		expect(fresh.profile.revision).toBeGreaterThanOrEqual(2);
+		expect(metas).toEqual(["conv-a.meta.json"]);
 		const convA = JSON.parse(readFileSync(join(dirs.home, "sessions", "conv-a.meta.json"), "utf8")) as {
 			profile: { modelId: string };
 		};

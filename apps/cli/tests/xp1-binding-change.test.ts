@@ -26,7 +26,7 @@
  * legs only open and switch).
  */
 
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -94,7 +94,9 @@ describe("XP-1 — a changed binding resumes under the CURRENT configuration", (
 		expect(refusal, `the refusal is a line: ${out}`).toBeGreaterThan(-1);
 		expect(out.lastIndexOf("you> "), `the REPL is still taking input: ${out}`).toBeGreaterThan(refusal);
 		expect(readFileSync(sidecar, "utf8"), "a REFUSED open writes nothing").toBe(CORRUPT);
-		expect(metaOf(dirs.home, "second").revision, "the session that stayed open is untouched").toBe(1);
+		// DC-60 (declared): the session that stayed open never received a turn,
+		// so nothing of it is on disk either
+		expect(existsSync(join(dirs.home, "sessions", "second.meta.json")), "the session that stayed open wrote nothing").toBe(false);
 	});
 
 	it("the ENTRY open still fails loudly — nothing is on screen to preserve there", () => {
