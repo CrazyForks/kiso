@@ -88,6 +88,10 @@ export class Run implements AsyncIterable<Event> {
 			// here, before any log or disk mutation.
 			this.#session.ensureHealthy();
 			this.#session.beginRun(this);
+			// DC-60: a resume of a session with no durable event has nothing to
+			// recover — and writes nothing (no trace header, no summary row) for
+			// a session that never began. The CLI runs one at every start.
+			if (this.#resume && this.#session.log.all.length === 0) return;
 			const log = this.#session.log;
 			// The static prompt parts — computed ONCE, before the tracer, and
 			// reused for both the composed string (below) and the rent ledger

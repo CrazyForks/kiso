@@ -204,6 +204,8 @@ export class AgentSession {
 	// XP-1: a legacy session records revision 1 at the next explicit
 	// selection or first request — never eagerly at open.
 	#profilePending: boolean;
+	/** DC-60: set until a NEW session's first durable event lands. */
+	#newSession: { readonly workspace: string | null } | undefined;
 	/** 0.40.0: the config profile name of the live binding (configuration:
 	 *  each revision records the name in force when it is written). */
 	#profileName: string | null;
@@ -279,6 +281,7 @@ export class AgentSession {
 		// CTX-1: starts as the startup policy, then follows the binding.
 		this.#microcompact = config.microcompact;
 		this.#profilePending = config.profilePending === true;
+		this.#newSession = config.newSession;
 		this.#profileName = config.profileName ?? null;
 		this.driftAcknowledgement = config.driftAcknowledgement ?? null;
 	}
@@ -324,6 +327,13 @@ export class AgentSession {
 	async persist(runId: string, event: Event): Promise<void> {
 		this.ensureHealthy();
 		try {
+			// DC-60: a NEW session's revision 1 lands with its first durable
+			// event and BEFORE it — a log line never exists without its profile.
+			if (this.#newSession !== undefined) {
+				const { workspace } = this.#newSession;
+				this.#newSession = undefined;
+				this.#writeProfileRevision(workspace);
+			}
 			await this.#store.append(this.id, runId, event);
 			if (event.type === "usage" && event.known) this.#lastUsageAt = Date.now();
 		} catch (err) {
@@ -707,6 +717,9 @@ export class AgentSession {
 	 * recovery, projection or a request reads it.
 	 */
 	recordSummary(open: boolean): void {
+		// DC-60: a session with no durable event has no row — writing one made
+		// a session that never began appear in the list.
+		if (this.log.all.length === 0) return;
 		try {
 			const prior = readProfile(this.#store.root, this.id);
 			writeSummary(
@@ -726,8 +739,18 @@ export class AgentSession {
 	}
 
 	/** XP-1: record the live binding as the next durable profile revision
-	 *  (read-modify-write under the session's single-writer ownership). */
+	 *  (read-modify-write under the session's single-writer ownership).
+	 *  DC-60: a NEW session keeps the binding in memory until its first
+	 *  durable event, which records it (persist). */
 	#recordProfile(): void {
+		if (this.#newSession !== undefined) return;
+		this.#writeProfileRevision(null);
+	}
+
+	/** The next profile revision from the live binding. `startWorkspace` is
+	 *  the workspace a NEW session opened in; with no prior revision and no
+	 *  start (a legacy session's first revision) the start is unknown: null. */
+	#writeProfileRevision(startWorkspace: string | null): void {
 		const prior = readProfile(this.#store.root, this.id);
 		const revision = prior.kind === "ok" ? prior.profile.revision + 1 : 1;
 		writeProfile(
@@ -739,9 +762,9 @@ export class AgentSession {
 				provider: this.#continuationScope ?? null,
 				profileName: this.#profileName,
 				// 0.40.0: history is CARRIED from the prior revision, never
-				// re-derived from this process. With no prior (a legacy
-				// session's first revision) the start is unknown: null.
-				workspace: prior.kind === "ok" ? prior.profile.workspace : null,
+				// re-derived from this process. With no prior, a NEW session's
+				// start is the workspace it opened in; a legacy one's is unknown.
+				workspace: prior.kind === "ok" ? prior.profile.workspace : startWorkspace,
 				reasoning: this.#reasoning,
 				...(this.#config.systemPrompt !== undefined ? { systemPrompt: this.#config.systemPrompt } : {}),
 				registry: this.#config.registry,
@@ -1400,6 +1423,9 @@ export interface SessionConfig {
 	readonly reasoning?: import("./provider/metadata.js").ReasoningSetting;
 	/** XP-1 internal: a legacy session's deferred revision-1 write. */
 	readonly profilePending?: true;
+	/** DC-60 internal: a NEW session — nothing is on disk yet; its revision 1
+	 *  (with the workspace it opened in) lands with its first durable event. */
+	readonly newSession?: { readonly workspace: string | null };
 	/** 0.40.0: the config profile name in force — recorded per revision. */
 	readonly profileName?: string;
 	/** 0.40.0: set when this open acknowledged material drift. */

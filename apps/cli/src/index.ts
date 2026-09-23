@@ -30,7 +30,7 @@ import { newSessionId } from "./session-id.js";
 import { createInterface } from "node:readline";
 import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { Body, Editor, PROMPT, bannerLines, currentGround, resolveGround, setGround, escapeTerminal, extensionsBannerText, idColumn, idleStatus, interactivePrompt, palette, renderSessionLine, sessionListFooter, sessionListHeader, sessionListRow, sessionListUnknownLine, slashCommandNames, type ResumeMeta, type SessionCardView } from "@vincemakes/kiso-tui";
 import {
 	createAgent,
@@ -45,6 +45,7 @@ import { listSessionSidecars, migrateSummaries, readProfile, runsACheck, summary
 import { skillMenuItems } from "./skill-invoke.js";
 import { canonicalPath, claimProjectDir, hasSession, locateSession, projectLayoutActive, sessionFolders, type SessionFolder, type SessionRoute } from "./projects.js";
 import { migrationNotice, pendingLegacyIds, planMigration, reverseMigration, runMigration } from "./session-migration.js";
+import { defaultTrashRoot, findEmptySessions, moveToTrash } from "./empty-sessions.js";
 import { createFauxProvider } from "@vincemakes/kiso-evals";
 import { createCodingTools, isProtectedPath, protectedIdentity, PROTECTED_REFUSAL } from "@vincemakes/kiso-tools-node";
 import { MODES, OFFERED_MODES, getMode, modeExtensions, modeFromEnv, modeSystemPrompt, setMode } from "./mode.js";
@@ -1704,7 +1705,17 @@ async function main(): Promise<void> {
 	// = each form's default (TTY: current; pipe: all, today's bytes).
 	let listScope: "all" | "current" | undefined;
 	let reverseManifest: string | undefined;
+	// DC-60: `kiso sessions --prune-empty [--yes]` — list the sessions that
+	// never began; with --yes, move them to the Trash
+	let pruneEmpty: "list" | "move" | undefined;
 	if (args[0] === "sessions") {
+		const pe = args.indexOf("--prune-empty");
+		if (pe !== -1) {
+			args.splice(pe, 1);
+			const yes = args.indexOf("--yes");
+			if (yes !== -1) args.splice(yes, 1);
+			pruneEmpty = yes !== -1 ? "move" : "list";
+		}
 		// 0.40.0: the undo of the per-project move, named by its manifest
 		const r = args.indexOf("--reverse-migration");
 		if (r !== -1) {
@@ -1929,6 +1940,20 @@ async function main(): Promise<void> {
 				// "reading 'question'" on the dock-less branch). The input
 				// exists so the gate's ask can be answered; the listing
 				// itself never touches it.
+				if (pruneEmpty !== undefined) {
+					// DC-60: before makeAgent — the scan only reads, and nothing
+					// needs an agent to move a file to the Trash
+					const { empty, inUse } = findEmptySessions(listingFolders().map((f) => f.dir));
+					const n = (k: number, w: string): string => `${k} ${w}${k === 1 ? "" : "s"}`;
+					if (empty.length === 0) console.log("no empty sessions");
+					else if (pruneEmpty === "list") {
+						console.log(`${n(empty.length, "empty session")} — a sidecar and no log; none of them ever ran:`);
+						for (const s of empty) console.log(`  ${basename(s.dir)}/${s.id}`);
+						console.log("kiso sessions --prune-empty --yes moves them to the Trash");
+					} else console.log(`moved ${n(empty.length, "empty session")} to ${moveToTrash(empty, defaultTrashRoot())}`);
+					if (inUse > 0) console.log(`skipped ${n(inUse, "empty session")} in use — a live process holds the lock`);
+					break;
+				}
 				if (reverseManifest !== undefined) {
 					// before makeAgent: its folder preparation would otherwise run
 					// the very move this undoes
