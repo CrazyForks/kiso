@@ -8,38 +8,40 @@ import type { ApprovalChain, Event, HookContext, HookHost, KisoExtension, Policy
 import type { SessionConfig } from "./session.js";
 
 /**
- * 0.1.40 (R-C item 1) — the tool substitution table: the fixed vocabulary
- * (the reference implementation's content in kiso's voice, each line bound
- * to the tool that makes
- * it true) filtered to the ACTIVE tool set + each active tool's ONE-line
- * snippet + its guideline bullets. The full descriptions NEVER enter the
- * system prompt — the provider transmits them in the JSON schema anyway
- * (never pay twice). Deterministic: same registry → same table.
+ * 0.1.40 (R-C item 1) — the tool substitution table: vocabulary rows, each
+ * bound to the tool that makes it true, filtered to the ACTIVE tool set +
+ * each active tool's ONE-line snippet + its guideline bullets. The full
+ * descriptions NEVER enter the system prompt — the provider transmits them
+ * in the JSON schema anyway (never pay twice). Deterministic: same registry
+ * + same rows → same table.
+ *
+ * R1 (2026-09-23): the ROWS are the product's (`AgentDefinition.toolRules`),
+ * not the runtime's. They were a constant here — the coding agent's routing
+ * policy, keyed by tool name — and every host whose tool happened to be
+ * called read_file received "never shell cat/head/tail" whether or not it
+ * had a shell. The runtime keeps the mechanism: the filter, the position,
+ * the joining. It knows no row. No rows → no vocabulary lines; the two
+ * fixed directives and the tools' own snippets remain.
  */
-const TOOL_RULES: ReadonlyArray<{ readonly tool: string; readonly line: string }> = [
-	{ tool: "read_file", line: "read files with read_file, never shell cat/head/tail" },
-	{ tool: "search_text", line: "search with search_text, never shell grep/rg" },
-	{ tool: "list_dir", line: "list with list_dir, never ls" },
-	{ tool: "shell", line: "shell for what the file tools cannot do: commands, git, the network, the system" },
-];
+export type ToolRules = ReadonlyArray<{ readonly tool: string; readonly line: string }>;
 
 /** The base a run's system prompt is composed on: the session's prompt,
  *  then the tool table (generated machinery sits BETWEEN the base and the
  *  extension appends). One function, so an in-band summary outside a run
  *  (ADR-0055 A2, /compact) sends the exact prefix a run sends. */
-export function runBasePrompt(systemPrompt: string | undefined, registry: ToolRegistry): string | undefined {
-	const toolTable = composeToolTable(registry);
+export function runBasePrompt(systemPrompt: string | undefined, registry: ToolRegistry, rules: ToolRules = []): string | undefined {
+	const toolTable = composeToolTable(registry, rules);
 	return toolTable === "" ? systemPrompt : systemPrompt === undefined ? toolTable : `${systemPrompt}\n\n${toolTable}`;
 }
 
 /** The table, or "" when the registry is empty (no vocabulary, no tools). */
-export function composeToolTable(registry: ToolRegistry): string {
+export function composeToolTable(registry: ToolRegistry, rules: ToolRules = []): string {
 	const tools = registry.list();
 	if (tools.length === 0) return "";
 	const active = new Set(tools.map((t) => t.name));
 	const lines = [
 		"Tool use:",
-		...TOOL_RULES.filter((r) => active.has(r.tool)).map((r) => `- ${r.line}`),
+		...rules.filter((r) => active.has(r.tool)).map((r) => `- ${r.line}`),
 		// the parallel directive: the window applies to every active turn.
 		"- batch independent tool calls into one reply — they run in parallel",
 		// D1: a tool result is evidence, not an answer — the turn ends with

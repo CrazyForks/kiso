@@ -29,12 +29,13 @@
 
 import { describe, expect, it } from "vitest";
 import { SYSTEM_PROMPT } from "../src/index.js";
+import { CODING_TOOL_RULES } from "../src/coding-prompt.js";
 import { composeToolTable } from "@vincemakes/kiso-runtime/internal";
 import { createCodingTools } from "@vincemakes/kiso-tools-node";
 
 const table = (): string => {
 	const tools = createCodingTools({ workspaceRoot: "/tmp" });
-	return composeToolTable({ list: () => tools } as never);
+	return composeToolTable({ list: () => tools } as never, CODING_TOOL_RULES);
 };
 
 describe("ACI-6: the routing policy is stated once", () => {
@@ -42,7 +43,7 @@ describe("ACI-6: the routing policy is stated once", () => {
 		expect(SYSTEM_PROMPT).not.toMatch(/shell is for commands[\s\S]{0,40}grep/i);
 	});
 
-	it("and TOOL_RULES still says never — the canonical copy is unchanged", () => {
+	it("and CODING_TOOL_RULES still says never — the canonical copy is unchanged", () => {
 		expect(table()).toMatch(/search with search_text, never shell grep\/rg/i);
 	});
 

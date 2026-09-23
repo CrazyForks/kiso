@@ -81,6 +81,12 @@ export interface AgentDefinition {
 	 *  before the request is aborted and retried (default 120 s; 0 off).
 	 *  Type-only additive; read by the runtime's idle guard. */
 	readonly streamIdleMs?: number;
+	/** R1 (2026-09-23): the tool table's vocabulary rows — the product's
+	 *  routing policy, one line per tool NAME, injected only while that tool
+	 *  is active. Absent = no vocabulary lines (the fixed directives and the
+	 *  tools' own snippets still compose). Type-only additive; never part of
+	 *  the profile digest. */
+	readonly toolRules?: ReadonlyArray<{ readonly tool: string; readonly line: string }>;
 	/** E1: loaded extensions — their tools merge into the registry (a name
 	 *  collision with a built-in is a loud startup error), their hooks
 	 *  compose after the agent's own (the existing come first), their approvals join the
@@ -254,6 +260,7 @@ export class AgentRuntime {
 			...(this.#definition.contextPolicy !== undefined ? { contextPolicy: this.#definition.contextPolicy } : {}),
 			...(this.#definition.maxRetries !== undefined ? { maxRetries: this.#definition.maxRetries } : {}),
 			...(this.#definition.streamIdleMs !== undefined ? { streamIdleMs: this.#definition.streamIdleMs } : {}),
+			...(this.#definition.toolRules !== undefined ? { toolRules: this.#definition.toolRules } : {}),
 			...(this.#definition.extensions !== undefined ? { extensions: this.#definition.extensions } : {}),
 		};
 		// 0.40.0: the last bill's time rides the RECORD, not the event.

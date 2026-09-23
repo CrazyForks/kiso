@@ -12,6 +12,14 @@ import { defineTool, ToolRegistry } from "@vincemakes/kiso-core";
 import { composeSystemPrompt, composeToolTable } from "../src/compose.js";
 
 const BASE = "You are a coding agent.";
+/** R1: the rows are the caller's now — the coding agent's, copied here as
+ *  test data so the golden bytes below stay the bytes the round inherited. */
+const RULES = [
+	{ tool: "read_file", line: "read files with read_file, never shell cat/head/tail" },
+	{ tool: "search_text", line: "search with search_text, never shell grep/rg" },
+	{ tool: "list_dir", line: "list with list_dir, never ls" },
+	{ tool: "shell", line: "shell for what the file tools cannot do: commands, git, the network, the system" },
+] as const;
 const EXT = { name: "e1", systemPrompt: { append: "Speak English." } };
 
 function registryWith(tools: Parameters<ToolRegistry["register"]>[0][]): ToolRegistry {
@@ -40,7 +48,7 @@ describe("the tool substitution table (R-C item 1)", () => {
 	it("golden: the assembled prompt is pinned byte-for-byte", () => {
 		// run.ts assembly: base + table, THEN the extension appends — the
 		// generated table never outranks the deliberate extension text.
-		const table = composeToolTable(registryWith([reader, plain]));
+		const table = composeToolTable(registryWith([reader, plain]), RULES);
 		const assembled = composeSystemPrompt(`${BASE}\n\n${table}`, [EXT]);
 		expect(assembled).toBe(`You are a coding agent.
 
@@ -56,7 +64,7 @@ Speak English.`);
 	});
 
 	it("vocabulary lines are filtered to the ACTIVE tool set — no shell, no shell line", () => {
-		const table = composeToolTable(registryWith([reader]));
+		const table = composeToolTable(registryWith([reader]), RULES);
 		expect(table).toContain("read files with read_file");
 		expect(table).not.toContain("reserve shell");
 		expect(table).not.toContain("search with search_text");
@@ -82,6 +90,6 @@ Speak English.`);
 
 	it("deterministic: same registry twice → byte-identical table", () => {
 		const registry = registryWith([reader, plain]);
-		expect(composeToolTable(registry)).toBe(composeToolTable(registry));
+		expect(composeToolTable(registry, RULES)).toBe(composeToolTable(registry, RULES));
 	});
 });

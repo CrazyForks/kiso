@@ -32,7 +32,7 @@ import { runsACheck } from "@vincemakes/kiso-runtime/internal";
 import { providerHost } from "./provider-label.js";
 import { adapterOptionsFor } from "./auth/adapter-options.js";
 import { createFauxProvider } from "@vincemakes/kiso-evals";
-import { composeSystemPrompt } from "./coding-prompt.js";
+import { CODING_TOOL_RULES, composeSystemPrompt } from "./coding-prompt.js";
 import { createAgent, loadExtensions, loadProjectExtensions, SessionStore, type AgentDefinition, type ContextPolicy } from "@vincemakes/kiso-runtime";
 
 /** LT-1: the stream watchdog's bound from the environment — a non-negative
@@ -266,6 +266,7 @@ export async function createCodingAgent(sessionId: string | undefined, input?: L
 		// Area 5: the coding tools are bound to the workspace — every path
 		// they touch is canonicalized inside cwd, escapes are refused.
 		tools: [...createCodingTools(codingToolOptions())], // DC-49 — the options live in state.ts, shared with the `!` command's runner
+		toolRules: CODING_TOOL_RULES, // R1: the product's rows, in the runtime's table
 		// Modes: the five tiers ride the E1 policy chain (mode:<tier>
 		// extensions, current tier first) — the old static PERMISSION_POLICY
 		// is gone, its semantics live in the "default" tier. The banner

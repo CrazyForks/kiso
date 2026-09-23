@@ -88,3 +88,22 @@ export function composeSystemPrompt(cwd: string, protectedFiles: readonly string
 	const injected = readProjectInstructions(cwd, protectedFiles);
 	return injected === "" ? SYSTEM_PROMPT : `${SYSTEM_PROMPT}\n${injected}`;
 }
+
+/**
+ * The coding agent's tool-table vocabulary — one routing line per tool, in
+ * the table only while that tool is active (0.1.40, R-C item 1: the
+ * reference implementation's content in kiso's voice). ACI-6 made this the
+ * ONE canonical statement of the routing policy; the base prompt above no
+ * longer restates it.
+ *
+ * R1 (2026-09-23): moved verbatim from the runtime's compose.ts, where it
+ * sat as a constant and reached every host whose tools shared these names.
+ * The rows, their order and their position in the table are unchanged —
+ * the byte fixture in tests/fixtures pins that.
+ */
+export const CODING_TOOL_RULES: ReadonlyArray<{ readonly tool: string; readonly line: string }> = [
+	{ tool: "read_file", line: "read files with read_file, never shell cat/head/tail" },
+	{ tool: "search_text", line: "search with search_text, never shell grep/rg" },
+	{ tool: "list_dir", line: "list with list_dir, never ls" },
+	{ tool: "shell", line: "shell for what the file tools cannot do: commands, git, the network, the system" },
+];

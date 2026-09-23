@@ -102,7 +102,7 @@ export class Run implements AsyncIterable<Event> {
 			// session's base prompt and the extension appends: generated
 			// machinery never outranks the deliberate extension text (the E2
 			// "append lands at the END" contract holds). "" when empty.
-			const basePrompt = runBasePrompt(this.#config.systemPrompt, this.#config.registry);
+			const basePrompt = runBasePrompt(this.#config.systemPrompt, this.#config.registry, this.#config.toolRules ?? []);
 			// E3 — the ledger's parts: the base as CONFIGURED (what the CLI
 			// handed the runtime — the tool table is generated machinery, R3)
 			// and the extension appends in load order (R4 attribution). The

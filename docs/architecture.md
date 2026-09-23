@@ -103,6 +103,13 @@ There is no single composition-root file, and the split is the point: the
 product owns product choices; the runtime owns wiring. Neither half runs
 the loop.
 
+The same line runs through the tool table (R1, 2026-09-23): the runtime
+owns HOW vocabulary rows compose — filtered to the active tool set, placed
+before the tools' own snippets — and the product owns WHICH rows exist
+(`AgentDefinition.toolRules`; kiso-code's are `CODING_TOOL_RULES` in
+`apps/cli/src/coding-prompt.ts`). A definition that passes no rows gets a
+table with no vocabulary lines.
+
 ## 3. Agent — definition and factory
 
 `AgentRuntime` (`packages/runtime/src/agent.ts`) holds an
