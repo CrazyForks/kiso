@@ -803,7 +803,7 @@ async function makeAgent(sessionId: string | undefined, input?: LineInput, model
 	// channel and not an exported KISO_SESSIONS_DIR: a variable in
 	// process.env would reach every shell child, and a kiso started from a
 	// shell tool would then write into this project's folder.
-	process.env.KISO_DELEGATION_CONFIG_JSON = JSON.stringify({ checks: merged.checks ?? {}, profiles: Object.keys(merged.models ?? {}), sessionsDir: sessionsDir() });
+	process.env.KISO_DELEGATION_CONFIG_JSON = JSON.stringify({ checks: merged.checks ?? {}, evaluators: merged.evaluators ?? [], profiles: Object.keys(merged.models ?? {}), sessionsDir: sessionsDir() });
 	setConfigModels(merged.models ?? {});
 	// CW-1 batch 2: the windows endpoints stated by refusing — read before the
 	// first window is asked for (the unknown-window notice below).

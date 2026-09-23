@@ -140,6 +140,7 @@
   "extensions/mcp/tests/mcp-e2e.test.ts",
   "extensions/mcp/tests/mcp.test.ts",
   "extensions/skills/tests/skills-e2e.test.ts",
+  "extensions/subagent/tests/cs1-evaluator-allowlist.test.ts",
   "extensions/subagent/tests/cx1-batch-a.test.ts",
   "extensions/subagent/tests/cx1-review-projection.test.ts",
   "extensions/subagent/tests/delegate-summary.test.ts",

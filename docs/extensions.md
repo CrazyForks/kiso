@@ -206,7 +206,11 @@ Configuration: `$KISO_MCP_CONFIG` (default `~/.kiso/mcp.json`):
   names an entry of the config's `checks` map (`"checks": { "test":
   "npm test" }`, user-authored or trust-gated project config) or
   `{ "evaluator": "/abs/path" }` names a script the PARENT holds outside
-  the project; **a model never supplies a command** — anything else is
+  the project AND the user listed in the config's `evaluators`
+  (`"evaluators": ["/abs/path/evaluate.sh"]`, compared by real path — an
+  unlisted path is refused, since a path the model picks could be an
+  interpreter running code the child wrote; 0.40.7, finding CS-1);
+  **a model never supplies a command** — anything else is
   refused before a child runs; the parent runs the acceptance in the
   child's worktree after a `completed` child (own process group, the
   child's timeout, output capped, killed on abort); a check's exit code
