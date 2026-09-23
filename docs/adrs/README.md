@@ -58,7 +58,9 @@ that has not finished speaking.
 the cli gate 1320 → 1856, one argued recalibration for the Config
 round's spec-forced growth; next approach without argument = extraction,
 not another recalibration)
-- 0044 — The compact summary layer — Accepted
+- 0044 — The compact summary layer — Accepted (the covered-range
+  sentence superseded by 0055 Amendment 2: a checkpoint replaces every
+  earlier one)
 - 0045 — The config surface: credentials never on disk, project config
   in the trust package, no "always" — Accepted
 - 0046 — The one-compositor — Accepted
@@ -104,6 +106,11 @@ not another recalibration)
   over MEASURED session shapes; five of six real shapes never reach any
   threshold, so it rests on one observed session in three hundred and
   says so.
+  Amendment 2 (2026-09-22, P0 in 0.40.1): a checkpoint REPLACES every
+  earlier one (ranges nest, one summary projects); a compaction must
+  remove at least what it writes; overflow is recognised without a status
+  and, past a stated window, by kiso's own measure; the reserve is what
+  the endpoint may grant.
 - 0056 — One resident line per MCP server, or one proxy tool — **Accepted**,
   2026-09-17, ratified by the owner. The entire
   built-in tool surface measures 3,772 B (~943 tokens) — the denominator

@@ -60,7 +60,7 @@ import { maxRetriesFromEnv } from "./retries.js";
 import { askUi, resolveProjectTrust } from "./trust-ui.js";
 import { isFirstRun, scaffoldFirstRun } from "./first-run.js";
 import { fauxSkip, readFauxScript } from "./faux-glue.js";
-import { chat, contextWindowTokens, displayCtxRatio, microcompactThresholdFor, statusModelLabel } from "./chat.js";
+import { chat, compactionDiscardedNotice, contextWindowTokens, displayCtxRatio, knownContextWindow, microcompactThresholdFor, statusModelLabel, unknownWindowNotice } from "./chat.js";
 import { adapterOptionsFor } from "./auth/adapter-options.js";
 import { loadProjectConfig, loadUserConfig, mergeConfigs, resolveAutoCompact, resolveContextWindow, resolveModel } from "./config.js";
 import { checkForUpdate, knownUpdate, updateCardLines } from "./update-check.js";
@@ -817,6 +817,12 @@ async function makeAgent(sessionId: string | undefined, input?: LineInput, model
 		setCurrentProfileName(resolved.name);
 	}
 	setAgentModel(model, resolved?.profile.baseUrl); // v2b: the status bar shows it; OR-1: the endpoint rides along
+	// ADR-0055 Amendment 2: the row says `ctx ?` for an unstated window, but
+	// the tiers still need a number and assume 200K — say so, once, at build.
+	if (!unknownWindowNoticed && knownContextWindow() === null) {
+		unknownWindowNoticed = true;
+		console.error(unknownWindowNotice(model));
+	}
 
 	// W21: the extensions array is built ONCE per agent and shared with
 	// the runtime by reference — the don't-ask-again writer pushes the
@@ -885,7 +891,16 @@ async function makeAgent(sessionId: string | undefined, input?: LineInput, model
 		// 1 reads the user's configured checks first, then the runner table.
 		contextPolicy: {
 			...(contextPolicy ?? {}),
-			tiers: { windowTokens: contextWindowTokens(), isCheck: (command: string) => runsACheck(command, Object.values(merged.checks ?? {})) },
+			tiers: {
+				windowTokens: contextWindowTokens(),
+				isCheck: (command: string) => runsACheck(command, Object.values(merged.checks ?? {})),
+				// ADR-0055 Amendment 2: a discarded checkpoint says so, in sizes only.
+				onDiscard: (d) => body.notice(compactionDiscardedNotice(d)),
+				// ADR-0055 Amendment 2 (decision 3): only a window someone stated
+				// arms the overflow belt — read from the LIVE binding, so it moves
+				// with /model and /resume; the 200K fallback reads as null.
+				statedWindow: () => knownContextWindow(),
+			},
 		},
 		// R3e (owner ruling, 2026-08-28): NO turn limit on an interactive
 		// session. This was `maxTurns: 20`, hardcoded on 2026-08-03 with no
@@ -1142,6 +1157,7 @@ async function pickSession(agent: Awaited<ReturnType<typeof makeAgent>>, input: 
  * once; 0.41.0 removes it.
  */
 let autoCompactNoticed = false;
+let unknownWindowNoticed = false;
 function retiredAutoCompact(merged: Parameters<typeof resolveAutoCompact>[0]): undefined {
 	if (!autoCompactNoticed && (process.env.KISO_AUTO_COMPACT !== undefined || resolveAutoCompact(merged) !== undefined)) {
 		autoCompactNoticed = true;

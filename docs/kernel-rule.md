@@ -26,10 +26,10 @@ $ npm run size
 core:
   packages/core/src/kernel/loop.ts      897
   packages/core/src/protocol/events.ts  490
-  packages/core/src/kernel/project.ts   360
+  packages/core/src/kernel/project.ts   356
   ...
-  total                                2192  / 2200
-  ✓ 8 lines of headroom remaining.
+  total                                2189  / 2200
+  ✓ 11 lines of headroom remaining.
 
 cli:
   apps/cli/src/index.ts     981

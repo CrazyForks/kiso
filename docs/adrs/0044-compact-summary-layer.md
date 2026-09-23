@@ -1,6 +1,6 @@
 # ADR-0044: the context three-layer merge — classic compaction retires into microcompact; /compact adds the model-summary layer
 
-- **Status:** Accepted
+- **Status:** Accepted (the covered-range sentence superseded by ADR-0055 Amendment 2, 2026-09-22: a checkpoint replaces every earlier one)
 - **Date:** 2026-08-06
 - **Layer:** core (kernel + protocol) + runtime (session) + cli (the /compact command)
 

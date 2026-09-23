@@ -161,23 +161,21 @@ export function projectMessages(events: readonly (Event | EventInput)[]): readon
 	for (const ev of events) {
 		if (ev.type === "tool_call_end") callMeta.set(ev.callId, { name: ev.name, input: ev.input });
 	}
-	// ADR-0044: summarized coverage — each `summarized` event covers the
-	// range (previous coversToSeq, coversToSeq] of ORDINARY events. The
-	// ranges are disjoint and in seq order; boundaries are turn boundaries
-	// by construction (summaryBoundarySeq cuts before a user_input), so a
-	// skipped event never splits a message. Each summary message renders
-	// AT ITS BOUNDARY — the first event after the covered range — NOT at
-	// the summarized event itself: the event sits at the log's END (the
-	// kept rounds live between the boundary and it), and the summary must
-	// precede the kept conversation in reading order.
+	// ADR-0055 Amendment 2: a checkpoint REPLACES every earlier one. The
+	// summarized event with the greatest coversToSeq covers (−1,
+	// coversToSeq] of ORDINARY events and is the ONE summary that renders;
+	// the superseded ones stay durable and render nothing. (ADR-0044's
+	// disjoint ranges kept every earlier summary beside an in-band
+	// checkpoint that already restated them — the 0.40.1 stacking.) The
+	// boundary is a turn boundary by construction, so a skipped event never
+	// splits a message. The summary renders AT ITS BOUNDARY — the first
+	// event after the covered range — NOT at the summarized event itself:
+	// the event sits at the log's END (the kept rounds live between the
+	// boundary and it), and the summary must precede the kept conversation.
 	const summaryRanges: { from: number; to: number; summary: string }[] = [];
-	{
-		let prev = -1;
-		for (const ev of events) {
-			if (ev.type === "summarized") {
-				summaryRanges.push({ from: prev, to: ev.coversToSeq, summary: ev.summary });
-				prev = ev.coversToSeq;
-			}
+	for (const ev of events) {
+		if (ev.type === "summarized" && (summaryRanges[0] === undefined || ev.coversToSeq >= summaryRanges[0].to)) {
+			summaryRanges[0] = { from: -1, to: ev.coversToSeq, summary: ev.summary };
 		}
 	}
 	// R-E 0.1.43 (Gap B): a model_output_abandoned marker voids the range

@@ -160,3 +160,28 @@ describe("A1b — a 400 that says the context is too long is an overflow", () =>
 		expect(mapApiError(400, "invalid tool schema").code).toBe("invalid_request");
 	});
 });
+
+describe("ADR-0055 Amendment 2 (decision 3) — the overflow is recognised by what it says, whatever the status", () => {
+	// d4fc, verbatim: the op gateway streamed this with NO HTTP status, and
+	// 0.40.1 classified it `unknown` — the overflow recovery never ran.
+	const D4FC =
+		"[deepseek] request failed: Streaming response failed: [400] This model's maximum context length is 1048576 tokens. However, you requested 131072 output tokens and your prompt contains at least 917505 input tokens, for a total of at least 1048577 tokens. Please reduce the length of the input prompt or the number of requested output tokens. (parameter=input_tokens, value=917505)";
+
+	it("a streamed refusal with no status is context_overflow, not retryable", () => {
+		const e = mapApiError(undefined, D4FC);
+		expect(e.code).toBe("context_overflow");
+		expect(e.retryable).toBe(false);
+	});
+
+	it("a 5xx that says the context is too long is context_overflow — its retries would re-send what cannot fit", () => {
+		const e = mapApiError(500, "request failed: 500 This model's maximum context length is 1048576 tokens");
+		expect(e.code).toBe("context_overflow");
+		expect(e.retryable).toBe(false);
+		expect(e.status).toBe(500);
+	});
+
+	it("a bare 5xx keeps its retries, and an unrelated status-less failure stays unknown", () => {
+		expect(mapApiError(500, "[deepseek] request failed: 500 Internal server error")).toMatchObject({ code: "api_5xx", retryable: true });
+		expect(mapApiError(undefined, "something odd").code).toBe("unknown");
+	});
+});

@@ -19,6 +19,7 @@ import {
 	policyTriggerFromWindow,
 	serializeCovered,
 	SUMMARY_GUARD,
+	SUMMARY_IN_BAND,
 	SUMMARY_MAX_OUTPUT,
 	SUMMARY_PROMPT,
 	summarizeConversation,
@@ -443,12 +444,11 @@ describe("E6 (b) — the output validation (the rejection path)", () => {
 	});
 });
 
-describe("E6 (d) — the retained context re-enters the summary input", () => {
-	it("an old summary text is labeled 'retained context, do not re-summarize' — never silently dropped", () => {
-		// Round 4 ended at seq 8 and was covered by an earlier summary; the
-		// NEW covered range is (8, 17] (rounds 5-6). The old summary text is
-		// the durable record of rounds 1-3 — the summarizer must SEE it
-		// (the order's R4: session.ts's filter once dropped it entirely).
+describe("ADR-0055 A2 — the serialised input folds in the previous checkpoint (E6 (d) retired)", () => {
+	it("the LATEST prior checkpoint is shown as material the new one replaces — never as 'do not re-summarize'", () => {
+		// Round 4 ended at seq 8 and was covered by an earlier checkpoint; the
+		// NEW covered range is (8, 17] (rounds 5-6). The new checkpoint
+		// replaces the old one, so the summariser must fold it in.
 		const events: Event[] = [
 			...roundEvents("r1", "a", 0),
 			...roundEvents("r2", "a", 3),
@@ -456,18 +456,25 @@ describe("E6 (d) — the retained context re-enters the summary input", () => {
 			...roundEvents("r4", "a", 9),
 			...roundEvents("r5", "a", 12),
 			...roundEvents("r6", "a", 15),
-			ev(18, { type: "summarized", coversToSeq: 8, summary: "S1: rounds 1-3 covered" }),
+			ev(18, { type: "summarized", coversToSeq: 2, summary: "S0: round 1 covered" }),
+			ev(19, { type: "summarized", coversToSeq: 8, summary: "S1: rounds 1-3 covered" }),
 		];
 		const text = serializeCovered({ events, prevPoint: 8, boundary: 17 });
-		// The retained block label + the do-not-re-summarize instruction.
-		expect(text).toContain("[retained context");
-		expect(text).toContain("do not re-summarize");
-		// The old summary's text rides verbatim — exactly once (the retained
-		// copy; the covered range holds rounds 5-6 only, no duplicate).
-		expect(text).toContain("S1: rounds 1-3 covered");
+		expect(text).not.toContain("do not re-summarize");
+		expect(text).toContain("[previous checkpoint");
+		expect(text).toContain("replaces it");
+		// Only the latest prior checkpoint — the one the projection shows —
+		// rides, exactly once; the superseded S0 does not.
 		expect(text.split("S1: rounds 1-3 covered")).toHaveLength(2);
-		// The covered turns still read normally after the retained block.
-		expect(text.indexOf("[retained context")).toBeLessThan(text.indexOf("[user] r5"));
+		expect(text).not.toContain("S0: round 1 covered");
+		// The covered turns read after it.
+		expect(text.indexOf("[previous checkpoint")).toBeLessThan(text.indexOf("[user] r5"));
+	});
+
+	it("the summary prompt states the replacement: the checkpoint restates the whole task", () => {
+		expect(SUMMARY_PROMPT).toContain("REPLACE");
+		expect(SUMMARY_PROMPT).toContain("every earlier checkpoint");
+		expect(SUMMARY_IN_BAND).toContain("every earlier checkpoint");
 	});
 });
 

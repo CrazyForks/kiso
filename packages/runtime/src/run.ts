@@ -11,6 +11,7 @@ import { resolveReasoning, type WireReasoning } from "./provider/metadata.js";
 import { deriveRecoveryPlan, invocationSeqOf } from "./recovery-plan.js";
 import { composeApprovalChain, composeSystemPrompt, runBasePrompt } from "./compose.js";
 import { truncationGuard } from "./truncation-guard.js";
+import { overflowBelt } from "./overflow-belt.js";
 import { DEFAULT_STREAM_IDLE_MS, idleGuard } from "./idle-guard.js";
 import { RequestTracer, traceGuard } from "./trace/guard.js";
 import type { RentParts } from "./trace/rent.js";
@@ -162,7 +163,10 @@ export class Run implements AsyncIterable<Event> {
 					// LT-1: the idle guard sits closest to the adapter — a stall is
 					// aborted and thrown there, the truncation guard and the tracer see
 					// the same events and the same error every other transport failure shows them.
-					adapter: traceGuard(tracer!, truncationGuard(idleGuard(this.#adapter, this.#config.streamIdleMs ?? DEFAULT_STREAM_IDLE_MS))), // tracer assigned above, before loopConfig
+					// ADR-0055 Amendment 2 (decision 3): the overflow belt sits outside
+					// the guards, so a stall or a cut on a request known not to fit is
+					// classified as the overflow it is, and the tracer records that.
+					adapter: traceGuard(tracer!, overflowBelt(truncationGuard(idleGuard(this.#adapter, this.#config.streamIdleMs ?? DEFAULT_STREAM_IDLE_MS)), () => this.#session.overflowMeasure())), // tracer assigned above, before loopConfig
 					model: this.#config.model,
 					sessionId: this.#session.id, // P3: tools see their session (ToolContext.sessionId)
 					...(systemPrompt !== undefined ? { systemPrompt } : {}),

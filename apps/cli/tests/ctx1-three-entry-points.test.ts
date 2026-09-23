@@ -92,8 +92,9 @@ function completedTerminals(home: string): number {
 }
 
 /** A history whose projected estimate lands between the two windows' tiers:
- *  over the 200k window's emergency (168k), under the 1M window's soft
- *  (400k).
+ *  over the 200k window's hard tier (160k — with no stated max output the
+ *  emergency tier folds into hard, ADR-0055 Amendment 2), under the 1M
+ *  window's soft (400k).
  *
  *  Written through the STORE, not by appending lines. A hand-written record
  *  is rejected — `line 4 is not a session record` — because the durable
@@ -107,8 +108,8 @@ async function seedHistory(home: string): Promise<void> {
 	// A1b: SETTLED rounds (call, stop, result), as a real log has them — a
 	// summary cuts only at a settled round, and a crash-shaped history of
 	// stop-less calls is one round still in flight, which no tier may cut.
-	// Sixty rounds ≈ 180k: over the 200k window's emergency tier (168k), so
-	// every door fires whatever the phase; under the 1M window's soft 400k.
+	// Sixty rounds ≈ 180k: over the 200k window's hard tier (160k), so every
+	// door fires whatever the phase; under the 1M window's soft 400k.
 	for (let i = 0; i < 60; i++) {
 		await store.append(SESSION, "seed", { seq: seq++, type: "tool_call_end", callId: `c${i}`, name: "read_file", input: { path: `f${i}.ts` } } as never);
 		await store.append(SESSION, "seed", { seq: seq++, type: "stop", reason: "tool_use" } as never);

@@ -29,8 +29,8 @@ export function parseRetryAfter(value: string | null | undefined, now = Date.now
 
 /** ADR-0055 §3: how the providers word a refused context — openai-compat's
  *  "maximum context length" / `context_length_exceeded`, Anthropic's
- *  "prompt is too long". That 400 is an overflow, not a malformed request:
- *  the kernel compacts once and retries once. */
+ *  "prompt is too long". It is an overflow, not a malformed request, at any
+ *  status (Amendment 2): the kernel compacts once and retries once. */
 const CONTEXT_TOO_LONG = /maximum context length|context_length_exceeded|prompt is too long|context window/i;
 
 export function mapApiError(status: number | undefined, message: string, retryAfterMs?: number): StructuredError {
@@ -40,6 +40,10 @@ export function mapApiError(status: number | undefined, message: string, retryAf
 		...(retryAfterMs !== undefined && Number.isFinite(retryAfterMs) && retryAfterMs >= 0 ? { retryAfterMs } : {}),
 	});
 
+	// ADR-0055 Amendment 2 (decision 3): the refusal is recognised by what it
+	// SAYS, whatever the status — a streamed 400 arrives with none (d4fc), and
+	// a 5xx that says so would only re-send what cannot fit.
+	if (CONTEXT_TOO_LONG.test(message)) return withStatus({ code: "context_overflow", retryable: false, message });
 	switch (status) {
 		case 401:
 		case 403:
@@ -51,7 +55,7 @@ export function mapApiError(status: number | undefined, message: string, retryAf
 		case 529:
 			return withStatus({ code: "overloaded", retryable: true, message });
 		case 400:
-			return withStatus({ code: CONTEXT_TOO_LONG.test(message) ? "context_overflow" : "invalid_request", retryable: false, message });
+			return withStatus({ code: "invalid_request", retryable: false, message });
 		default:
 			if (status !== undefined && status >= 500 && status < 600) {
 				// D4: every 500-599 is api_5xx and retryable.

@@ -87,7 +87,7 @@ describe("AgentSession.summarize (ADR-0044)", () => {
 		expect(msgs.some((m) => m.role === "user" && m.content === "turn 0")).toBe(false);
 	});
 
-	it("a second summarize covers the rounds since the first summary point only", async () => {
+	it("a second summarize REPLACES the first (ADR-0055 A2): its boundary moves past the first, ONE summary projects", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "kiso-compact2-"));
 		const store = new SessionStore(dir);
 		await seedLongSession(store);
@@ -116,20 +116,21 @@ describe("AgentSession.summarize (ADR-0044)", () => {
 		const session3 = await agent3.session({ id: "s" });
 		const result2 = await session3.summarize();
 		expect(result2).not.toBeNull();
-		// The second summary covers (firstCovers, newBoundary] — it never
-		// re-covers the first range, and the projection shows TWO summaries.
+		// Both events stay durable; the second's boundary lies past the
+		// first's. Declared supersession (ADR-0051 Amendment 3 (b)): this
+		// golden read TWO projected summaries while ranges tiled — the second
+		// checkpoint now covers (−1, its boundary] and is the only one sent.
 		const durable = store.load("s");
 		const summaries = durable.filter((r) => r.event.type === "summarized");
 		expect(summaries).toHaveLength(2);
 		const [s1, s2] = summaries.map((r) => r.event as { coversToSeq: number });
 		expect(s2!.coversToSeq).toBeGreaterThan(s1!.coversToSeq);
-		// Both summaries render as USER messages (the E6 (e) framing) —
-		// each carries the framing prefix + its body, never as assistant
-		// echoes — and both ride the projection in reading order.
+		// The one summary renders as a USER message (the E6 (e) framing).
 		const summaryMsgs = projectMessages(durable.map((r) => r.event))
 			.filter((m) => m.role === "user" && typeof m.content === "string" && m.content.includes(SUMMARY_FRAMING))
 			.map((m) => (m.role === "user" ? String(m.content) : ""));
-		expect(summaryMsgs.filter((t) => t.includes(VALID_SUMMARY))).toHaveLength(2);
+		expect(summaryMsgs).toHaveLength(1);
+		expect(summaryMsgs[0]).toContain(VALID_SUMMARY);
 	});
 
 	it("a failed summary leaves the session byte-identical (nothing happened)", async () => {
