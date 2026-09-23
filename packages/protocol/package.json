@@ -1,0 +1,37 @@
+{
+	"name": "@vincemakes/kiso-protocol",
+	"version": "0.40.7",
+	"description": "kiso protocol — the wire contract between a hosted kiso session and its clients: request envelopes, wire events (a projection of the durable stream, never the stream itself), the session snapshot, one error shape, a version. Zero runtime dependencies.",
+	"type": "module",
+	"license": "MIT",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"default": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist",
+		"README.md",
+		"LICENSE"
+	],
+	"scripts": {
+		"build": "tsc -p tsconfig.build.json",
+		"typecheck": "tsc -p tsconfig.json",
+		"test": "vitest run"
+	},
+	"devDependencies": {
+		"@types/node": "^26.1.2",
+		"typescript": "^5.7.2",
+		"vitest": "^3.0.0"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/vincemakes/kiso.git",
+		"directory": "packages/protocol"
+	},
+	"bugs": {
+		"url": "https://github.com/vincemakes/kiso/issues"
+	},
+	"homepage": "https://github.com/vincemakes/kiso/tree/main/packages/protocol#readme"
+}

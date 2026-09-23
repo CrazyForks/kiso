@@ -1,0 +1,78 @@
+/**
+ * R1 (2026-09-23) — the tool table's vocabulary rows are the DEFINITION's.
+ *
+ * The runtime carried the coding agent's routing rows as a constant keyed
+ * by tool name, so a host that named a tool read_file received "never
+ * shell cat/head/tail" — with or without a shell. The sentence this file
+ * exists for: a definition that passes no rows gets no vocabulary line.
+ * The first test is RED on the code before R1.
+ */
+
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { defineTool, ToolRegistry } from "@vincemakes/kiso-core";
+import { createFauxProvider } from "@vincemakes/kiso-evals";
+import { composeToolTable } from "../src/compose.js";
+import { createAgent, SessionStore } from "../src/index.js";
+
+const reader = defineTool({
+	name: "read_file",
+	description: "A host's own reader that happens to share the coding tool's name.",
+	parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+	execute: async () => ({ content: "", isError: false }),
+});
+
+const ROW = { tool: "read_file", line: "read files with read_file, never shell cat/head/tail" } as const;
+
+describe("R1: the table's vocabulary rows come from the definition", () => {
+	it("no rows → a read_file tool gets no 'never shell' line (red before R1)", () => {
+		const registry = new ToolRegistry();
+		registry.register(reader);
+		const table = composeToolTable(registry);
+		expect(table).not.toMatch(/never shell/);
+		expect(table).toContain("Tool use:"); // the fixed directives still compose
+	});
+
+	it("rows passed → the line is there, filtered to the ACTIVE set", () => {
+		const registry = new ToolRegistry();
+		registry.register(reader);
+		const table = composeToolTable(registry, [ROW, { tool: "shell", line: "shell for everything else" }]);
+		expect(table).toContain("- read files with read_file, never shell cat/head/tail");
+		expect(table).not.toContain("shell for everything else"); // no shell tool → no shell row
+	});
+
+	it("end to end: the system prompt the adapter receives carries the definition's rows and nothing else", async () => {
+		const seen: (string | undefined)[] = [];
+		const capture = (script: Parameters<typeof createFauxProvider>[0]) => {
+			const base = createFauxProvider(script);
+			return {
+				stream: (options: Parameters<typeof base.stream>[0]) => {
+					seen.push(options.systemPrompt);
+					return base.stream(options);
+				},
+			};
+		};
+		const script = [{ events: [{ type: "text_delta" as const, text: "ok" }, { type: "stop" as const, reason: "end_turn" as const }] }];
+		const run = async (toolRules?: readonly { readonly tool: string; readonly line: string }[]) => {
+			const agent = createAgent({
+				model: "faux",
+				systemPrompt: "You are a host.",
+				store: new SessionStore(mkdtempSync(join(tmpdir(), "kiso-toolrules-"))),
+				tools: [reader],
+				adapter: capture(script),
+				...(toolRules !== undefined ? { toolRules } : {}),
+			});
+			const session = await agent.session({ id: "s" });
+			for await (const _ of session.run("hi")) {
+				// drain
+			}
+		};
+		await run();
+		await run([ROW]);
+		expect(seen).toHaveLength(2);
+		expect(seen[0]).not.toMatch(/never shell/);
+		expect(seen[1]).toContain("- read files with read_file, never shell cat/head/tail");
+	});
+});

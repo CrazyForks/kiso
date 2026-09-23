@@ -84,6 +84,27 @@ It must not decide: anything about the model/tool cycle, event semantics,
 or durability. A second host (server, IDE, script) must get the identical
 agent semantics by driving the same runtime surface.
 
+## 1b. Hosting — `packages/server` (R3, 2026-09-23)
+
+A product backend that keeps many sessions alive in one process uses the
+hosted-session service instead of writing its own registry: one run per
+session, observers with exact replay from a sequence number, approve /
+abort / resume routed to the right run, drain and close. It sits ABOVE
+the composition step — the product hands it an agent factory — and below
+any transport. It is not a second agent: every run it drives is a
+session's own `run()` / `resume()`. kiso-code does not use it (one
+session per process, no observers).
+
+Above the service, `packages/protocol` (R4) is the wire contract — request
+envelopes, wire events, the snapshot, one error shape, a version — with
+zero dependencies, and `packages/server/http` is the HTTP + SSE transport
+over the service. A wire event is a PROJECTION of a durable event (a
+curated subset, an allowlist of fields, tool arguments sanitized), never
+the durable type: the persistence contract and the transport contract
+move on their own. `packages/client` (R5) is the typed client over that
+contract — browser and Node, protocol-only, with a stream that reconnects
+on `Last-Event-ID` and never repeats a seq.
+
 ## 2. Composition — two homes, on purpose
 
 Composition is split between "what" and "how":
@@ -102,6 +123,13 @@ Composition is split between "what" and "how":
 There is no single composition-root file, and the split is the point: the
 product owns product choices; the runtime owns wiring. Neither half runs
 the loop.
+
+The same line runs through the tool table (R1, 2026-09-23): the runtime
+owns HOW vocabulary rows compose — filtered to the active tool set, placed
+before the tools' own snippets — and the product owns WHICH rows exist
+(`AgentDefinition.toolRules`; kiso-code's are `CODING_TOOL_RULES` in
+`apps/cli/src/coding-prompt.ts`). A definition that passes no rows gets a
+table with no vocabulary lines.
 
 ## 3. Agent — definition and factory
 

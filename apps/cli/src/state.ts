@@ -384,7 +384,7 @@ export function bodyLog(text: string, wrap?: "words"): void {
 	body.raw(text.split("\n"), wrap);
 }
 
-/** TUI2-R2 ②/③: the session store makeAgent built — the ONE store per
+/** TUI2-R2 ②/③: the session store createCodingAgent built — the ONE store per
  *  process. The navigation surfaces need its read side (load) to project
  *  the badges, and a second store on the same root would be a second
  *  lock manager for a job that never writes. */
@@ -393,7 +393,14 @@ export function setSessionStore(value: { load(id: string): readonly StoreRecord[
 	sessionStoreRef = value;
 }
 
-/** The model name for the status bar — set by makeAgent. */
+/** The folder createCodingAgent built the store on — written there and by
+ *  the resume picker's folder switch, read by the listings. */
+export let activeStoreDir = "";
+export function setActiveStoreDir(value: string): void {
+	activeStoreDir = value;
+}
+
+/** The model name for the status bar — set by createCodingAgent. */
 export let agentModel = "faux";
 /** OR-1: the live model's ENDPOINT, set in the same call as the model so
  *  the two can never drift: the window lookup keys on (model, endpoint). */
@@ -404,14 +411,14 @@ export function setAgentModel(value: string, baseUrl?: string): void {
 }
 
 /** merge round B: whether the agent runs on the faux provider (no real key) —
- *  set inside makeAgent, read by main for chat/resume's exhaustion check. */
+ *  set inside createCodingAgent, read by main for chat/resume's exhaustion check. */
 export let currentFaux = true;
 export function setCurrentFaux(value: boolean): void {
 	currentFaux = value;
 }
 
 /** merge round B: the merged config (user + trusted project) as resolved by the
- *  LAST makeAgent — /model and autoCompact resolve against it. */
+ *  LAST createCodingAgent — /model and autoCompact resolve against it. */
 export let mergedConfig: import("./config.js").KisoConfig = {};
 export function setMergedConfig(value: import("./config.js").KisoConfig): void {
 	mergedConfig = value;
@@ -475,7 +482,7 @@ export function upstreamOf(baseUrl: string | undefined): string | undefined {
  * first reload — the effort-axis round produced that bug once already
  * from having two sources for the model.
  *
- * One variable, seeded by `makeAgent` from the startup flag and
+ * One variable, seeded by `createCodingAgent` from the startup flag and
  * overwritten by `/model`. Undefined means "resolve exactly as this
  * process did at startup", which is the right answer for a session that
  * never named a profile.
@@ -507,7 +514,7 @@ export function setCurrentProfileName(value: string | null): void {
  *  session being left and none is dropped. */
 export const queuedSwitchLines: string[] = [];
 
-/** E1: the extensions loaded by makeAgent — their names feed the banner. */
+/** E1: the extensions loaded by createCodingAgent — their names feed the banner. */
 /** 0.40.0: whether the catastrophe floor is on (floor.ts) — the user
  *  config's `floor`, read where the chain is assembled. */
 /** 0.40.6: what /settings needs to name each value's layer — the two config
@@ -566,7 +573,7 @@ export function loadedSkillsCatalog(): import("@vincemakes/kiso-skills-ext").Ski
 	return ext?.catalog ?? null;
 }
 
-/** W21: the CURRENT agent's extensions array — set by makeAgent, the
+/** W21: the CURRENT agent's extensions array — set by createCodingAgent, the
  *  don't-ask-again writer pushes the generated extension into it so a
  *  first-time rule joins the chain at the NEXT run (the run's policies
  *  are fixed at its start; the array is shared by reference with the
