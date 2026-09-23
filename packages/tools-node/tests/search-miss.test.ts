@@ -119,7 +119,8 @@ describe("edit_file carries it, and changes nothing else", () => {
 			},
 			undefined as never,
 		);
-		expect(r.content.split("\n")[0]).toContain("(hunk 2)");
+		// ACI-3: hunks apply in order, so the headline says what the hunk met
+		expect(r.content.split("\n")[0]).toContain("(hunk 2, after hunk 1 applied)");
 		expect(r.content).toContain("the file ENDS there");
 	});
 
@@ -130,8 +131,12 @@ describe("edit_file carries it, and changes nothing else", () => {
 			undefined as never,
 		);
 		expect(r.isError).toBe(true);
-		expect(r.content).toContain("changed since");
-		expect(r.content).not.toContain("characters matched");
+		// the staleness stays the headline — the truer cause first. ACI-3
+		// adds, BELOW it, where the search stands in the file as it is now:
+		// declared, so the retry needs no read.
+		expect(r.content.split("\n")[0]).toContain("changed since");
+		expect(r.content.split("\n")[0]).not.toContain("characters matched");
+		expect(r.content).toContain("the search: not found");
 	});
 
 	it("a SUCCESSFUL edit carries no miss detail", async () => {
