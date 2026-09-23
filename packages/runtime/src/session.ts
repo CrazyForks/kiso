@@ -75,9 +75,10 @@ import { contextAnchor } from "./context-anchor.js";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { estimateTokens } from "@vincemakes/kiso-core";
-import { StaleWriterError, type SessionStore } from "./store.js";
+import { StaleWriterError, type SessionStore, type StoreRecord } from "./store.js";
 import { composeHooks, composeSystemPrompt, microcompactFor, runBasePrompt } from "./compose.js";
 import { checkpointBoundarySeq } from "./checkpoint.js";
+import { ABORTED_BEFORE_EXECUTION, unansweredAbortedCalls } from "./aborted-calls.js";
 import { breakEvenFactor, guardedPruneSeq, KEEP_COMPACTABLE_RESULTS, microcompactBoundarySeq, outputReserve, phaseEnd, runsACheck, tierReason, tiersFor } from "./compaction-policy.js";
 import { Run } from "./run.js";
 // TUI2-R3v2 ③ — the side query rides the SAME tracer the runs ride; that
@@ -304,6 +305,22 @@ export class AgentSession {
 	 *  the cause (stale handle, corruption, a live external writer, an I/O
 	 *  fault) — so no further run, resume, or log mutation may proceed.
 	 *  The health check runs BEFORE every write, on every path. */
+	/**
+	 * 0.40.2 — a committed call an aborted run left with no started and no
+	 * result gets ONE durable result, "aborted before execution", riding the
+	 * run that owns it (aborted-calls.ts). Every path that projects the
+	 * session into a request calls this first — a run's start (fresh or
+	 * resumed) and /compact — so no dangling tool_use reaches a provider,
+	 * and the already-poisoned logs heal with no migration. Idempotent per
+	 * invocation: a crash between two repairs leaves the rest for next time.
+	 */
+	async repairAbortedCalls(records: readonly StoreRecord[]): Promise<void> {
+		for (const c of unansweredAbortedCalls(records)) {
+			const ev = this.log.append({ type: "tool_result", callId: c.callId, invocationSeq: c.invocationSeq, content: ABORTED_BEFORE_EXECUTION, isError: true, errorKind: "precondition" });
+			await this.persist(c.runId, ev);
+		}
+	}
+
 	async persist(runId: string, event: Event): Promise<void> {
 		this.ensureHealthy();
 		try {
@@ -867,6 +884,7 @@ export class AgentSession {
 		// happened" outcome (ADR-0044 crash semantics).
 		const cancelled = (): Error => new Error("the compaction was cancelled");
 		if (options.signal !== undefined && options.signal.aborted) throw cancelled();
+		await this.repairAbortedCalls(this.#store.load(this.id));
 		const events = this.log.all;
 		// ADR-0055 (the owner's dogfood): a long autonomous session has few
 		// user turns and many tool rounds, and the user-turn cut found nothing

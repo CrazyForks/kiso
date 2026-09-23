@@ -219,6 +219,9 @@ export class Run implements AsyncIterable<Event> {
 				// dangling approvals closed (permission_expired) — a dead
 				// run's approval is never re-presented or resurrected.
 				const records = this.#store.load(this.#session.id);
+				// 0.40.2: a dead run's committed calls that never ran are answered
+				// before anything below projects the session into a request.
+				await this.#session.repairAbortedCalls(records);
 				const runs = new Map<string, Event[]>();
 				const order: string[] = [];
 				for (const r of records) {
@@ -291,12 +294,16 @@ export class Run implements AsyncIterable<Event> {
 			// persistence layer — a second open run would be permanently
 			// orphaned (recovery only ever recovers the last one). The
 			// open run is continued via resume(), never by starting another.
-			const openRun = openRunId(this.#store.load(this.#session.id));
+			const records = this.#store.load(this.#session.id);
+			const openRun = openRunId(records);
 			if (openRun !== undefined) {
 				throw new Error(
 					`session ${this.#session.id} still has an open run (${openRun}) — resume() it instead of starting a new run`,
 				);
 			}
+			// 0.40.2: an aborted run's committed calls that never ran are
+			// answered before this run's first request projects them.
+			await this.#session.repairAbortedCalls(records);
 
 			// E6 — the run-start context policy: BEFORE this run's
 			// user_input lands, the policy may persist one `summarized`

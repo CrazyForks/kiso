@@ -680,6 +680,47 @@ describe("the crash matrix (R-F 0.1.46-3): the four effect boundaries, crash-bef
 		expect(terminalOf(events)).toMatchObject({ outcome: { kind: "completed" } });
 		expect(recordsOf(dir).filter((e) => e.type === "tool_result" && e.executionId === "ex-1")).toHaveLength(1);
 	});
+
+	it("R3 — the aborted-call repair's write dies (0.40.2): the next run re-derives the SAME repair, lands exactly one result", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "kiso-mx-r3-"));
+		const gate = new EffectGate();
+		// a committed round of two calls: c1 ran, the esc landed before c2 started
+		const seed: readonly Event[] = [
+			{ seq: 0, type: "user_input", content: "go" },
+			{ seq: 1, type: "tool_call_end", callId: "c1", name: "web_search", input: { query: "a" } },
+			{ seq: 2, type: "permission_decided", decisionId: "d1", callId: "c1", invocationSeq: 1, decision: "approved", decidedBy: "mode:default" },
+			{ seq: 3, type: "tool_call_end", callId: "c2", name: "web_search", input: { query: "b" } },
+			{ seq: 4, type: "permission_decided", decisionId: "d2", callId: "c2", invocationSeq: 3, decision: "approved", decidedBy: "mode:default" },
+			{ seq: 5, type: "stop", reason: "tool_use" },
+			{ seq: 6, type: "tool_execution_started", executionId: "ex-6", callId: "c1", invocationSeq: 1, name: "web_search", input: { query: "a" } },
+			{ seq: 7, type: "tool_execution_succeeded", executionId: "ex-6", callId: "c1", invocationSeq: 1, result: { content: "a", isError: false } },
+			{ seq: 8, type: "tool_result", callId: "c1", invocationSeq: 1, content: "a", isError: false },
+			{ seq: 9, type: "terminal", outcome: { kind: "aborted", by: "user" } },
+		];
+		const store = new SessionStore(dir);
+		for (const ev of seed) await store.append("s", "r1", ev);
+		store.closeAll();
+
+		const { adapter } = scriptedAdapter([DONE_TURN, DONE_TURN]);
+		const live = new SessionStore(dir);
+		const session = await createAgent({ model: "faux", store: live, tools: [], adapter }).session({ id: "s" });
+		gatedSession(session, gate);
+		gate.park("persist");
+		const it = session.run("again")[Symbol.asyncIterator]();
+		expect(await stepUntilHold(it, gate)).toBe("held"); // the repair's write — before the new input
+		expect(recordsOf(dir).some((e) => e.type === "tool_result" && e.callId === "c2")).toBe(false);
+		expect(recordsOf(dir).some((e) => e.type === "user_input" && e.content === "again")).toBe(false);
+
+		await processDeath(it);
+		live.closeAll(); // the old process released its writer lock
+
+		const session2 = await reopenAgent(dir, adapter);
+		const events: Event[] = [];
+		for await (const ev of session2.run("again")) events.push(ev);
+		expect(terminalOf(events)).toMatchObject({ outcome: { kind: "completed" } });
+		expect(recordsOf(dir).filter((e) => e.type === "tool_result" && e.callId === "c2")).toHaveLength(1);
+		expect(recordsOf(dir).some((e) => e.type === "tool_execution_started" && e.callId === "c2")).toBe(false);
+	});
 });
 
 // ── EC-1 ⑥ — the commit boundary's own crash cells ────────────────────────
