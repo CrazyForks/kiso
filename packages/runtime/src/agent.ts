@@ -163,6 +163,7 @@ export class AgentRuntime {
 		});
 		let restored: { model: string; reasoning: import("./provider/metadata.js").ReasoningSetting; scope: typeof startupScope } | null = null;
 		let profilePending = false;
+		let newSession: { readonly workspace: string | null } | null = null;
 		let driftAcknowledgement: DriftAcknowledgement | null = null;
 		if (meta.kind === "ok") {
 			const drift = assessProfileDrift(meta.profile, {
@@ -208,8 +209,10 @@ export class AgentRuntime {
 				restored = { model: meta.profile.modelId, reasoning: meta.profile.reasoning, scope };
 			}
 		} else if (log.all.length === 0) {
-			// a NEW session: revision 1 lands BEFORE any durable event.
-			writeProfile(store.root, options.id, { ...candidate, revision: 1 });
+			// a NEW session. DC-60: nothing of it reaches the disk before its
+			// first durable event — revision 1 (with the workspace it opened in)
+			// lands WITH that event, still before it (session.ts persist).
+			newSession = { workspace: candidate.workspace };
 		} else {
 			// legacy (pre-XP log, no sidecar): generation absence is not
 			// drift — restore under current configuration; revision 1 lands
@@ -227,6 +230,7 @@ export class AgentRuntime {
 				: {}),
 			...(restored !== null ? { reasoning: restored.reasoning } : {}),
 			...(profilePending ? { profilePending: true } : {}),
+			...(newSession !== null ? { newSession } : {}),
 			...(this.#definition.profileName !== undefined ? { profileName: this.#definition.profileName } : {}),
 			...(driftAcknowledgement !== null ? { driftAcknowledgement } : {}),
 			...(this.#definition.systemPrompt !== undefined ? { systemPrompt: this.#definition.systemPrompt } : {}),

@@ -55,6 +55,10 @@ describe("0.40.0 — every declared field survives all three writers", () => {
 		// revision 1 — a new session started in /work/a under profile "fast"
 		const a = createAgent({ model: "faux-y", store: new SessionStore(dir), tools: [], adapter: DONE, workspace: "/work/a", profileName: "fast" });
 		const s1 = await a.session({ id: "s" });
+		// DC-60: revision 1 lands with the first durable event, not at open
+		for await (const _ of s1.run("go")) {
+			// the first turn
+		}
 		const r1 = profileOf(dir, "s");
 		keysPresent(r1);
 		expect(r1.revision).toBe(1);
