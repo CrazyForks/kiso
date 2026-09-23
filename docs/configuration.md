@@ -83,29 +83,36 @@ a broken config file fails loudly with the file named.
   name (Astra F5).** The registry never guesses. A model with no row still
   sends text — `default`/`default` resolves to an empty wire setting — but
   an explicit `low`/`high`/`max` is REFUSED, by name, rather than silently
-  downgraded, and its context window is unknown. The window then falls back
-  to a conservative **200,000 tokens**, which is what the meter and the
-  microcompact threshold are computed from; for a model with a larger real
-  window that means context relief fires EARLIER than it needs to, and for
-  a smaller one the provider can refuse a request while the meter still
-  looks comfortable. Set the true number when you know it: the top-level
-  `"contextWindow"` above, or `KISO_CONTEXT_WINDOW` for one session. The
-  environment wins over the config value, as everywhere else, and both win
-  over the registry.
+  downgraded.
 
-  DeepSeek's current recommended id `deepseek-flash` is registered (dated
-  2026-09-12, sourced), with the same capabilities as the legacy
-  `deepseek-v4-flash` row, which is retained because the vendor still
-  accepts it. Both carry a null window on purpose, and the reason is
-  mechanical rather than editorial: **the microcompact threshold is derived
-  from the window, at half of it** (`apps/cli/src/index.ts`). Registering
-  the vendor-documented 1M figure would move automatic compaction from
-  100,000 tokens to 500,000 on the model the bench runs — a
-  compaction/context change, which under BM-1 §3 blocks on the request-byte
-  gates and the paired bench. That is its own measured round, not a line in
-  a documentation pass. Until then the conservative fallback applies and
-  `KISO_CONTEXT_WINDOW` is the override; set it when you know the number
-  you want and accept that it moves the compaction point with it.
+- **The context window follows the MODEL, not the address (CW-1).** The
+  same few models are reachable through many endpoints — the vendor, a
+  gateway, a relay, a local forwarder — and the window is a property of
+  the weights: a route can cap it lower, never raise it. The window is
+  resolved in this order, and `/status` and `/model` say which step
+  answered:
+
+  1. **what you set** — `KISO_CONTEXT_WINDOW`, the profile's
+     `"contextWindow"`, the top-level `"contextWindow"`, in that order;
+  2. **the registry's row for this endpoint** (gpt-5.5 is 1,050,000 at the
+     first-party API and 272,000 at the subscription backend);
+  3. **the registry's row for the profile's `"upstream"`** — a profile
+     whose `baseUrl` is a local forwarder names where the forwarder sends
+     its requests (`"upstream": "https://gateway.example/v1"`); `/model`
+     then shows `@gateway.example via 127.0.0.1:47821`;
+  4. **the model's own window**, from every row for the same model at any
+     endpoint — the vendor prefix dropped, case folded, and a vendor-stated
+     alias applied (`deepseek-v4.1-flash` is `deepseek-flash`). Where rows
+     disagree, the smallest. `/status` says `inferred from the model` —
+     no row states it for this endpoint.
+
+  Nothing after step 4: an unknown model shows `ctx ?`, and compaction
+  assumes a conservative **200,000 tokens** (said once at startup). For a
+  model with a larger real window, relief fires earlier than it needs to;
+  for a smaller one the provider can refuse a request while the meter still
+  looks comfortable. Set the true number when you know it. Price, effort
+  levels and max output are facts about a route and are never inferred
+  this way.
 
 - **Sign-in and the OpenAI Responses dialect (OR-1, 0.31.0).**
   `kiso login <provider>` stores a credential in `~/.kiso/auth.json`

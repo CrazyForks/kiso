@@ -11,7 +11,8 @@
  *                      direct write (provider: "openai-compat" |
  *                      "anthropic" | "openai-responses")
  *   models?: { [name]: { kind: "openai-compat"|"anthropic"|"openai-responses",
- *                        baseUrl?: string, model: string, apiKeyEnv: string } }
+ *                        baseUrl?: string, model: string, apiKeyEnv: string,
+ *                        upstream?: string } }   — upstream: never where requests go
  *   mode?: "manual"|"default"|"accept-edits"|"plan"|"bypass"|"dontAsk"
  *   contextWindow?: number      — tokens
  *   autoCompact?: { thresholdRatio: number }   — 0<r<1; default off
@@ -73,6 +74,16 @@ export interface ModelProfile {
 	 * registry, where every figure has to carry a source.
 	 */
 	readonly contextWindow?: number;
+	/**
+	 * What this endpoint FORWARDS to, when `baseUrl` is a local proxy — a URL
+	 * (`https://gateway.example/v1`) or a name (`my gateway`). It never
+	 * moves a request — they still go to `baseUrl`. The owner, 2026-09-23: a
+	 * profile behind a local forwarder showed `@127.0.0.1:47821`, which says
+	 * where the bytes go and not who is billed; the row now reads
+	 * `@gateway.example via 127.0.0.1:47821`. CW-1: a URL here is also where
+	 * the registry looks for this model's window when `baseUrl` has no row.
+	 */
+	readonly upstream?: string;
 }
 
 export interface AutoCompactConfig {
@@ -223,6 +234,8 @@ export function parseConfig(text: string, source: string): KisoConfig {
 			// your profile") had never done anything.
 			if (p.contextWindow !== undefined && (typeof p.contextWindow !== "number" || !Number.isFinite(p.contextWindow) || p.contextWindow <= 0))
 				fail(`models.${name}.contextWindow`, "expected a positive token count");
+			if (p.upstream !== undefined && (typeof p.upstream !== "string" || p.upstream.trim() === ""))
+				fail(`models.${name}.upstream`, "expected the URL or name of what this endpoint forwards to");
 			models[name] = {
 				kind: p.kind as ProfileKind,
 				model: p.model as string,
@@ -231,6 +244,7 @@ export function parseConfig(text: string, source: string): KisoConfig {
 				...(typeof p.promptCaching === "boolean" ? { promptCaching: p.promptCaching } : {}),
 				...(typeof p.streamIdleMs === "number" ? { streamIdleMs: p.streamIdleMs } : {}),
 				...(typeof p.contextWindow === "number" ? { contextWindow: p.contextWindow } : {}),
+				...(typeof p.upstream === "string" ? { upstream: p.upstream.trim() } : {}),
 			};
 		}
 		out.models = models;
