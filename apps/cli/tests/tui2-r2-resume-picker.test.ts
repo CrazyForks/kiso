@@ -133,7 +133,7 @@ describe("TUI2-R2 ③ — `kiso sessions`: the badges on a TTY, the same bytes i
 		const { env, dirs } = isolatedEnv();
 		await fixtureHome(dirs.home);
 		const out = execFileSync("node", [CLI, "sessions"], { env: env as NodeJS.ProcessEnv, encoding: "utf8" });
-		// the keyless demo's own notice is makeAgent's and predates this
+		// the keyless demo's own notice is createCodingAgent's and predates this
 		// round; the LISTING is everything after it
 		const lines = out.trimEnd().split("\n").filter((l) => l !== "" && !l.startsWith("[faux mode"));
 		expect(lines).toHaveLength(3); // three sessions, three lines, nothing else

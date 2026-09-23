@@ -3,7 +3,7 @@
  * 1.0.3 patch round).
  *
  * The BARE-COMMAND boot (`kiso <sessionId>` — the default case) called
- * makeAgent(id) WITHOUT the input source (and without the model flag),
+ * createCodingAgent(id) WITHOUT the input source (and without the model flag),
  * while the chat/resume cases pass both. On a TTY, a first-run trust
  * gate (.kiso in the cwd, fresh home) then crashed: the gate's askPanel
  * read through the undefined input — "Cannot read properties of
@@ -18,7 +18,7 @@
  * pinned a SECOND call site with the same defect: `kiso sessions` —
  * the read-only listing. The directive's presumption that the listing
  * "doesn't need input" is disproven by the evidence: the trust gate
- * lives INSIDE makeAgent and asks through the input, so on a TTY with
+ * lives INSIDE createCodingAgent and asks through the input, so on a TTY with
  * a first-discovery .kiso the listing crashed identically (the
  * dock-less 'question' branch — sessions never enters the dock). The
  * listing itself never writes — the input exists so the gate's ask can
