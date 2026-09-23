@@ -1256,7 +1256,7 @@ export { PROTECTED_REFUSAL, diskPath, isProtectedPath, protectedIdentity, protec
 /** The search corpus's credential rule, by name — exported so the CLI's
  *  read-only shell allow holds a shell read to the same definition rather
  *  than a copy of it. */
-export { isCredentialName } from "./corpus.js";
+export { isCredentialName, isCredentialPath } from "./corpus.js";
 
 export function shellTool(opts: WorkspaceToolsOptions): Tool<{ command: string; timeoutMs?: number }> {
 	return defineTool<{ command: string; timeoutMs?: number }>({

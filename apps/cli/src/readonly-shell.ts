@@ -36,7 +36,7 @@ import { homedir } from "node:os";
 import { basename, isAbsolute, join, relative } from "node:path";
 import type { PolicyVerdict } from "@vincemakes/kiso-core";
 import type { KisoExtension } from "@vincemakes/kiso-runtime";
-import { isCredentialName } from "@vincemakes/kiso-tools-node";
+import { isCredentialName, isCredentialPath } from "@vincemakes/kiso-tools-node";
 import { getMode, type Mode } from "./mode.js";
 import { HOME_SUBTREES, parseShell, realCase, resolveShellPath, type Redirect, type SimpleCommand } from "./shell-words.js";
 
@@ -74,16 +74,11 @@ function scope(ctx: Ctx, word: string): string | null {
 	return null;
 }
 
-/** B4: credentials by the shell's own list — names the search corpus's
- *  rule does not cover, on the canonical path. (The corpus rule itself,
- *  shared with read_file and search_text, is not moved before the freeze:
- *  finding RO-F4, 0.41.0.) */
-const SHELL_CREDENTIAL_NAMES = new Set([".npmrc", ".pypirc", ".git-credentials", ".htpasswd"]);
-const SHELL_CREDENTIAL_PATHS = ["/.aws/credentials", "/.config/gh/hosts.yml", "/.docker/config.json", "/.kube/config"];
-
+/** B4, and since RO-F4 (0.40.7) the search corpus's own set: the shell and
+ *  the file tools ask ONE rule — names (`isCredentialName`) and the
+ *  directory-scoped paths (`isCredentialPath`) — on the canonical path. */
 function shellCredential(canonical: string): boolean {
-	const folded = canonical.toLowerCase();
-	return SHELL_CREDENTIAL_NAMES.has(basename(folded)) || SHELL_CREDENTIAL_PATHS.some((s) => folded.endsWith(s));
+	return isCredentialName(basename(canonical).toLowerCase()) || isCredentialPath(canonical);
 }
 
 function content(ctx: Ctx, word: string): string | null {

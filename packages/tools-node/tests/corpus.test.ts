@@ -24,7 +24,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { globToRegExp, walkCorpus } from "../src/corpus.js";
+import { globToRegExp, isCredentialPath, walkCorpus } from "../src/corpus.js";
 
 function ws(files: Record<string, string>): string {
 	const root = mkdtempSync(join(tmpdir(), "kiso-corpus-"));
@@ -96,19 +96,44 @@ describe("the search corpus", () => {
 			"certs/server.pem": "-----BEGIN",
 			// a public key is PUBLIC — a different name, and searchable
 			"keys/id_rsa.pub": "ssh-rsa AAAA",
+			// DECLARED RE-PIN (RO-F4, the owner's 0.40.7 ruling): `.npmrc` was
+			// here as a deliberate omission; it is IN now, with the other
+			// names the read-only shell rule already treated as credentials
+			".npmrc": "//registry:_authToken=literal-token",
+			".pypirc": "[pypi]\npassword = x",
+			".git-credentials": "https://u:p@example.invalid",
+			".htpasswd": "u:$apr1$x",
 			// deliberately OUT of the set: the omissions are decisions
-			".npmrc": "//registry:_authToken=${NPM_TOKEN}",
 			"app.key": "not necessarily a secret",
 		});
 		const out = names(root);
-		for (const excluded of [".envrc", ".netrc", "keys/id_rsa", "keys/id_ed25519", "keys/id_ecdsa", "keys/id_dsa", "certs/server.pem"]) {
+		for (const excluded of [".envrc", ".netrc", "keys/id_rsa", "keys/id_ed25519", "keys/id_ecdsa", "keys/id_dsa", "certs/server.pem", ".npmrc", ".pypirc", ".git-credentials", ".htpasswd"]) {
 			expect(out, `${excluded} must be excluded`).not.toContain(excluded);
 		}
-		// and the three that are NOT in the set stay searchable, which is
+		// and the two that are NOT in the set stay searchable, which is
 		// the half that proves the rule is a set and not a hunch
 		expect(out).toContain("keys/id_rsa.pub");
-		expect(out).toContain(".npmrc");
 		expect(out).toContain("app.key");
+	});
+
+	it("RO-F4: the directory-scoped credential files are excluded by PATH; their neighbours are not", () => {
+		const root = ws({
+			".gitignore": "dist\n", // declared: dot-directories are walked, so the path rule is what excludes
+			".aws/credentials": "[default]\naws_secret_access_key = x",
+			".aws/config": "[default]\nregion = eu-west-1",
+			".kube/config": "users: [token: x]",
+			".docker/config.json": "{\"auths\": {}}",
+			".docker/daemon.json": "{}",
+			".config/gh/hosts.yml": "oauth_token: x",
+			"src/credentials": "a plain file that happens to be called that",
+		});
+		const out = names(root);
+		for (const excluded of [".aws/credentials", ".kube/config", ".docker/config.json", ".config/gh/hosts.yml"]) {
+			expect(out, `${excluded} must be excluded`).not.toContain(excluded);
+		}
+		for (const kept of [".aws/config", ".docker/daemon.json", "src/credentials"]) expect(out, `${kept} is not a credential`).toContain(kept);
+		expect(isCredentialPath("/home/u/project/.AWS/Credentials"), "folded like a case-insensitive disk").toBe(true);
+		expect(isCredentialPath("src/credentials")).toBe(false);
 	});
 
 	it("carves out the three template names BY EXACT NAME — they exist to be read", () => {
