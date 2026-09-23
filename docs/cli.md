@@ -327,3 +327,161 @@ It is a USER setting on purpose. A terminal is a property of the person
 sitting at it, not of the repository they happen to be in, so a `theme` in a
 project-level config is a LOUD error rather than a silent win — the same rule
 the rest of the project surface follows.
+
+## Sessions
+
+Sessions are append-only JSONL, one folder per project under
+`$KISO_HOME/projects`, and a session resumes only in its own project. Exit,
+restart, and `kiso resume <id>` continues the conversation with a contiguous
+seq. Since
+0.32.2 the store is private by default — the directory `0700`, the log and the
+history `0600` — so a transcript is not readable by every account on a shared
+machine. Files that already existed are left as their owner set them.
+
+```
+kiso [sessionId]               interactive session (default; `kiso chat` is the same)
+kiso resume                    pick a session to continue (the picker)
+kiso resume <id> [prompt]      continue a session in a new process
+kiso sessions [--all|--current]  list durable sessions, with their state
+```
+
+`kiso resume` with no id opens a picker: one row per session, arrows to walk,
+type to filter, enter to continue. It opens on the sessions that started in
+this directory — only those; tab shows every session, each tagged with where it
+started. Sessions from before 0.40.0 recorded no workspace (no event in their
+log names one); they are counted in one line and listed under tab. Each row
+SAYS the state kiso will resume into, in words:
+
+| the row's note | means | what `kiso resume` will do |
+|---|---|---|
+| `completed clean` | the run ended cleanly | continue from a settled session |
+| `failed`, or the outcome (`aborted`, `max turns`) | the run ended some other way | continue from where it stopped |
+| `interrupted mid-run — resumes exactly` | **no terminal event** | resume the trajectory exactly, from its durable prefix |
+| `N uncertain — needs your verdict` | the uncertain ledger is not empty | ask you to rule on the interrupted side effect first |
+| `N asks pending` | a permission request nobody answered | put the question back in front of you |
+
+**Context relief is on by default, inside a run.** The context is measured by
+the provider's own count of the last request. Past half the model window (at
+most 400K), kiso compacts at the next round that ends a phase — the checks ran,
+the edits finished, the reading finished, or a new turn began; past 80% (at
+most 700K) it compacts at the next round regardless. The summary is requested
+on the run's own cached prefix and lands as one durable `summarized` event;
+the most recent tenth of the window (at most 100K) stays verbatim. If the
+provider still refuses the context, kiso compacts once and retries once.
+`/compact` does the same on demand. Every boundary is a persisted fact, so a
+crash and resume land on the byte-identical projection —
+[docs/context.md](context.md).
+
+## How a mode composes, and the catastrophe floor
+
+A tier is **one voice in that chain, not the verdict**. The chain composes
+`deny > allow > ask`, so a tier that ASKS abstains in favour of anything that
+ALLOWS: a saved "don't ask again" rule still allows, and the call runs without
+a new question. Switching to `manual` is therefore **not a revocation** of
+rules you already granted.
+
+
+**To be asked again, remove the rule.** Grants from "don't ask again" are
+written to `~/.kiso/extensions/dont-ask-again.mjs`, which is human-editable and
+human-deletable: drop a tool from its set, or delete the file, and the next call
+asks. The file is allow-only by design — it can never deny or ask — so the mode
+and safe-defaults moats keep their teeth. It never carries a destructive command
+or a write into `.git/` or `.kiso/`: those reach you every time.
+
+**The catastrophe floor.** In every mode, bypass included, kiso refuses a
+destructive command (`rm`, `git clean -f`, `git reset --hard`,
+`git checkout -- <paths>` / `.` / `-f`, `git restore`, `git switch -f`,
+`find … -delete` with no selecting primary) whose target cannot be recovered:
+`/`, a system root or what is inside it (temp directories excepted), your home
+directory, the workspace root or anything above it, the workspace's `.git`,
+`~/.ssh`, `~/.config`, `~/.kiso`, `~/.gnupg`, `~/.aws` or anything inside them,
+a wildcard over any of those, or a target that is only a variable
+(`rm -rf $DIR/`). Everything else runs as the mode says — `rm -rf /tmp/probe`
+runs in bypass. A refusal is recorded as `decidedBy: floor`, and the model is
+told why. The floor reads the command line; it is not a sandbox. `"floor": "off"`
+in `~/.kiso/config.json` turns it off — a project config cannot — and the status
+row then says `floor off`.
+
+Startup: `--mode <name>` or `KISO_MODE=<name>`; the status bar names the tier,
+so the constraint is visible rather than encoded in a hue.
+
+## The interactive screen
+
+```text
+  read  suite.sh · 7 lines · 0.0s · ctrl+o expands
+
+● shell ./suite.sh; echo "exit=$?"
+  └ packages/core      ok  184 tests
+    packages/runtime   ok  221 tests
+    packages/tui       ok  120 tests
+    1s · esc stops · alt+⏎ redirects
+✦ working 19s ↓ 94 tokens · 186 tok/s · esc stop · alt+⏎ redirect · ctx left ~98%
+```
+
+and the same turn once it settles:
+
+```text
+  shell ./suite.sh; echo "exit=$?"
+  └ packages/core      ok  184 tests
+    packages/runtime   ok  221 tests
+    packages/tui       ok  120 tests
+    exit=0
+    exit 0 · 4 lines · 2.6s
+
+✦ took 22s · fresh 175 out 54 · cache 97% · ctx left ~98%
+▸ bypass · /mode to switch · deepseek-v…s-on-0910 · CH 97% · ctx left ~98% · 186 tok/s
+```
+
+Both blocks are rows lifted from a real 100-column screen, not typed: a live
+call carries its output while it runs and settles into a record of it. The
+session is in `bypass`, which is why the command ran without the pause the
+approval bullet below describes. `186 tok/s` is the decode rate of the last
+call that could be measured, and the model name is shortened in its middle
+because the row ran out of width — the facts never are.
+
+**The keys**, the whole sheet `?` shows: `enter` send · `ctrl+j / shift+⏎`
+newline · `@` files · `esc` stop · `alt+⏎ / ctrl+⏎` redirect · `/` commands ·
+`↑↓` history / queue pop · `ctrl+o` expand cells · `ctrl+r` transcript · `tab`
+complete · `?` this sheet · `alt+←→ / ctrl+←→` word motion · `alt+⌫ / alt+d`
+delete word · `ctrl+x` copy the last answer · `ctrl+z / ctrl+y` undo / redo ·
+`ctrl+v` attach a clipboard image (macOS).
+In a panel, in the product's own words: `panels: ↑↓ move · ⏎ confirms · digits
+act on their row · t types`. Space selects at the cursor and never commits, so
+a stray one cannot answer anything.
+
+- **Images.** `ctrl+v` attaches the image on your clipboard — the terminal's
+  own paste only ever carries text, so the obvious gesture cannot reach it.
+  **That gesture is macOS-only**: elsewhere there is no clipboard reader, so
+  kiso says the gesture is macOS-only rather than claiming your clipboard is
+  empty. Use a path instead, which is also what dragging a file into the
+  window leaves behind and works on both: `look at shot.png` sends the picture with the words, in
+  place. PNG, JPEG, GIF and WebP, identified by content rather than by
+  extension, up to 5 MB.
+- **The palette follows the terminal.** kiso asks it for its colour scheme and
+  its background, and picks dark or light from the answer; a terminal that
+  answers neither is treated as unknown, which is a supported outcome rather
+  than a failure. To decide it yourself, set `theme` to `"dark"` or `"light"`
+  in `~/.kiso/config.json`; `KISO_THEME` outranks that for one run. It is a
+  USER setting — a terminal belongs to the person at it, not to the project —
+  so a `theme` in a project config is a loud error, never a silent win.
+
+- **The approval is a selection, not a form.** The pause shows the full call —
+  the whole command, the whole diff, never truncated — with the highlight bar
+  already on *Yes, run it*: look, press enter. One option grants a **durable**
+  don't-ask-again rule by writing a human-readable, human-deletable extension
+  file, and deleting that file is the revocation path. Another asks the model
+  for two or three narrower versions of the call, one request, only when pressed.
+- **Irreversible deletes say so.** Four commands carry one yellow line naming
+  what goes: `rm -rf` with its targets listed, `git checkout --`,
+  `git reset --hard`, `git clean -f`. Nothing else does — a warning on every
+  dangerous command teaches the eye to skip warnings.
+- **The interface is monochrome** — colour is reserved for the three things
+  that mean something: green for a diff's additions, red for errors, yellow
+  for warnings. `NO_COLOR` or a pipe disables all of it, and a pipe carries
+  zero ANSI.
+
+None of this costs a token: the per-call cards, the live shell tail, `/context`'s rent
+ledger and the status meter all read what the session already knew — no extra
+request, no estimate presented as a measurement. The whole surface — every
+command, the scoped-read rules, each visibility mechanism — is
+[docs/cli.md](cli.md).
