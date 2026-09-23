@@ -69,7 +69,7 @@ export function setMode(m: Mode): void {
 
 /** The startup mode from env: KISO_MODE, or undefined when unset (the
  *  config layer's mode then applies — merge round B; the --mode flag is
- *  applied by main before the first makeAgent and wins over everything). */
+ *  applied by main before the first createCodingAgent and wins over everything). */
 export function modeFromEnv(): Mode | undefined {
 	const raw = process.env.KISO_MODE;
 	return MODES.find((x) => x === raw);

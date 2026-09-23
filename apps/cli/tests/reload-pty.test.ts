@@ -404,7 +404,7 @@ describe("§2.5 — /reload", () => {
 
 	it("gate 10 — RL-F6: a reload that fails LATE leaves the rule writer pointed at the live chain", () => {
 		// The lead's review of 353a278 named this as a nit; it is reachable,
-		// which makes it a finding. makeAgent publishes currentAgentExtensions
+		// which makes it a finding. createCodingAgent publishes currentAgentExtensions
 		// BEFORE createAgent, and createAgent throws on a tool-name collision
 		// — a user extension exposing `read_file` is enough. So a failed
 		// reload could leave the NEW array published beside the OLD agent,

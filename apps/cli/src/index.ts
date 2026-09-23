@@ -21,7 +21,7 @@
  * resume.ts, trust-ui.ts (the question surface + E3 merges), faux-glue.ts
  * (the scripted-model plumbing), state.ts (the shared process state).
  * index.ts keeps the entry: banner, input sources, the A area prompt,
- * makeAgent, and main.
+ * createCodingAgent, and main.
  */
 
 import { appendFileSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -32,42 +32,21 @@ import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { basename, join } from "node:path";
 import { Body, Editor, PROMPT, bannerLines, currentGround, resolveGround, setGround, escapeTerminal, extensionsBannerText, idColumn, idleStatus, interactivePrompt, palette, renderSessionLine, sessionListFooter, sessionListHeader, sessionListRow, sessionListUnknownLine, slashCommandNames, type ResumeMeta, type SessionCardView } from "@vincemakes/kiso-tui";
-import {
-	createAgent,
-	disposeExtensions,
-	loadExtensions,
-	loadProjectExtensions,
-	SessionStore,
-	type AgentDefinition,
-	type ContextPolicy,
-} from "@vincemakes/kiso-runtime";
-import { listSessionSidecars, migrateSummaries, readProfile, runsACheck, summaryMigrationPending } from "@vincemakes/kiso-runtime/internal";
+import { disposeExtensions, SessionStore } from "@vincemakes/kiso-runtime";
+import { listSessionSidecars, migrateSummaries, readProfile, summaryMigrationPending } from "@vincemakes/kiso-runtime/internal";
 import { skillMenuItems } from "./skill-invoke.js";
-import { canonicalPath, claimProjectDir, hasSession, locateSession, projectLayoutActive, sessionFolders, type SessionFolder, type SessionRoute } from "./projects.js";
-import { migrationNotice, pendingLegacyIds, planMigration, reverseMigration, runMigration } from "./session-migration.js";
+import { canonicalPath, hasSession, locateSession, projectLayoutActive, sessionFolders, type SessionFolder, type SessionRoute } from "./projects.js";
+import { reverseMigration } from "./session-migration.js";
 import { defaultTrashRoot, findEmptySessions, moveToTrash } from "./empty-sessions.js";
 import { createFauxProvider } from "@vincemakes/kiso-evals";
-import { createCodingTools, isProtectedPath, protectedIdentity, PROTECTED_REFUSAL } from "@vincemakes/kiso-tools-node";
-import { MODES, OFFERED_MODES, getMode, modeExtensions, modeFromEnv, modeSystemPrompt, setMode } from "./mode.js";
-import { readOnlyShellExtension } from "./readonly-shell.js";
-import type { PolicyCall } from "@vincemakes/kiso-core";
-import { guardSavedAllow, isProtectedWrite } from "./protected-writes.js";
-import { floorExtension, isDestructiveCall } from "./floor.js";
-import { protectedShellExtension } from "./protected-shell.js";
-import { breakerExtension } from "./breaker.js";
-import { builtInLayer } from "./builtin.js";
-import { agentModel, atFiles, body, bodyLog, codingToolOptions, kisoHome, workspaceRoot, projectRoot, ownSessionsDir, setOpenSessionFolder, builtInExtensions, currentFaux, dock, extensionsDir, loadedExtensions, mergedConfig, mergedTempPaths, modelChoice, projectExtensions, configModels, configuredWindow, agentBaseUrl, currentModelName, currentAgentExtensions, sessionStoreRef, sessionsDir, setAgentModel, setBody, setConfigModels, setConfiguredWindow, setCurrentAgentExtensions, setCurrentFaux, setCurrentModelName, setCurrentProfileName, setExtensionLists, setUserProtectedPaths, protectedFiles, setMergedConfig, setModelChoice, setSessionStore, setRetryShown, setNeverInherited, secretEnvNamesOf, userExtensions, VERSION, type LineInput, lastBinding, acceptDrift, setAcceptDrift, setFloorOn, floorOn, loadedSkillsCatalog, queuedSwitchLines } from "./state.js";
-import { maxRetriesFromEnv } from "./retries.js";
-import { askUi, resolveProjectTrust } from "./trust-ui.js";
-import { isFirstRun, scaffoldFirstRun } from "./first-run.js";
+import { isProtectedPath, protectedIdentity, PROTECTED_REFUSAL } from "@vincemakes/kiso-tools-node";
+import { MODES, OFFERED_MODES, getMode, modeFromEnv, setMode } from "./mode.js";
+import { activeStoreDir, setActiveStoreDir, agentModel, atFiles, body, bodyLog, kisoHome, workspaceRoot, projectRoot, ownSessionsDir, setOpenSessionFolder, builtInExtensions, currentFaux, dock, loadedExtensions, mergedConfig, mergedTempPaths, modelChoice, projectExtensions, configModels, configuredWindow, agentBaseUrl, currentModelName, currentAgentExtensions, sessionStoreRef, sessionsDir, setAgentModel, setBody, setConfigModels, setConfiguredWindow, setCurrentAgentExtensions, setCurrentFaux, setCurrentModelName, setCurrentProfileName, setExtensionLists, protectedFiles, setMergedConfig, setModelChoice, setSessionStore, userExtensions, VERSION, type LineInput, lastBinding, acceptDrift, setAcceptDrift, loadedSkillsCatalog, queuedSwitchLines } from "./state.js";
 import { fauxSkip, readFauxScript } from "./faux-glue.js";
-import { chat, compactionDiscardedNotice, contextWindowTokens, displayCtxRatio, knownContextWindow, microcompactThresholdFor, statusModelLabel, unknownWindowNotice, windowLearnedNotice } from "./chat.js";
-import { recordLearnedWindow, useLearnedWindows } from "./learned-windows.js";
+import { chat, contextWindowTokens, displayCtxRatio, microcompactThresholdFor, statusModelLabel } from "./chat.js";
 import { preferences, usePreferences } from "./preferences.js";
 import { settingsLayers } from "./state.js";
-import { providerHost } from "./provider-label.js";
-import { adapterOptionsFor } from "./auth/adapter-options.js";
-import { loadProjectConfig, loadUserConfig, mergeConfigs, resolveAutoCompact, resolveContextWindow, resolveModel } from "./config.js";
+import { loadUserConfig, resolveAutoCompact } from "./config.js";
 import { checkForUpdate, knownUpdate, updateCardLines } from "./update-check.js";
 import { tmuxMouseHint } from "./tmux-hint.js";
 import { resume } from "./resume.js";
@@ -78,6 +57,9 @@ import { armByteTrace } from "./byte-trace.js";
 import { tmpdir, homedir } from "node:os";
 import { clipboardImage } from "./clipboard.js";
 import { cardsFromListings } from "./session-cards.js";
+import { createCodingAgent } from "./create-coding-agent.js";
+export { contextPolicyFromEnv } from "./create-coding-agent.js";
+export { SYSTEM_PROMPT, composeSystemPrompt, readProjectInstructions } from "./coding-prompt.js";
 
 // The moved exports stay reachable from this entry — the test imports
 // (project-trust, coding-agent) never change (B4: zero assertion changes).
@@ -105,17 +87,6 @@ function openInBrowser(url: string): void {
 	} catch {
 		// the URL is on screen; opening it is the person's fallback
 	}
-}
-
-/** LT-1: the stream watchdog's bound from the environment — a non-negative
- *  number of milliseconds (0 disables it); anything else is ignored. The
- *  PTY rigs use it to trip the watchdog in seconds against a stub that
- *  never finishes a stream. */
-function streamIdleFromEnv(): number | undefined {
-	const raw = process.env.KISO_STREAM_IDLE_MS;
-	if (raw === undefined || raw === "") return undefined;
-	const n = Number(raw);
-	return Number.isFinite(n) && n >= 0 ? n : undefined;
 }
 
 /** OR-3: the commands that own their own stdin reader (a hidden key prompt,
@@ -610,366 +581,6 @@ function extensionsBanner(resume: ResumeMeta[] = []): void {
 	});
 }
 
-/**
- * A area: the coding-agent system prompt — ONE constant, byte-stable for the
- * session's lifetime (D area). Kept under ~80 lines; no template engine.
- */
-/** The built-in prompt. Exported for scripts/request-surface.mjs — the
- *  model-side token-rent counter measures the REAL bytes, never a copy. */
-export const SYSTEM_PROMPT = `You are kiso, a coding agent. You work in a workspace
-directory and change code with tools. Be concise: answer in a few lines
-unless the task genuinely needs more. Never claim a file was changed
-unless a tool confirmed it.
-
-What you can reach:
-- The workspace: read_file, list_dir, search_text, write_file, edit_file.
-- This machine and the network: shell — builds, tests, git, package
-  managers, curl for HTTP, system queries. A request one command can
-  answer is answered by running it.
-- The human: ask_user, for a decision that is theirs.
-
-Tool discipline:
-- READ BEFORE YOU EDIT. For any file you are about to change, read it
-  first — never guess its content.
-- Use edit_file for targeted changes and write_file for full rewrites.
-  Prefer many small edits over one large write.
-- Be careful — shell has side effects and may take time.
-- search_text and list_dir are cheap — locate first, then read ranges
-  with read_file offset/limit; never read a whole large file in one call.
-- Do not re-read a file you already read unchanged, or one you changed
-  yourself through a confirmed edit — rely on the earlier result and
-  on the change you just made.
-- When a tool fails, read the error and adjust; do not repeat the same
-  call blindly.
-
-An authorization covers what it NAMES: when the scope is not named —
-which files, which branches, whether to push — ask before acting.
-Delivering, sharing or handing over changes means committing locally and
-stopping; pushing, publishing or sending happens only when the human
-names it.
-
-Workflow: understand the request, find the relevant code, make the
-smallest change that works, then verify with a command (tests/build).
-Report what you did in one or two lines per change.`;
-
-/** The project-instructions file names, in priority order (A area). */
-const INSTRUCTION_FILES = ["AGENTS.md", "CLAUDE.md"] as const;
-/** Hard cap for injected instructions — truncate and say so. */
-
-/**
- * A area: read the FIRST present instruction file (AGENTS.md preferred) and
- * return it as an injected section, or "" when none exists. Truncated at
- * 8KB with an explicit note. Pure — read once per session, so the prompt
- * is byte-stable for the session's lifetime.
- *
- * kiso never serves its own credential store to a model, and this read is
- * the one that needs no model at all: a cloned repository whose AGENTS.md
- * is a symlink to the store would put it in the SYSTEM PROMPT of every
- * request, with no tool call and no trust prompt. A file that resolves to
- * a protected one is skipped as though absent.
- */
-export function readProjectInstructions(cwd: string, protectedFiles: readonly string[] = []): string {
-	const id = protectedIdentity(protectedFiles);
-	for (const name of INSTRUCTION_FILES) {
-		if (isProtectedPath(join(cwd, name), id)) continue;
-		let text: string;
-		try {
-			text = readFileSync(join(cwd, name), "utf8");
-		} catch {
-			continue; // not present — try the next
-		}
-		return `\n\n=== Project instructions (${name}) ===\n${text.length > 8 * 1024 ? text.slice(0, 8 * 1024) + `\n\n[truncated at ${8 * 1024} chars]` : text}`;
-	}
-	return "";
-}
-
-/** A area: the session's system prompt — the constant plus any project
- *  instructions found in the workspace. Deterministic per cwd. */
-export function composeSystemPrompt(cwd: string, protectedFiles: readonly string[] = []): string {
-	const injected = readProjectInstructions(cwd, protectedFiles);
-	return injected === "" ? SYSTEM_PROMPT : `${SYSTEM_PROMPT}\n${injected}`;
-}
-
-/**
- * E6: the run-start context policy, OFF unless env-armed (invalid values
- * are ABSENT, never a crash — the autoCompactFromEnv convention).
- * The product arming is KISO_CONTEXT_WINDOW → window − POLICY_RESERVE
- * (the window rides the config as windowTokens; the runtime owns the
- * arithmetic — never a fixed low absolute). KISO_POLICY_SUMMARY_TRIGGER
- * survives ONLY as the legacy absolute override when no window is set
- * (bench back-compat); the window wins when both are set.
- * KISO_POLICY_SUMMARY_KEEP (rounds) and KISO_POLICY_SUMMARY_KEEP_TOKENS
- * override the runtime defaults (KEEP_RECENT_ROUNDS = 4,
- * KEEP_TOKENS_DEFAULT = 20,000) — emitted only when set.
- * KISO_POLICY_SUMMARY_MAX_FAILURES overrides the (h) circuit-breaker
- * default (MAX_SUMMARY_FAILURES = 3).
- * KISO_POLICY_DROP=1 switches the armed mode to the crux C arm
- * (mechanical drop — same trigger/keep envs); KISO_POLICY_MICROCOMPACT
- * arms the session-aware override (MIN_TURNS = the no-fire guard).
- */
-export function contextPolicyFromEnv(): ContextPolicy | undefined {
-	const summaryTrigger = positiveIntEnv("KISO_POLICY_SUMMARY_TRIGGER");
-	const contextWindow = positiveIntEnv("KISO_CONTEXT_WINDOW");
-	const microcompactTrigger = positiveIntEnv("KISO_POLICY_MICROCOMPACT");
-	if (summaryTrigger === undefined && contextWindow === undefined && microcompactTrigger === undefined) return undefined;
-	return {
-		...(summaryTrigger === undefined && contextWindow === undefined ? {} : {
-			[(process.env.KISO_POLICY_DROP === "1" ? "drop" : "summary")]: {
-				...(contextWindow !== undefined ? { windowTokens: contextWindow } : summaryTrigger !== undefined ? { triggerTokens: summaryTrigger } : {}),
-				...kv("keepRounds", "KISO_POLICY_SUMMARY_KEEP"),
-				...kv("keepTokens", "KISO_POLICY_SUMMARY_KEEP_TOKENS"),
-				...kv("maxFailures", "KISO_POLICY_SUMMARY_MAX_FAILURES"),
-			},
-		}),
-		...(microcompactTrigger !== undefined ? { microcompact: { thresholdTokens: microcompactTrigger, ...kv("keepResults", "KISO_POLICY_MICROCOMPACT_KEEP"), ...kv("minTurns", "KISO_POLICY_MICROCOMPACT_MIN_TURNS") } } : {}),
-	};
-}
-
-/** { [key]: value } when the env int is set — the spread-friendly optional field. */
-function kv(key: string, env: string): { [key: string]: number } | undefined {
-	const v = positiveIntEnv(env);
-	return v !== undefined ? { [key]: v } : {};
-}
-
-/** Parse a positive-int env var — absent or invalid is undefined (no crash). */
-function positiveIntEnv(name: string): number | undefined {
-	const n = Number.parseInt(process.env[name] ?? "", 10);
-	return Number.isFinite(n) && n > 0 ? n : undefined;
-}
-
-async function makeAgent(sessionId: string | undefined, input?: LineInput, modelFlag?: string) {
-	// §2.5: the ONE source a reload reads for the model, seeded here from
-	// the startup flag. Without this a session started with `--model X`
-	// would silently revert to the env/config default on its first reload.
-	if (modelFlag !== undefined) setModelChoice(modelFlag);
-	// E3: the project-level trust gate runs BEFORE any extension load (the
-	// mcp/skills merges must be in the env when the user-level extensions
-	// load). Untrusted project capability is never loaded — never silently.
-	const project = input !== undefined ? await resolveProjectTrust(input) : await resolveProjectTrust(undefined as unknown as LineInput);
-
-	// R-D 0.1.45 (deliverable B): the first-run scaffold lands AFTER the
-	// verdict — pre-trust zero-read/write/scan is absolute. The sessions
-	// dir (SessionStore's constructor mkdirs) moved behind the gate too:
-	// the trust record is the first home write, the scaffold the second.
-	if (isFirstRun()) scaffoldFirstRun();
-	// 0.40.0 — one folder per project: the one-time move of the legacy
-	// folder, then this project's folder claimed (made, its workspace
-	// recorded). Both write, so both sit behind the verdict, with the store.
-	prepareSessionFolders();
-	activeStoreDir = sessionsDir();
-	const store = new SessionStore(activeStoreDir);
-	// TUI2-R2 ②/③: the navigation surfaces read through THIS store — one
-	// store per process, and the picker/listing never write through it.
-	setSessionStore(store);
-	// E area: the durable script position — computed AFTER the verdict
-	// (fauxSkip's session-log read is a home read: pre-trust zero-read).
-	const fauxSkipTurns = sessionId === undefined ? 0 : fauxSkip(sessionId);
-	// E1: the startup extension scan — a broken extension fails the process
-	// LOUDLY here (loadExtensions throws), never silently.
-	const user = await loadExtensions(extensionsDir());
-	const proj = project !== null ? await loadProjectExtensions(process.cwd(), user) : [];
-	// R-D 0.1.45: the built-in layer registers by module import (builtin.ts)
-	// — a user extension may shadow a built-in, a project one may not.
-	// KC3.5: built-in #4 (ask) registers ONLY where a human can answer —
-	// the panel bridge is the argument, and a non-TTY session has none to
-	// give. A piped run's composed tool table therefore cannot contain
-	// ask_user (T-Q3: the bench's structural byte-identity proof).
-	// Astra F7: the config is READ here — a pure read, its setters still run
-	// below with the rest of merge round B — because the mcp extension spawns
-	// its stdio children while it is being constructed, and the strip needs
-	// the configured secret names by then.
-	const userCfg = loadUserConfig();
-	const projectCfg = loadProjectConfig(process.cwd(), project !== null);
-	const merged = mergeConfigs(userCfg, projectCfg);
-	// 0.40.6: /settings names each value's layer from these
-	settingsLayers.user = userCfg;
-	settingsLayers.project = projectCfg;
-	settingsLayers.modelFlag = modelFlag;
-	const secretEnvNames = secretEnvNamesOf(merged.models ?? {});
-	const builtIn = await builtInLayer(user, proj, input !== undefined && process.stdin.isTTY ? askUi(input) : undefined, secretEnvNames);
-	setExtensionLists(builtIn, user, proj, [...builtIn, ...user, ...proj]);
-
-	// merge round B — the config surface: user config + (trusted) project config,
-	// resolved with flags > env > project > user > default. The CLI never
-	// imports provider SDKs directly — the runtime's lazy provider
-	// resolution owns them (a config profile only ever NAMES an env var for
-	// its key; the key itself never sits in a config file).
-	setMergedConfig(merged);
-	// DT-1a: what a delegated task may NAME — the configured checks and the
-	// model profiles — handed to the (in-process) subagent extension through
-	// the environment. A model never supplies a command; it names a check.
-	// 0.40.0: and the folder this process keeps its sessions in — a child
-	// writes beside its parent, whatever directory it runs in. Through this
-	// channel and not an exported KISO_SESSIONS_DIR: a variable in
-	// process.env would reach every shell child, and a kiso started from a
-	// shell tool would then write into this project's folder.
-	process.env.KISO_DELEGATION_CONFIG_JSON = JSON.stringify({ checks: merged.checks ?? {}, profiles: Object.keys(merged.models ?? {}), sessionsDir: sessionsDir() });
-	setConfigModels(merged.models ?? {});
-	// CW-1 batch 2: the windows endpoints stated by refusing — read before the
-	// first window is asked for (the unknown-window notice below).
-	useLearnedWindows();
-
-	const resolved = resolveModel(modelFlag, merged);
-	// AFTER the model resolves: the window a PROFILE states is about that
-	// profile's model, so it cannot be read before we know which profile is
-	// selected. Reading it a line too early is how the compaction threshold
-	// ended up frozen at the wrong model's value (CTX-1).
-	setConfiguredWindow(resolveContextWindow(merged, resolved?.profile));
-	const model = resolved === null ? "faux" : resolved.profile.model;
-	if (resolved === null) {
-		console.log(
-			"[faux mode — set ANTHROPIC_API_KEY or OPENAI_API_KEY, or configure models in ~/.kiso/config.json]\n",
-		);
-		setCurrentFaux(true);
-		setCurrentModelName("faux");
-		setCurrentProfileName(null);
-	} else {
-		setCurrentFaux(false);
-		setCurrentModelName(resolved.name);
-		setCurrentProfileName(resolved.name);
-	}
-	setAgentModel(model, resolved?.profile.baseUrl); // v2b: the status bar shows it; OR-1: the endpoint rides along
-	// ADR-0055 Amendment 2: the row says `ctx ?` for an unstated window, but
-	// the tiers still need a number and assume the fallback — say so, once,
-	// at build.
-	if (!unknownWindowNoticed && knownContextWindow() === null) {
-		unknownWindowNoticed = true;
-		console.error(unknownWindowNotice(model));
-	}
-
-	// W21: the extensions array is built ONCE per agent and shared with
-	// the runtime by reference — the don't-ask-again writer pushes the
-	// generated extension into it so a first-time rule joins the chain
-	// at the NEXT run (the run's policies are fixed at its start; run.ts
-	// re-reads the config's extensions array per run).
-	// LT-2: the loop breaker at the chain HEAD — it speaks first when it speaks,
-	// so `decidedBy` names it; a deny there beats every tier, bypass included.
-	// 0.40.0: the read-only shell allow sits after the tiers — an allow from
-	// it outranks a tier's ask and names itself in decidedBy.
-	// 0.40.0: a saved allow never carries a write into .git/ or .kiso/, nor
-	// a destructive shell command.
-	const workspaceRoot = (): string => codingToolOptions().workspaceRoot;
-	const neverInherited = (call: PolicyCall): boolean => isProtectedWrite(call, workspaceRoot()) || isDestructiveCall(call);
-	setNeverInherited(neverInherited);
-	// 0.40.0: the catastrophe floor, at the chain's HEAD — a deny there
-	// names itself in decidedBy and outranks every tier, bypass included.
-	// Read per agent, so /reload picks up an edited user config.
-	const userConfig = loadUserConfig();
-	setFloorOn(userConfig?.floor !== "off");
-	// kiso never serves its own credential store to a model: the file tools
-	// refuse it through codingToolOptions, and this member denies a shell
-	// line naming it — at the HEAD with the floor, in every mode, and NOT
-	// switched off with it (`floor: "off"` lowers the catastrophe floor,
-	// never this).
-	setUserProtectedPaths(userConfig?.protectedPaths);
-	const extensions = [
-		protectedShellExtension({ files: protectedFiles, workspaceRoot, env: () => ({ home: homedir(), kisoHome: kisoHome() }) }),
-		floorExtension(() => floorOn, workspaceRoot),
-		breakerExtension(),
-		...modeExtensions(workspaceRoot),
-		readOnlyShellExtension(codingToolOptions),
-		...loadedExtensions.map((e) => guardSavedAllow(e, neverInherited)),
-	];
-	setCurrentAgentExtensions(extensions);
-
-	// E6: the run-start context policy (captured once — exactOptionalPropertyTypes).
-	const contextPolicy = contextPolicyFromEnv();
-	const idleFromEnv = streamIdleFromEnv(); // read once: a narrowed const, not a call per spread
-	const retriesFromEnv = maxRetriesFromEnv();
-	const definition: AgentDefinition = {
-		model,
-		store,
-		// 0.40.0: a NEW session records where it started; the picker scopes by
-		// it. The profile name is recorded only when the model came from a
-		// config profile — a direct provider/model or an env key names none.
-		workspace: workspaceRoot(),
-		...(resolved !== null && merged.models?.[resolved.name] === resolved.profile ? { profileName: resolved.name } : {}),
-		// Area 5: the coding tools are bound to the workspace — every path
-		// they touch is canonicalized inside cwd, escapes are refused.
-		tools: [...createCodingTools(codingToolOptions())], // DC-49 — the options live in state.ts, shared with the `!` command's runner
-		// Modes: the five tiers ride the E1 policy chain (mode:<tier>
-		// extensions, current tier first) — the old static PERMISSION_POLICY
-		// is gone, its semantics live in the "default" tier. The banner
-		// still counts loadedExtensions only — the modes are in-process,
-		// never a file extension.
-		systemPrompt: (() => {
-			const sp = composeSystemPrompt(process.cwd(), protectedFiles());
-			const extra = modeSystemPrompt();
-			return extra === undefined ? sp : `${sp}\n\n${extra}`;
-		})(),
-		// ADR-0055 Amendment 1 (A1b): compaction is ON by default and runs
-		// INSIDE a run, by tiers drawn from the model's window (CTX-1: the
-		// binding step moves the window with /model and /resume). The
-		// standing microcompact at half the window is gone (A4). Phase rule
-		// 1 reads the user's configured checks first, then the runner table.
-		contextPolicy: {
-			...(contextPolicy ?? {}),
-			tiers: {
-				windowTokens: contextWindowTokens(),
-				isCheck: (command: string) => runsACheck(command, Object.values(merged.checks ?? {})),
-				// ADR-0055 Amendment 2: a discarded checkpoint says so, in sizes only.
-				onDiscard: (d) => body.notice(compactionDiscardedNotice(d)),
-				// ADR-0055 Amendment 2 (decision 3): only a window someone stated
-				// arms the overflow belt — read from the LIVE binding, so it moves
-				// with /model and /resume; the fallback reads as null.
-				statedWindow: () => knownContextWindow(),
-				// CW-1 batch 2: an endpoint's refusal stated its cap. The tiers
-				// took it already; kept, it is where the next session starts, and
-				// the status row's denominator moves with it. Said once per new
-				// figure — a refusal at a cap already kept says nothing.
-				onWindowLearned: (w) => {
-					if (recordLearnedWindow(w.model, w.baseUrl, w.tokens)) body.notice(windowLearnedNotice(w.model, providerHost(w.baseUrl) ?? "", w.tokens));
-				},
-			},
-		},
-		// R3e (owner ruling, 2026-08-28): NO turn limit on an interactive
-		// session. This was `maxTurns: 20`, hardcoded on 2026-08-03 with no
-		// stated reason and no way to change it — and it was the thing that
-		// stopped a real 43-call session dead, mid-task, in silence. The
-		// field survives for the callers that want a bound (subagents, the
-		// SDK, `kiso run`); the interactive front door does not set one.
-		// Modes: the five tiers join at the CHAIN HEAD, before the user/
-		// project extensions (the deny>allow>ask composition keeps a user
-		// deny winning over any mode tier — bypass included).
-		extensions,
-		...(resolved !== null
-			? {
-					provider: resolved.profile.kind,
-					// Astra F1 (P0): the wire config is built in ONE place
-					// (auth/adapter-options.ts) — credential shape, the ALWAYS
-					// EXPLICIT endpoint, the session's cache key and the
-					// profile's caching flag. This site and the `/model` site
-					// were the same spread written twice.
-					...adapterOptionsFor(
-						resolved.profile,
-						resolved.oauthProviderId !== undefined
-							? { type: "oauth", providerId: resolved.oauthProviderId }
-							: { type: "api-key", apiKey: resolved.apiKey ?? "none" },
-						sessionId,
-					),
-					// LT-1: the profile's stream watchdog bound, if it states one.
-					// NOT an adapter option — an agent-definition field the
-					// runtime reads — so it stays here rather than moving into
-					// adapterOptionsFor.
-					...(resolved.profile.streamIdleMs !== undefined ? { streamIdleMs: resolved.profile.streamIdleMs } : {}),
-				}
-			: { adapter: createFauxProvider(readFauxScript().slice(fauxSkipTurns)) }),
-		// LT-1: KISO_STREAM_IDLE_MS (the test rigs' knob) beats the profile —
-		// the last spread wins, which is why it sits after the profile's.
-		...(idleFromEnv !== undefined ? { streamIdleMs: idleFromEnv } : {}),
-		...(retriesFromEnv !== undefined ? { maxRetries: retriesFromEnv } : {}),
-		// ADR-0005 Amendment 2: the kernel announces each retry before its
-		// wait; the running row shows it. Composed with every extension's
-		// hooks by the runtime — an extension observing retries too is heard.
-		hooks: {
-			onRetry: async (info) => {
-				setRetryShown({ attempt: info.attempt, maxRetries: info.maxRetries, code: info.code, until: Date.now() + info.delayMs });
-			},
-		},
-	};
-	return createAgent(definition);
-}
-
 export { workspaceRoot } from "./state.js";
 
 /** TUI2-R2 ② — the picker's affordance row: the keys, said where the
@@ -981,9 +592,9 @@ const PICKER_HINT = "↑↓ pick · ⏎ resumes · type filters · esc";
  * runtime's own accessors (see session-cards.ts); this is only the
  * plumbing that hands it the store's read side.
  */
-async function sessionCards(_agent: Awaited<ReturnType<typeof makeAgent>>, announce: (line: string) => void = (l) => bodyLog(l)): Promise<SessionCardView[]> {
+async function sessionCards(_agent: Awaited<ReturnType<typeof createCodingAgent>>, announce: (line: string) => void = (l) => bodyLog(l)): Promise<SessionCardView[]> {
 	const store = sessionStoreRef;
-	if (store === null) return []; // unreachable: makeAgent builds the store first
+	if (store === null) return []; // unreachable: createCodingAgent builds the store first
 	const folders = listingFolders();
 	// 0.40.0 dogfood (item 2, lead's ruling A): the ONE-TIME migration — the
 	// first list after the upgrade reads each legacy log exactly once and
@@ -1021,26 +632,6 @@ function listingFolders(): SessionFolder[] {
 	const all = sessionFolders(home);
 	const mine = all.find((f) => f.dir === here) ?? { dir: here, workspace: projectRoot(), kind: "project" as const };
 	return [mine, ...all.filter((f) => f.dir !== here)];
-}
-
-/**
- * 0.40.0 — before any session opens: the one-time move of the legacy
- * folder into project folders (announced once, with the undo), then this
- * project's folder claimed. Nothing happens under a pinned folder or after
- * a reversed migration.
- */
-function prepareSessionFolders(): void {
-	const home = kisoHome();
-	if (!projectLayoutActive(home)) return;
-	if (pendingLegacyIds(home).length > 0) {
-		const result = runMigration(home, planMigration(home));
-		if (result !== null && result.moved > 0) {
-			const line = migrationNotice(result);
-			if (process.stdout.isTTY) bodyLog(line);
-			else process.stderr.write(`${line}\n`);
-		}
-	}
-	claimProjectDir(ownSessionsDir(), projectRoot());
 }
 
 /**
@@ -1083,9 +674,6 @@ function sessionFolderOf(id: string): string {
 	return route?.kind === "elsewhere" ? route.dir : ownSessionsDir();
 }
 
-/** The folder makeAgent built the store on. */
-let activeStoreDir = "";
-
 /** The workspace a listing is scoped to: a project folder's identity under
  *  the per-project layout, the recorded realpath in one pinned folder. */
 function scopeRoot(): string {
@@ -1098,7 +686,7 @@ function tildeOf(path: string): string {
 }
 
 /** The explicit-id doors (`chat <id>`, `resume <id>`, `-p … <id>`), BEFORE
- *  makeAgent builds the store: a refusal is the entry's error (the line on
+ *  createCodingAgent builds the store: a refusal is the entry's error (the line on
  *  stderr, exit 2); a session in another folder opens there. Returns the
  *  line to say once the session is up. */
 function enterRouted(id: string): string | null {
@@ -1124,7 +712,7 @@ function sayRouteLine(line: string | null): void {
  * null when they left. The picker path WRITES NOTHING: the cards are a
  * projection over what is already on disk.
  */
-async function pickSession(agent: Awaited<ReturnType<typeof makeAgent>>, input: LineInput): Promise<string | null> {
+async function pickSession(agent: Awaited<ReturnType<typeof createCodingAgent>>, input: LineInput): Promise<string | null> {
 	const cards = await sessionCards(agent);
 	if (cards.length === 0) {
 		bodyLog("no sessions yet \u2014 `kiso` starts one");
@@ -1158,7 +746,7 @@ async function pickSession(agent: Awaited<ReturnType<typeof makeAgent>>, input: 
  * tier, the /mode hint, the model and the remaining context belong.
  *
  * It is painted HERE, at the first moment every field is TRUE: after
- * makeAgent, because that is where the model is resolved. Painting it at
+ * createCodingAgent, because that is where the model is resolved. Painting it at
  * dock.enter() — the literally-first frame — would have to name a model
  * nobody had chosen yet, and a status row that guesses is worse than a
  * status row that waits two hundred milliseconds.
@@ -1177,7 +765,6 @@ async function pickSession(agent: Awaited<ReturnType<typeof makeAgent>>, input: 
  * once; 0.41.0 removes it.
  */
 let autoCompactNoticed = false;
-let unknownWindowNoticed = false;
 function retiredAutoCompact(merged: Parameters<typeof resolveAutoCompact>[0]): undefined {
 	if (!autoCompactNoticed && (process.env.KISO_AUTO_COMPACT !== undefined || resolveAutoCompact(merged) !== undefined)) {
 		autoCompactNoticed = true;
@@ -1299,26 +886,26 @@ function skillCount(): number {
  * invisible in it, because nothing the model said or did changes.
  */
 async function reloadAgent(
-	old: Awaited<ReturnType<typeof makeAgent>>,
+	old: Awaited<ReturnType<typeof createCodingAgent>>,
 	id: string,
 	input: LineInput,
 	announce = true,
-): Promise<Awaited<ReturnType<typeof makeAgent>>> {
-	// Snapshot BEFORE makeAgent: it overwrites every one of these, so the
+): Promise<Awaited<ReturnType<typeof createCodingAgent>>> {
+	// Snapshot BEFORE createCodingAgent: it overwrites every one of these, so the
 	// old set would be unreachable by the time we needed to dispose it.
 	const oldLoaded = loadedExtensions;
 	const oldBuiltIn = builtInExtensions;
 	const oldUser = userExtensions;
 	const oldProject = projectExtensions;
 	const oldTemps = mergedTempPaths.splice(0);
-	// makeAgent publishes the config side BEFORE it can fail on the model,
+	// createCodingAgent publishes the config side BEFORE it can fail on the model,
 	// so a failure past the extension load would leave a NEW window, model
 	// name and profile table beside the OLD agent — and the failure line
 	// says nothing changed. Rather than soften the line, the snapshot makes
 	// it true: a failed reload is atomic, which is what load-then-swap
 	// promises. (Lead's review of 5bee644, observation 1.)
 	const oldCfg = {
-		// RL-F6: makeAgent publishes this BEFORE createAgent, and createAgent
+		// RL-F6: createCodingAgent publishes this BEFORE createAgent, and createAgent
 		// throws on a tool-name collision — a user extension exposing
 		// `read_file` is enough — so a failure CAN land after it. Left
 		// unrestored, the new array stands beside the old agent, whose config
@@ -1338,13 +925,13 @@ async function reloadAgent(
 		endpoint: agentBaseUrl,
 		delegation: process.env.KISO_DELEGATION_CONFIG_JSON,
 	};
-	let next: Awaited<ReturnType<typeof makeAgent>>;
+	let next: Awaited<ReturnType<typeof createCodingAgent>>;
 	try {
-		next = await makeAgent(id, input, modelChoice);
+		next = await createCodingAgent(id, input, modelChoice);
 	} catch (err) {
 		// Nothing is swapped. Clean up whatever the failed attempt managed
 		// to create, put the old set's own temp paths back so exit still
-		// removes them, and restore the lists in case makeAgent got far
+		// removes them, and restore the lists in case createCodingAgent got far
 		// enough to publish new ones.
 		for (const p of mergedTempPaths.splice(0)) {
 			try {
@@ -1384,7 +971,7 @@ async function reloadAgent(
 }
 
 async function chatLoop(
-	first: Awaited<ReturnType<typeof makeAgent>>,
+	first: Awaited<ReturnType<typeof createCodingAgent>>,
 	firstId: string,
 	input: LineInput,
 	autoCompact: Parameters<typeof chat>[3],
@@ -1417,8 +1004,8 @@ async function chatLoop(
 			setOpenSessionFolder(folder === ownSessionsDir() ? null : folder);
 			const next = await reloadAgent(agent, id, input, false);
 			if (next === agent) {
-				// makeAgent may have built the new store before it failed
-				activeStoreDir = was.dir;
+				// createCodingAgent may have built the new store before it failed
+				setActiveStoreDir(was.dir);
 				if (was.store !== null) setSessionStore(was.store);
 				setOpenSessionFolder(was.dir === ownSessionsDir() ? null : was.dir);
 				if (prev === null) return;
@@ -1522,7 +1109,7 @@ async function chatLoop(
 		setCurrentModelName(session.model);
 		// A SWITCH knows only a model id here — nothing that names the profile —
 		// so the mark is cleared rather than guessed. A FRESH start keeps what
-		// makeAgent resolved from `--model <profile>`, which is the one place
+		// createCodingAgent resolved from `--model <profile>`, which is the one place
 		// the name is known (prev is null only on the first entry).
 		if (prev !== null) setCurrentProfileName(null);
 		paintBootStatus(session);
@@ -1629,7 +1216,7 @@ async function main(): Promise<void> {
 	// banner and the first frame are in the record. Off by default.
 	armByteTrace();
 	// Modes: --mode <name> wins over KISO_MODE — both applied before the
-	// first makeAgent (the tier extensions read `current` live). The flag
+	// first createCodingAgent (the tier extensions read `current` live). The flag
 	// is stripped from the positional args, so it works in any position.
 	const args = process.argv.slice(2);
 	// XP-1: --accept-drift (a flag, never an env var) authorizes opening a
@@ -1672,7 +1259,7 @@ async function main(): Promise<void> {
 		args.splice(printIdx, 2);
 	}
 	// merge round B: --model <profile|provider/model> — the top of the model
-	// precedence chain; the value flows into makeAgent's config resolution.
+	// precedence chain; the value flows into createCodingAgent's config resolution.
 	let modelFlag: string | undefined;
 	const modelArgIdx = args.indexOf("--model");
 	if (modelArgIdx !== -1) {
@@ -1685,7 +1272,7 @@ async function main(): Promise<void> {
 	}
 	// Modes: --mode wins over KISO_MODE, which wins over the USER config's
 	// mode (the project config's mode applies later — after the trust gate,
-	// inside makeAgent — unless a higher layer already decided).
+	// inside createCodingAgent — unless a higher layer already decided).
 	const modeFlag = args.indexOf("--mode");
 	if (modeFlag !== -1) {
 		const m = MODES.find((x) => x === args[modeFlag + 1]);
@@ -1754,10 +1341,10 @@ async function main(): Promise<void> {
 	const [command, arg] = args;
 	// round 8: faux mode is the keyless demo script — an exhausted script must
 	// exit non-zero, never masquerade as a successful provider run. The
-	// verdict comes from makeAgent's config resolution now (a config
+	// verdict comes from createCodingAgent's config resolution now (a config
 	// profile can provide a real model with no OPENAI_* env).
 	let faux = true;
-	let agent: Awaited<ReturnType<typeof makeAgent>> | undefined;
+	let agent: Awaited<ReturnType<typeof createCodingAgent>> | undefined;
 
 	// v2c: ONE input source per process — the raw-mode editor on a TTY
 	// (entered here, dock-bound, trusted before any extension loads),
@@ -1871,7 +1458,7 @@ async function main(): Promise<void> {
 			// verbatim (a fresh id makes the recovery a no-op)
 			const id = command ?? newSessionId(sessionsDir());
 			const routeLine = command !== undefined ? enterRouted(id) : null;
-			agent = await makeAgent(id, input, modelFlag);
+			agent = await createCodingAgent(id, input, modelFlag);
 			applyConfigMode();
 			sayRouteLine(routeLine);
 			const session = await agent.session({ id, ...(acceptDrift() ? { acceptDrift: true } : {}) });
@@ -1891,7 +1478,7 @@ async function main(): Promise<void> {
 				// E area: a resumed session continues the script at its durable
 				// position — never restarts it (fauxSkip).
 				const routeLine = arg !== undefined ? enterRouted(id) : null;
-				agent = await makeAgent(id, input, modelFlag);
+				agent = await createCodingAgent(id, input, modelFlag);
 				applyConfigMode();
 				sayRouteLine(routeLine);
 				faux = currentFaux;
@@ -1913,7 +1500,7 @@ async function main(): Promise<void> {
 				const prompt = process.argv[4];
 				dock.enter();
 				const routeLine = arg !== undefined ? enterRouted(arg) : null;
-				agent = await makeAgent(arg, input, modelFlag);
+				agent = await createCodingAgent(arg, input, modelFlag);
 				applyConfigMode();
 				let id = arg;
 				if (id === undefined) {
@@ -1945,7 +1532,7 @@ async function main(): Promise<void> {
 				faux = currentFaux;
 				// E area: the durable script position is computed from the
 				// session id, and on the picker path the id did not exist when
-				// makeAgent ran. Re-arm the scripted adapter at the PICKED
+				// createCodingAgent ran. Re-arm the scripted adapter at the PICKED
 				// session's position so a picked resume continues its script
 				// exactly where `kiso resume <id>` would have.
 				if (faux && arg === undefined) session.setAdapter(createFauxProvider(readFauxScript().slice(fauxSkip(id))));
@@ -1958,14 +1545,14 @@ async function main(): Promise<void> {
 			case "sessions": {
 				// R-I-p2 audit (the argument-consistency mandate): the
 				// read-only listing NEVER writes through the input, but the
-				// trust gate lives inside makeAgent and ASKS through it — on
+				// trust gate lives inside createCodingAgent and ASKS through it — on
 				// a TTY with a first-discovery .kiso, the undefined input
 				// crashed identically to the bare command (finding R-I-p-2,
 				// "reading 'question'" on the dock-less branch). The input
 				// exists so the gate's ask can be answered; the listing
 				// itself never touches it.
 				if (pruneEmpty !== undefined) {
-					// DC-60: before makeAgent — the scan only reads, and nothing
+					// DC-60: before createCodingAgent — the scan only reads, and nothing
 					// needs an agent to move a file to the Trash
 					const { empty, inUse } = findEmptySessions(listingFolders().map((f) => f.dir));
 					const n = (k: number, w: string): string => `${k} ${w}${k === 1 ? "" : "s"}`;
@@ -1979,13 +1566,13 @@ async function main(): Promise<void> {
 					break;
 				}
 				if (reverseManifest !== undefined) {
-					// before makeAgent: its folder preparation would otherwise run
+					// before createCodingAgent: its folder preparation would otherwise run
 					// the very move this undoes
 					const { restored, left } = reverseMigration(kisoHome(), reverseManifest);
 					console.log(`moved ${restored} session${restored === 1 ? "" : "s"} back to ${join(kisoHome(), "sessions")}; one folder per project is off until ${join(kisoHome(), "projects", ".migration-reversed")} is removed${left > 0 ? ` — ${left} created since the move stay in their project folders` : ""}`);
 					break;
 				}
-				agent = await makeAgent(undefined, input, modelFlag);
+				agent = await createCodingAgent(undefined, input, modelFlag);
 				// TUI2-R2 ③ — the same projection the picker renders, printed.
 				// The PIPE keeps today's bytes exactly: `kiso sessions` is
 				// something scripts read, and a badge column is a TTY-render
@@ -2184,7 +1771,7 @@ async function main(): Promise<void> {
 				// through the undefined input: "Cannot read properties of
 				// undefined" at the ask (panelAsk with the dock, question on
 				// the dock-less fallback).
-				agent = await makeAgent(id, input, modelFlag);
+				agent = await createCodingAgent(id, input, modelFlag);
 				// finding E4-1's faux resolution rides chatLoop (currentFaux).
 				faux = currentFaux;
 				// CX-1 F9 (audit F9): the bare entry resolves autoCompact from
