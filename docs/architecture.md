@@ -101,7 +101,9 @@ zero dependencies, and `packages/server/http` is the HTTP + SSE transport
 over the service. A wire event is a PROJECTION of a durable event (a
 curated subset, an allowlist of fields, tool arguments sanitized), never
 the durable type: the persistence contract and the transport contract
-move on their own.
+move on their own. `packages/client` (R5) is the typed client over that
+contract — browser and Node, protocol-only, with a stream that reconnects
+on `Last-Event-ID` and never repeats a seq.
 
 ## 2. Composition — two homes, on purpose
 

@@ -22,6 +22,8 @@ const PACKAGES = [
 	// R4 (2026-09-23): the wire contract, zero dependencies.
 	"@vincemakes/kiso-protocol",
 	"@vincemakes/kiso-server",
+	// R5 (2026-09-24): the typed client over the wire contract.
+	"@vincemakes/kiso-client",
 	"@vincemakes/kiso-tools-node",
 	"@vincemakes/kiso-provider-anthropic",
 	"@vincemakes/kiso-provider-openai",
