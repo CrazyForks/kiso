@@ -94,20 +94,27 @@ a broken config file fails loudly with the file named.
 
   1. **what you set** — `KISO_CONTEXT_WINDOW`, the profile's
      `"contextWindow"`, the top-level `"contextWindow"`, in that order;
-  2. **the registry's row for this endpoint** (gpt-5.5 is 1,050,000 at the
+  2. **what this endpoint refused at** — a refusal such as "maximum context
+     length is 131072 tokens" states the route's real cap. kiso reads it,
+     compacts against it at once (`✦ window learned — …`), and keeps it in
+     `~/.kiso/learned-windows.json` (per endpoint and model, only ever
+     lowered) so the next session starts there. Delete the file's entry if
+     the endpoint later raises its cap;
+  3. **the registry's row for this endpoint** (gpt-5.5 is 1,050,000 at the
      first-party API and 272,000 at the subscription backend);
-  3. **the registry's row for the profile's `"upstream"`** — a profile
+  4. **the registry's row for the profile's `"upstream"`** — a profile
      whose `baseUrl` is a local forwarder names where the forwarder sends
      its requests (`"upstream": "https://gateway.example/v1"`); `/model`
      then shows `@gateway.example via 127.0.0.1:47821`;
-  4. **the model's own window**, from every row for the same model at any
+  5. **the model's own window**, from every row for the same model at any
      endpoint — the vendor prefix dropped, case folded, and a vendor-stated
      alias applied (`deepseek-v4.1-flash` is `deepseek-flash`). Where rows
      disagree, the smallest. `/status` says `inferred from the model` —
-     no row states it for this endpoint.
+     no row states it for this endpoint — step 2 corrects it the first
+     time the endpoint refuses.
 
-  Nothing after step 4: an unknown model shows `ctx ?`, and compaction
-  assumes a conservative **200,000 tokens** (said once at startup). For a
+  Nothing after step 5: an unknown model shows `ctx ?`, and compaction
+  assumes a conservative **128,000 tokens** (said once at startup). For a
   model with a larger real window, relief fires earlier than it needs to;
   for a smaller one the provider can refuse a request while the meter still
   looks comfortable. Set the true number when you know it. Price, effort

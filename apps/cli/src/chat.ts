@@ -37,13 +37,18 @@ import { dispatch, type DispatchCtx, abortBangCommand } from "./dispatch.js";
 import { paintWindowTitle } from "./window-title.js";
 import { agentBaseUrl, agentModel, body, bodyLog, configuredWindow, dock, retryOnRow, retryShown, setRetryShown, floorOn, protectedFiles, upstreamOf, type LineInput } from "./state.js";
 import { attachImages } from "./attachments.js";
+import { learnedWindowFor } from "./learned-windows.js";
 import { lookupContextWindow, lookupModelMetadata, type ContextWindowSource } from "@vincemakes/kiso-runtime/internal";
 import { addDontAskAgainRule, askPanel, fixHintFor, pendingAsk, resolveUncertains } from "./trust-ui.js";
 import { FauxExhaustionError, failOnFauxExhaustion } from "./faux-glue.js";
 import { OFFERED_MODES, getMode, setMode } from "./mode.js";
 
-/** B area: default context window for the ~ctx estimate (config overridable). */
-const DEFAULT_CONTEXT_WINDOW = 200_000;
+/** B area: default context window for the ~ctx estimate (config overridable).
+ *  CW-1 batch 2: 128,000, down from 200,000 — the figure a model nobody
+ *  states a window for is assumed to hold (the reference implementation's
+ *  default too). Too small costs an early compaction; too large costs a
+ *  refused request on a 128K model. Registered models never reach it. */
+const DEFAULT_CONTEXT_WINDOW = 128_000;
 
 /** The in-process fake provider's id, and the window we declare for it.
  *  Ours to state: faux is not a vendor's model, so "nobody published a
@@ -118,9 +123,11 @@ export function knownContextWindow(of?: { readonly model: string; readonly baseU
  *  registry's steps (lookupContextWindow). */
 export interface StatedWindow {
 	readonly tokens: number;
-	readonly source: "set" | "faux" | ContextWindowSource;
+	readonly source: "set" | "faux" | "learned" | ContextWindowSource;
 	/** the registry row's model id, for the registry's steps */
 	readonly from?: string;
+	/** CW-1 batch 2: the day an endpoint's refusal stated it, for `learned` */
+	readonly observedAt?: string;
 }
 
 /** CW-1: `knownContextWindow` with its source — the chain the displays name.
@@ -146,6 +153,10 @@ export function statedContextWindow(
 	// belongs to models whose capacity genuinely nobody states.
 	if (model === FAUX_MODEL) return { tokens: FAUX_CONTEXT_WINDOW, source: "faux" };
 	const baseUrl = of !== undefined ? of.baseUrl : agentBaseUrl;
+	// CW-1 batch 2: what this endpoint's own refusal stated, before any
+	// statement about the model — a measurement of the route.
+	const learned = learnedWindowFor(model, baseUrl);
+	if (learned !== undefined) return { tokens: learned.tokens, source: "learned", observedAt: learned.observedAt };
 	return lookupContextWindow(model, baseUrl, of?.upstream ?? upstreamOf(baseUrl));
 }
 
@@ -169,6 +180,8 @@ export function windowSourceNote(w: StatedWindow | null, form: "short" | "long")
 			return `window ${size}, as you set it`;
 		case "faux":
 			return `window ${size} (faux)`;
+		case "learned":
+			return `window ${size}, learned from this endpoint's refusal (${w.observedAt ?? "date unknown"})`;
 		case "route":
 			return `window ${size}, the registry's for this endpoint`;
 		case "upstream":
@@ -203,6 +216,11 @@ export function contextWindowTokens(of?: { readonly model: string; readonly base
 	// the upstream's, then the model's own identity — the same chain
 	// `statedContextWindow` names for the displays.
 	const baseUrl = of !== undefined ? of.baseUrl : agentBaseUrl;
+	// CW-1 batch 2: faux is declared here too — it read the old 200K
+	// fallback by accident, and the fallback moving must not move it.
+	if ((of?.model ?? agentModel) === FAUX_MODEL) return FAUX_CONTEXT_WINDOW;
+	const learned = learnedWindowFor(of?.model ?? agentModel, baseUrl);
+	if (learned !== undefined) return learned.tokens;
 	const known = lookupContextWindow(of?.model ?? agentModel, baseUrl, upstreamOf(baseUrl));
 	if (known !== null) return known.tokens;
 	return DEFAULT_CONTEXT_WINDOW;
@@ -261,10 +279,17 @@ export function statusModelLabel(session: { readonly reasoning?: { readonly effo
 }
 
 /** ADR-0055 Amendment 2 (decision 5): with no stated window the status row
- *  shows `ctx ?`, yet the compaction tiers still assume the 200K fallback
+ *  shows `ctx ?`, yet the compaction tiers still assume the fallback (128K
+ *  since CW-1 batch 2)
  *  — the assumption is said out loud once, at agent build. */
 export function unknownWindowNotice(model: string): string {
 	return `[kiso] context window unknown for ${model} at this endpoint — compaction assumes ${DEFAULT_CONTEXT_WINDOW / 1000}K; set contextWindow on the profile to state it`;
+}
+
+/** CW-1 batch 2: said once, when an endpoint's refusal states its cap — the
+ *  tiers aim below it from the next request, and later sessions start on it. */
+export function windowLearnedNotice(model: string, host: string, tokens: number): string {
+	return `✦ window learned — ${host === "" ? "the endpoint" : host} refused ${model} past ${windowLabel(tokens)} tokens; compaction now aims below it`;
 }
 
 /** ADR-0055 Amendment 2: the notice for a checkpoint the shrink invariant
@@ -275,7 +300,7 @@ export function compactionDiscardedNotice(d: { readonly pre: number; readonly po
 }
 
 export function displayCtxRatio(session: AgentSession): number {
-	// CAPACITY is not POLICY. `contextWindowTokens` falls back to 200,000 so
+	// CAPACITY is not POLICY. `contextWindowTokens` falls back to 128,000 so
 	// that the compaction threshold always HAS a value — a policy needs a
 	// number. A percentage on screen is a different kind of thing: it is a
 	// claim about the model, and an unstated window makes it unanswerable.

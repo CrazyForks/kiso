@@ -5,7 +5,7 @@ import { setAgentModel } from "../src/state.js";
 /**
  * ADR-0055 Amendment 2 — the CLI's three surfaces for the 0.40.2 round:
  * the discarded-checkpoint notice (sizes only), the unknown-window notice
- * (the 200K assumption said out loud), and the status row naming the
+ * (the fallback assumption said out loud), and the status row naming the
  * model without its vendor prefix.
  */
 afterEach(() => setAgentModel("faux"));
@@ -21,7 +21,8 @@ describe("the discarded-checkpoint notice", () => {
 describe("the unknown-window notice", () => {
 	it("names the model and the assumed window, and how to state the real one", () => {
 		expect(unknownWindowNotice("deepseek-v4.1-flash")).toBe(
-			"[kiso] context window unknown for deepseek-v4.1-flash at this endpoint — compaction assumes 200K; set contextWindow on the profile to state it",
+			// CW-1 batch 2 (declared re-pin): the fallback is 128K, down from 200K
+			"[kiso] context window unknown for deepseek-v4.1-flash at this endpoint — compaction assumes 128K; set contextWindow on the profile to state it",
 		);
 	});
 });

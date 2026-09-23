@@ -79,12 +79,12 @@ describe("the forwarder's upstream is found by its address", () => {
 });
 
 describe("unknown stays unknown — and says what it assumes", () => {
-	it("no row, no figure: ? on the row, 200K for the tiers, said in words", () => {
+	it("no row, no figure: ? on the row, the fallback for the tiers, said in words", () => {
 		setAgentModel("unregistered-model-nobody-publishes-a-window-for", FORWARDER);
 		expect(knownContextWindow()).toBeNull();
-		expect(contextWindowTokens()).toBe(200_000);
+		expect(contextWindowTokens()).toBe(128_000); // CW-1 batch 2 (declared re-pin): the fallback is 128K, down from 200K
 		expect(windowSourceNote(statedContextWindow(), "short")).toBe("ctx ?");
-		expect(windowSourceNote(statedContextWindow(), "long")).toBe("window unknown — compaction assumes 200K; set contextWindow on the profile to state it");
+		expect(windowSourceNote(statedContextWindow(), "long")).toBe("window unknown — compaction assumes 128K; set contextWindow on the profile to state it");
 	});
 
 	it("the route's own row is named as the registry's", () => {
