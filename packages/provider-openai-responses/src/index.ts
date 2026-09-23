@@ -46,6 +46,11 @@ export interface OpenAIResponsesProviderConfig {
 	readonly oauth?: () => Promise<ResponsesOAuthToken>;
 	/** Overrides the target's default base URL (tests and proxies). */
 	readonly baseUrl?: string;
+	/** Headers the endpoint needs on every request, as the profile names
+	 *  them. They go FIRST: the target's own headers (the credential, the
+	 *  backend's account and beta headers) are merged over them, so a
+	 *  configured header never replaces one this adapter must send. */
+	readonly headers?: Readonly<Record<string, string>>;
 	/** The ChatGPT backend's prefix-cache key — the session id, so one
 	 *  session's requests share a cache lane. Sent only to that target. */
 	readonly promptCacheKey?: string;
@@ -119,6 +124,7 @@ function resolveTarget(config: OpenAIResponsesProviderConfig): Target {
 			headers: async () => {
 				const token = await oauth();
 				return {
+					...config.headers,
 					authorization: `Bearer ${token.access}`,
 					"chatgpt-account-id": token.accountId,
 					originator: "kiso",
@@ -138,7 +144,7 @@ function resolveTarget(config: OpenAIResponsesProviderConfig): Target {
 	return {
 		providerId: "openai",
 		url: firstPartyUrl(config.baseUrl ?? FIRST_PARTY_BASE),
-		headers: async () => ({ authorization: `Bearer ${config.apiKey ?? ""}` }),
+		headers: async () => ({ ...config.headers, authorization: `Bearer ${config.apiKey ?? ""}` }),
 		extraBody: {},
 	};
 }

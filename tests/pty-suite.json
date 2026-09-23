@@ -70,6 +70,7 @@
   "apps/cli/tests/per-project-sessions-pty.test.ts",
   "apps/cli/tests/ph1a-front-door.test.ts",
   "apps/cli/tests/ph1c-metadata-cli.test.ts",
+  "apps/cli/tests/profile-headers-e2e.test.ts",
   "apps/cli/tests/project-trust.test.ts",
   "apps/cli/tests/protected-context-paths.test.ts",
   "apps/cli/tests/protected-credential-store-e2e.test.ts",
@@ -205,6 +206,10 @@
   {
    "file": "apps/cli/tests/cw1-learned-window.test.ts",
    "reason": "spawns nothing. It calls the learned-windows store (useLearnedWindows, recordLearnedWindow, learnedWindowFor) against mkdtemp files and the window chain (statedContextWindow, contextWindowTokens, windowSourceNote, windowLearnedNotice), and asserts their values. The classifier follows its import of ../src/chat.js into ../src/state.js, which carries one execFileSync(\"git\", [\"ls-files\"]) for @-file completion; this test calls none of it. Verified: no child_process, no spawn, no pty helper in the file."
+  },
+  {
+   "file": "apps/cli/tests/profile-headers.test.ts",
+   "reason": "spawns nothing. It calls parseConfig, adapterOptionsFor and expandProfileHeaders and asserts their values. The classifier follows its import of ../src/config.js into ../src/state.js, which carries one execFileSync(\"git\", [\"ls-files\"]) for @-file completion; this test calls none of it. Verified: no child_process, no spawn, no pty helper in the file."
   }
  ]
 }
