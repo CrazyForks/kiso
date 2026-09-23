@@ -30,7 +30,7 @@ describe("F33-R1: every generation ever written stays readable", () => {
 		// pins is that the set NAMES every generation explicitly — F33-R1
 		// found it spelled `[1, 2, 3, TRACE_SCHEMA_VERSION]`, where the
 		// moving member silently dropped the generation it stood on.
-		expect([...TRACE_SCHEMA_VERSIONS].sort()).toEqual([1, 2, 3, 4, 5, 6]);
+		expect([...TRACE_SCHEMA_VERSIONS].sort()).toEqual([1, 2, 3, 4, 5, 6, 7]); // DECLARED SUPERSESSION (SMK0400-F1): v7 joins
 		expect(TRACE_SCHEMA_VERSIONS.has(TRACE_SCHEMA_VERSION)).toBe(true);
 	});
 
