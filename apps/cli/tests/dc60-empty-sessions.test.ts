@@ -39,8 +39,8 @@ describe("DC-60 — findEmptySessions", () => {
 		const dir = folder();
 		const { empty, inUse } = findEmptySessions([dir], alive);
 		expect(empty.map((s) => s.id).sort()).toEqual(["ghost-a", "ghost-b"]);
-		expect(empty.find((s) => s.id === "ghost-a")!.files.sort()).toEqual(["ghost-a.meta.json", join("traces", "ghost-a.jsonl")].sort());
-		expect(empty.find((s) => s.id === "ghost-b")!.files.sort()).toEqual(["ghost-b.lock", "ghost-b.meta.json"]);
+		expect([...empty.find((s) => s.id === "ghost-a")!.files].sort()).toEqual(["ghost-a.meta.json", join("traces", "ghost-a.jsonl")].sort());
+		expect([...empty.find((s) => s.id === "ghost-b")!.files].sort()).toEqual(["ghost-b.lock", "ghost-b.meta.json"]);
 		expect(inUse).toBe(1);
 	});
 
