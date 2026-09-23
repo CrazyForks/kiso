@@ -7,7 +7,7 @@
  * never a silent fall back to an API key or an env var.
  */
 import { AuthError, modifyAuthFile, readAuthFile, type Credential } from "./credentials.js";
-import type { OAuthCredential, OAuthFlow } from "./oauth/index.js";
+import { type OAuthCredential, type OAuthFlow, RefreshRejectedError } from "./oauth/index.js";
 
 export const FRESH_WINDOW_MS = 5 * 60_000;
 
@@ -15,6 +15,9 @@ export async function ensureFresh(providerId: string, flow: OAuthFlow, path?: st
 	const current = readAuthFile(path).credentials[providerId];
 	if (current === undefined) throw new AuthError(`not signed in to ${providerId}: run \`kiso login ${providerId}\``);
 	if (current.type !== "oauth" || current.expires - now > FRESH_WINDOW_MS) return current;
+	// 0.40.7: a refresh token the endpoint already refused is not sent again —
+	// the answer would be the same refusal, one round trip later
+	if (current.refreshRejectedAt !== undefined) throw new AuthError(`signed out of ${providerId} (the sign-in was refused when kiso tried to renew it) — run \`kiso login ${providerId}\``);
 	let refreshed: OAuthCredential | undefined;
 	let error: Error | undefined;
 	// the double check: another process may have refreshed while we waited for the lock
@@ -25,7 +28,21 @@ export async function ensureFresh(providerId: string, flow: OAuthFlow, path?: st
 	} catch (err) {
 		error = err instanceof Error ? err : new Error(String(err));
 	}
-	if (refreshed === undefined) throw new AuthError(`signed out of ${providerId} (the token could not be refreshed: ${error?.message ?? "unknown"}) — run \`kiso login ${providerId}\``);
+	if (refreshed === undefined) {
+		// 0.40.7: the endpoint's REFUSAL is remembered on the credential, so
+		// /model can say the sign-in is over before a turn finds out. The
+		// same generation rule as the write-back below (R2a): a logout or a
+		// new login while the refresh was on the wire is left alone.
+		if (error instanceof RefreshRejectedError) {
+			const began = current;
+			modifyAuthFile((file) => {
+				const latest = file.credentials[providerId];
+				if (latest === undefined || latest.type !== "oauth" || latest.refresh !== began.refresh || latest.expires !== began.expires) return file;
+				return { version: 1, credentials: { ...file.credentials, [providerId]: { ...latest, refreshRejectedAt: now } } };
+			}, path);
+		}
+		throw new AuthError(`signed out of ${providerId} (the token could not be refreshed: ${error?.message ?? "unknown"}) — run \`kiso login ${providerId}\``);
+	}
 	const written = refreshed;
 	// R2a — THE WRITE-BACK MAY NOT RESURRECT WHAT THE HUMAN REMOVED.
 	//

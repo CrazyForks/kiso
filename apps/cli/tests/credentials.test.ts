@@ -118,7 +118,9 @@ describe("the resolve rule", () => {
 	it("OR-1: a stored OAuth sign-in is USABLE by the Responses kind — the same credential that is a refusal for a key-only kind", () => {
 		const subscription: ModelProfile = { kind: "openai-responses", baseUrl: "https://chatgpt.com/backend-api", model: "gpt-5.5" };
 		setCredential("chatgpt", { type: "oauth", access: "a", refresh: "r", expires: Date.now() + 1e6, accountId: "acct", savedAt: 1 }, path);
-		expect(authForProfile("sub", subscription)).toEqual({ type: "oauth", providerId: "chatgpt" });
+		// 0.40.7: the shape also carries the access token's expiry (for the
+		// /model row), so this pins the two fields that decide the route
+		expect(authForProfile("sub", subscription)).toMatchObject({ type: "oauth", providerId: "chatgpt" });
 		// …and it is AVAILABLE: the key-only resolver would have called a
 		// working sign-in broken, which is the bug this shape prevents.
 		expect(profileAvailable(subscription)).toBe(true);

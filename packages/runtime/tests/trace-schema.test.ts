@@ -86,6 +86,8 @@ const canonicalRecord: TraceRecord = {
 	purpose: "safer-options",
 	usageKnown: true,
 	servedModel: "deepseek-flash",
+	// SMK0400-F1 (v7): every optional field present, so the gate sees it
+	providerError: { code: "rate_limit", status: 429, message: "slow down" },
 	lineageLink: {
 		parentSessionId: "session-0142",
 		parentRunId: "run-0142",
@@ -119,7 +121,9 @@ describe("E1 slice 1 — the record schema gate (proposal §1.1)", () => {
 		// It is the SERVER's statement, so a provider that says nothing
 		// leaves it absent — that absence is a fact, not a missing field.
 		for (const key of TRACE_RECORD_FIELDS) {
-			if (key === "lineageLink" || key === "purpose" || key === "usageKnown" || key === "servedModel") continue;
+			// DECLARED SUPERSESSION (SMK0400-F1): `providerError` joins them at
+			// v7 — present only on a provider_error record.
+			if (key === "lineageLink" || key === "purpose" || key === "usageKnown" || key === "servedModel" || key === "providerError") continue;
 			const broken = looseCopy(canonicalRecord);
 			delete broken[key];
 			expect(validateTraceRecord(broken), `missing ${key}`).toBe(false);
@@ -171,11 +175,26 @@ describe("E1 slice 1 — the record schema gate (proposal §1.1)", () => {
 		// the probe is always ONE PAST the current version — it moved 4 -> 5
 		// for `purpose`, 5 -> 6 when F33-1 took 5 for `usageKnown`, and
 		// DECLARED SUPERSESSION (TRACE-F1): 6 -> 7 now that v6 is written.
+		// DECLARED SUPERSESSION (SMK0400-F1): 7 -> 8 now that v7 is written.
 		// What it pins is unchanged: a version no writer produces is refused.
-		expect(validateTraceRecord({ ...canonicalRecord, schemaVersion: 7 })).toBe(false);
+		expect(validateTraceRecord({ ...canonicalRecord, schemaVersion: 8 })).toBe(false);
 		const noVersion = looseCopy(canonicalRecord);
 		delete noVersion.schemaVersion;
 		expect(validateTraceRecord(noVersion)).toBe(false);
+	});
+
+	it("SMK0400-F1 (v7): providerError is closed, coded, integer-statused and capped", () => {
+		const note = (e: unknown) => validateTraceRecord({ ...canonicalRecord, providerError: e });
+		expect(note({ code: "network", message: "the stream ended" }), "status is optional").toBe(true);
+		expect(note({ code: "", message: "x" }), "an empty code").toBe(false);
+		expect(note({ code: "network", message: "x", status: 4.5 }), "a status is an integer").toBe(false);
+		expect(note({ code: "network", message: "x", extra: 1 }), "closed keys").toBe(false);
+		expect(note({ code: "network", message: "x".repeat(301) }), "the cap").toBe(false);
+		// a v6 record never carries it — the field set of ITS generation
+		expect(validateTraceRecord({ ...canonicalRecord, schemaVersion: 6 }), "a v6 record with the v7 field").toBe(false);
+		const v6 = looseCopy(canonicalRecord);
+		delete v6.providerError;
+		expect(validateTraceRecord({ ...v6, schemaVersion: 6 }), "a v6 record as a v6 writer wrote it").toBe(true);
 	});
 
 	it("the closed-field-set gate is bidirectional (R1a): type fields and the spec'd const agree exactly", () => {
@@ -202,9 +221,10 @@ describe("E1 slice 1 — the record schema gate (proposal §1.1)", () => {
 		// a version with no pinned algorithm cannot be used — the probe is
 		// ONE PAST the current version (4 -> 5 for `purpose`, 5 -> 6 when
 		// F33-1 pinned v5 for `usageKnown`; DECLARED SUPERSESSION, TRACE-F1:
-		// 6 -> 7 now that v6 is pinned). The rule it pins is unchanged: a
-		// version with no pinned algorithm cannot be written.
-		expect(() => hashSpecFor(7)).toThrow(/no hash spec pinned/i);
+		// 6 -> 7 now that v6 is pinned; SMK0400-F1: 7 -> 8 now that v7 is).
+		// The rule it pins is unchanged: a version with no pinned algorithm
+		// cannot be written.
+		expect(() => hashSpecFor(8)).toThrow(/no hash spec pinned/i);
 		// and the record's hashes are sha-256 full-hex by construction
 		const HEX_64 = /^[0-9a-f]{64}$/;
 		for (const key of ["systemPromptHash", "toolSchemaHash", "contextHash", "stablePrefixFingerprint"] as const) {
@@ -293,6 +313,7 @@ describe("E1 slice 1 — the record schema gate (proposal §1.1)", () => {
 		// presence: a field from a later generation in an older record is a
 		// record that could not have been written.
 		delete v1.servedModel;
+		delete v1.providerError; // SMK0400-F1: a v7 field, never in an older record
 		v1.schemaVersion = 1;
 		expect(validateTraceRecord(v1)).toBe(true); // accepted — readers derive defaults
 		expect(validateTraceLine(v1)).toBe(true);
@@ -312,7 +333,8 @@ describe("E1 slice 1 — the record schema gate (proposal §1.1)", () => {
 		delete v2.rent;
 		delete v2.purpose; // TUI2-R3v2 ③: predates side queries
 		delete v2.usageKnown; // F33-1: predates the marker; silence = unknown
-		delete v2.servedModel; // TRACE-F1: predates reading the served id
+		delete v2.servedModel;
+		delete v2.providerError; // SMK0400-F1: a v7 field, never in an older record // TRACE-F1: predates reading the served id
 		v2.schemaVersion = 2;
 		expect(validateTraceRecord(v2)).toBe(true); // accepted — readers derive defaults
 		expect(validateTraceLine(v2)).toBe(true);
@@ -343,14 +365,15 @@ describe("E1 slice 1 — the record schema gate (proposal §1.1)", () => {
 		expect(validateTraceRecord({ ...canonicalRecord, canonical: { ...c, costUsd: exact + 1e-7 } })).toBe(true); // within epsilon
 	});
 
-	it("the closed-field-set gate spans all SIX generations (R1d-1, R2-1)", () => {
+	it("the closed-field-set gate spans all SEVEN generations (R1d-1, R2-1)", () => {
 		// MOVED (TUI2-R3v2 ③, the safer-options seam adjudicated 2026-08-18):
 		// the v4 generation adds `purpose`. MOVED again (F33-1): v5 adds
 		// `usageKnown`. MOVED again (TRACE-F1): v6 adds `servedModel`. The
 		// additive discipline is the property this case exists for and it is
 		// unchanged — each generation is the previous one plus its new
 		// field, in order.
-		expect(TRACE_RECORD_FIELDS).toEqual([...TRACE_RECORD_FIELDS_V1, "canonical", "rent", "purpose", "usageKnown", "servedModel"]);
+		// MOVED again (SMK0400-F1): v7 adds `providerError`.
+		expect(TRACE_RECORD_FIELDS).toEqual([...TRACE_RECORD_FIELDS_V1, "canonical", "rent", "purpose", "usageKnown", "servedModel", "providerError"]);
 		expect(TRACE_RECORD_FIELDS_V3).toEqual([...TRACE_RECORD_FIELDS_V1, "canonical", "rent"]);
 		expect(new Set(TRACE_RECORD_FIELDS_V1).size).toBe(TRACE_RECORD_FIELDS_V1.length);
 	});

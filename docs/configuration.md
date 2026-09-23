@@ -243,6 +243,15 @@ gateway profile starts from plain `kiso`, with no env var exported first.
 A vendor's own origin is refused there (use `kiso login <provider>`).
 `kiso logout --endpoint <url>` removes it; `kiso auth` lists it masked.
 
+**A subscription sign-in's state is on its row (0.40.7).** An access token
+past its expiry renews on the next use, so the profile stays available and
+`/model` says `oauth, expired — renews on use`. When the token endpoint
+REFUSES the renewal (the refresh token was revoked, e.g. by signing out of
+all devices), kiso remembers it: the profile reads `(unavailable)` with the
+reason `run kiso login chatgpt`, the refused token is not sent again, and
+`kiso auth` marks the entry. A network failure is not a refusal and marks
+nothing. A new `kiso login` replaces the entry and the mark with it.
+
 **A stored credential OWNS its provider.** An unusable stored one is a loud
 error, never a silent fall back to the environment variable — what you signed
 in with is what runs. Without one the env layer still works: `ANTHROPIC_API_KEY`

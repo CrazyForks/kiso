@@ -8,6 +8,14 @@ import type { Credential } from "../credentials.js";
 
 export type OAuthCredential = Extract<Credential, { type: "oauth" }>;
 
+/**
+ * 0.40.7 — a refresh the token endpoint REFUSED (400 / 401: the refresh
+ * token was revoked or has expired), as distinct from one that never got an
+ * answer. Only this marks a sign-in dead (`refreshRejectedAt`); a network
+ * failure leaves the credential as it was, to be tried again.
+ */
+export class RefreshRejectedError extends Error {}
+
 export interface LoginInteraction {
 	/** Print a line for the person signing in (the URL to open, the paste prompt). */
 	readonly notify: (line: string) => void;

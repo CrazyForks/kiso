@@ -147,6 +147,13 @@ export interface KisoConfig {
 	 *  in the child's worktree. A model never supplies a command; it names
 	 *  one of these. `{ "test": "npm test", "lint": "npm run lint" }`. */
 	readonly checks?: Readonly<Record<string, string>>;
+	/** CS-1 (0.40.7): the evaluator scripts a delegated task may name —
+	 *  absolute paths, `["/abs/path/to/evaluate.sh"]`. The PARENT runs the
+	 *  one a task names with the child's worktree as its argument. A path
+	 *  the user did not list is refused: the model chooses the task, so an
+	 *  unlisted path could be an interpreter running code the child wrote.
+	 *  Same layers as `checks`. */
+	readonly evaluators?: readonly string[];
 }
 
 /** The resolved, merged config — project wins over user, both validated. */
@@ -183,6 +190,7 @@ export function parseConfig(text: string, source: string): KisoConfig {
 		floor?: "catastrophe" | "off";
 		protectedPaths?: readonly string[];
 		checks?: Record<string, string>;
+		evaluators?: string[];
 	} = {};
 	const obj = raw as Record<string, unknown>;
 	const fail = (key: string, why: string): never => {
@@ -230,6 +238,13 @@ export function parseConfig(text: string, source: string): KisoConfig {
 			if (typeof cmd !== "string" || cmd.trim() === "") fail(`checks.${name}`, "expected a non-empty command string");
 		}
 		out.checks = obj.checks as Record<string, string>;
+	}
+	if (obj.evaluators !== undefined) {
+		if (!Array.isArray(obj.evaluators)) fail("evaluators", "expected a list of absolute paths to evaluator scripts");
+		for (const path of obj.evaluators as unknown[]) {
+			if (typeof path !== "string" || !path.startsWith("/")) fail("evaluators", `expected an absolute path, got ${JSON.stringify(path)}`);
+		}
+		out.evaluators = obj.evaluators as string[];
 	}
 	if (obj.model !== undefined) {
 		if (typeof obj.model !== "string" || obj.model === "") fail("model", "expected a profile name or provider/model string");
@@ -344,6 +359,8 @@ export function mergeConfigs(user: KisoConfig | null, project: KisoConfig | null
 		...(p.projectTrust !== undefined ? { projectTrust: p.projectTrust } : {}),
 		// DT-1a: checks merge per name — a (trusted) project's check wins over the user's
 		...(u.checks !== undefined || p.checks !== undefined ? { checks: { ...(u.checks ?? {}), ...(p.checks ?? {}) } } : {}),
+		// CS-1: the evaluator lists join — either layer's script may be named
+		...(u.evaluators !== undefined || p.evaluators !== undefined ? { evaluators: [...(u.evaluators ?? []), ...(p.evaluators ?? [])] } : {}),
 	};
 }
 
@@ -352,7 +369,7 @@ export function mergeConfigs(user: KisoConfig | null, project: KisoConfig | null
  *  sign-in is a token that expires and must be re-resolved per request. */
 export type ProfileAuth =
 	| { readonly type: "api-key"; readonly apiKey: string; readonly source: "store" | "env" | "none" }
-	| { readonly type: "oauth"; readonly providerId: string };
+	| { readonly type: "oauth"; readonly providerId: string; /** the access token's expiry (epoch ms) — past it, the next use renews */ readonly expires?: number };
 
 /** Where a profile's sign-in comes from, or why it has none. The sign-in
  *  plan's resolve rule: a stored credential OWNS the provider (an
@@ -376,7 +393,14 @@ export function authForProfile(name: string, p: ModelProfile): ProfileAuth {
 		}
 		if (stored !== undefined) {
 			if (stored.type === "api-key") return { type: "api-key", apiKey: stored.key, source: "store" };
-			if (p.kind === "openai-responses") return { type: "oauth", providerId };
+			if (p.kind === "openai-responses") {
+				// 0.40.7: a sign-in whose renewal the endpoint REFUSED is over —
+				// unavailable here, where /model reads it, not first at a turn
+				if (stored.refreshRejectedAt !== undefined) {
+					throw new ConfigError(`model ${name}: unavailable — the ${providerId} sign-in was refused when kiso tried to renew it: run \`kiso login ${providerId}\``);
+				}
+				return { type: "oauth", providerId, expires: stored.expires };
+			}
 			throw new ConfigError(`model ${name}: signed in to ${providerId} with OAuth, but this profile's adapter needs an API key — run \`kiso login ${providerId}\` with a key, or \`kiso logout ${providerId}\` to use the env var ${p.apiKeyEnv ?? "(none configured)"}`);
 		}
 	}

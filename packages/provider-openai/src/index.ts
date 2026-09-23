@@ -620,6 +620,17 @@ function toOpenAIError(err: unknown, model: string): unknown {
 		return connectionFailure(err, label + err.message);
 	}
 	if (err instanceof OpenAI.APIError) {
+		// 0.40.7 (finding-stream-error-frame-2026-09-17): an `{"error": …}`
+		// frame INSIDE a 200 stream reaches here with NO status — a gateway
+		// that lost its upstream mid-answer ("Upstream stream ended before
+		// terminal chunk"). It used to fall to `unknown`, non-retryable, and
+		// the run ended where the mid-stream retry belongs. What the frame's
+		// WORDS identify (a context overflow) keeps its own verdict; the rest
+		// is the transport failing after the headers, as COMPAT-F2 below.
+		if (err.status === undefined) {
+			const mapped = mapApiError(undefined, label + err.message);
+			return mapped.code === "unknown" ? streamFailure(label + err.message) : mapped;
+		}
 		// CX-1 F8: the kernel owns retries — Retry-After travels with the error
 		return mapApiError(err.status, label + err.message, retryAfterOf(err.headers));
 	}

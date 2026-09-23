@@ -15,4 +15,12 @@ describe("DT-1a — config checks", () => {
 		expect(m.checks).toEqual({ test: "npm test", lint: "b" });
 		expect(mergeConfigs(null, null).checks).toBeUndefined();
 	});
+	it("CS-1: evaluators are a list of absolute paths; both layers' lists join", () => {
+		const cfg = parseConfig(JSON.stringify({ evaluators: ["/opt/eval/strict.sh"] }), "~/.kiso/config.json");
+		expect(cfg.evaluators).toEqual(["/opt/eval/strict.sh"]);
+		expect(() => parseConfig(JSON.stringify({ evaluators: { strict: "/opt/eval/strict.sh" } }), "x")).toThrow(/evaluators — expected a list/);
+		expect(() => parseConfig(JSON.stringify({ evaluators: ["eval/strict.sh"] }), "x")).toThrow(/evaluators — expected an absolute path/);
+		expect(mergeConfigs({ evaluators: ["/a.sh"] }, { evaluators: ["/b.sh"] }).evaluators).toEqual(["/a.sh", "/b.sh"]);
+		expect(mergeConfigs(null, null).evaluators).toBeUndefined();
+	});
 });
