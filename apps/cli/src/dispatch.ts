@@ -119,7 +119,9 @@ function effortAxis(p: ModelProfile): Pick<PickOption, "levels" | "level" | "dis
 function signInNote(p: ModelProfile): string {
 	try {
 		const auth = authForProfile("?", p);
-		if (auth.type === "oauth") return "oauth";
+		// 0.40.7: an access token past its expiry is not a dead sign-in — the
+		// next use renews it — but the row says so rather than nothing
+		if (auth.type === "oauth") return auth.expires !== undefined && auth.expires < Date.now() ? "oauth, expired — renews on use" : "oauth";
 		if (auth.source === "store") return "stored key";
 	} catch {
 		// unavailable — the availability mark says so; the env name still names what would sign it in

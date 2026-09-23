@@ -352,7 +352,7 @@ export function mergeConfigs(user: KisoConfig | null, project: KisoConfig | null
  *  sign-in is a token that expires and must be re-resolved per request. */
 export type ProfileAuth =
 	| { readonly type: "api-key"; readonly apiKey: string; readonly source: "store" | "env" | "none" }
-	| { readonly type: "oauth"; readonly providerId: string };
+	| { readonly type: "oauth"; readonly providerId: string; /** the access token's expiry (epoch ms) — past it, the next use renews */ readonly expires?: number };
 
 /** Where a profile's sign-in comes from, or why it has none. The sign-in
  *  plan's resolve rule: a stored credential OWNS the provider (an
@@ -376,7 +376,14 @@ export function authForProfile(name: string, p: ModelProfile): ProfileAuth {
 		}
 		if (stored !== undefined) {
 			if (stored.type === "api-key") return { type: "api-key", apiKey: stored.key, source: "store" };
-			if (p.kind === "openai-responses") return { type: "oauth", providerId };
+			if (p.kind === "openai-responses") {
+				// 0.40.7: a sign-in whose renewal the endpoint REFUSED is over —
+				// unavailable here, where /model reads it, not first at a turn
+				if (stored.refreshRejectedAt !== undefined) {
+					throw new ConfigError(`model ${name}: unavailable — the ${providerId} sign-in was refused when kiso tried to renew it: run \`kiso login ${providerId}\``);
+				}
+				return { type: "oauth", providerId, expires: stored.expires };
+			}
 			throw new ConfigError(`model ${name}: signed in to ${providerId} with OAuth, but this profile's adapter needs an API key — run \`kiso login ${providerId}\` with a key, or \`kiso logout ${providerId}\` to use the env var ${p.apiKeyEnv ?? "(none configured)"}`);
 		}
 	}
