@@ -63,6 +63,8 @@ import { isFirstRun, scaffoldFirstRun } from "./first-run.js";
 import { fauxSkip, readFauxScript } from "./faux-glue.js";
 import { chat, compactionDiscardedNotice, contextWindowTokens, displayCtxRatio, knownContextWindow, microcompactThresholdFor, statusModelLabel, unknownWindowNotice, windowLearnedNotice } from "./chat.js";
 import { recordLearnedWindow, useLearnedWindows } from "./learned-windows.js";
+import { preferences, usePreferences } from "./preferences.js";
+import { settingsLayers } from "./state.js";
 import { providerHost } from "./provider-label.js";
 import { adapterOptionsFor } from "./auth/adapter-options.js";
 import { loadProjectConfig, loadUserConfig, mergeConfigs, resolveAutoCompact, resolveContextWindow, resolveModel } from "./config.js";
@@ -779,6 +781,10 @@ async function makeAgent(sessionId: string | undefined, input?: LineInput, model
 	const userCfg = loadUserConfig();
 	const projectCfg = loadProjectConfig(process.cwd(), project !== null);
 	const merged = mergeConfigs(userCfg, projectCfg);
+	// 0.40.6: /settings names each value's layer from these
+	settingsLayers.user = userCfg;
+	settingsLayers.project = projectCfg;
+	settingsLayers.modelFlag = modelFlag;
 	const secretEnvNames = secretEnvNamesOf(merged.models ?? {});
 	const builtIn = await builtInLayer(user, proj, input !== undefined && process.stdin.isTTY ? askUi(input) : undefined, secretEnvNames);
 	setExtensionLists(builtIn, user, proj, [...builtIn, ...user, ...proj]);
@@ -1688,6 +1694,7 @@ async function main(): Promise<void> {
 			process.exit(2);
 		}
 		setMode(m);
+		settingsLayers.modeFlag = m;
 		args.splice(modeFlag, 2);
 	} else {
 		setMode(modeFromEnv() ?? loadUserConfig()?.mode ?? "default");
@@ -1829,6 +1836,10 @@ async function main(): Promise<void> {
 			onDock: () => dock.redraw(), // v2d-B: the freeze scrolls the dock up — re-pin it
 		}),
 	);
+	// 0.40.6: the choices kiso remembers (preferences.json) — today ctrl+t's
+	// thinking display, restored before the first block can be drawn.
+	usePreferences();
+	body.setThinkingHidden(preferences().thinking === "hidden");
 	// REL-0152-D11: pasting an image sends no bytes, so an empty paste is
 	// the signal to go and look at the clipboard. What comes back is a
 	// PATH, which the turn's attachment scan then picks up exactly as it
@@ -2029,8 +2040,30 @@ async function main(): Promise<void> {
 				// `login <provider>` reads the key from a hidden prompt on a TTY
 				// or from stdin otherwise (never from an argument — shell history);
 				// `logout <provider>` deletes; `auth` lists, keys masked.
-				const { KNOWN_PROVIDERS, OAUTH_PROVIDERS, authPath, deleteCredential, maskSecret, readAuthFile, setCredential } = await import("./auth/credentials.js");
+				const { KNOWN_PROVIDERS, OAUTH_PROVIDERS, authPath, deleteCredential, endpointCredentialId, maskSecret, providerIdOf, readAuthFile, setCredential } = await import("./auth/credentials.js");
 				const provider = arg;
+				if (provider === "--endpoint" && command !== "auth") {
+					// 0.40.6: a gateway's own key, stored for its ORIGIN and sent
+					// there alone (credentials.ts endpointCredentialId) — so a
+					// gateway profile starts from plain `kiso`, no env var on the
+					// command line. The key still never comes from an argument.
+					const url = args[2];
+					const id = endpointCredentialId(url);
+					if (id === null) throw new CliUsageError(`kiso ${command} --endpoint <url> — an http(s) URL, e.g. https://gateway.example/v1`);
+					const origin = id.slice("endpoint:".length);
+					const vendor = ["openai-compat", "anthropic", "openai-responses"].map((k) => providerIdOf(k, url)).find((v) => v !== null);
+					if (vendor !== undefined && vendor !== null) throw new CliUsageError(`${origin} is ${vendor}'s own endpoint — run \`kiso ${command} ${vendor}\``);
+					if (command === "logout") {
+						const had = deleteCredential(id);
+						process.stdout.write(had ? `removed the key for ${origin}\n` : `nothing stored for ${origin}\n`);
+						break;
+					}
+					const key = (await readSecret(`API key for ${origin}: `)).trim();
+					if (key === "") throw new CliUsageError(`kiso login --endpoint ${origin}: no key given`);
+					setCredential(id, { type: "api-key", key, savedAt: Date.now() });
+					process.stdout.write(`stored an API key for ${origin} (${maskSecret(key)}) in ${authPath()} — sent to that origin only; every profile whose baseUrl is on it uses this key before its env var\n`);
+					break;
+				}
 				if (command === "auth") {
 					const file = readAuthFile();
 					const rows = Object.entries(file.credentials);
@@ -2045,7 +2078,7 @@ async function main(): Promise<void> {
 					break;
 				}
 				if (provider === undefined || !KNOWN_PROVIDERS.includes(provider)) {
-					throw new CliUsageError(`kiso ${command} <provider> — one of: ${KNOWN_PROVIDERS.join(", ")}`);
+					throw new CliUsageError(`kiso ${command} <provider> — one of: ${KNOWN_PROVIDERS.join(", ")}; or kiso ${command} --endpoint <url> for a gateway`);
 				}
 				if (command === "logout") {
 					const had = deleteCredential(provider);
@@ -2121,7 +2154,8 @@ async function main(): Promise<void> {
 						"  kiso sessions [--all|--current]   list durable sessions (a terminal shows this workspace's by default)\n" +
 						"  kiso login <provider>    anthropic|openai|deepseek|zai: store an API key (hidden prompt, or stdin when piped);\n" +
 						"                           chatgpt: sign in with a ChatGPT subscription (browser; unofficial third-party flow)\n" +
-						"  kiso logout <provider>   remove the stored credential\n" +
+						"  kiso login --endpoint <url>    a gateway: store its API key for that URL's origin only\n" +
+						"  kiso logout <provider>   remove the stored credential (or --endpoint <url>)\n" +
 						"  kiso auth               list stored credentials (keys masked)\n" +
 						"  kiso update             install the latest release (npm i -g @vincemakes/kiso-code@latest)\n" +
 						"  kiso help               this help\n\n" +
@@ -2134,7 +2168,7 @@ async function main(): Promise<void> {
 						"  OPENAI_API_KEY           OpenAI-compatible (OPENAI_MODEL, default gpt-4o;\n" +
 						"                           OPENAI_BASE_URL for DeepSeek/compat endpoints) — checked first\n" +
 						"  ANTHROPIC_API_KEY        Anthropic (ANTHROPIC_MODEL, default claude-sonnet-5)\n" +
-						"  ~/.kiso/config.json      named model profiles (keys stay in env vars; see the README)\n",
+						"  ~/.kiso/config.json      named model profiles (keys stay in env vars or kiso login; see the README)\n",
 				);
 				break;
 			}

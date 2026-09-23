@@ -29,6 +29,7 @@ kiso
 ```bash
 kiso login deepseek      # 也可以是 anthropic / openai / zai
 kiso login chatgpt       # ChatGPT 订阅，浏览器登录，不需要密钥
+kiso login --endpoint https://gateway.example/v1   # 网关：密钥只发给这个网关
 kiso auth                # 查看已存的登录信息（已打码）
 ```
 
@@ -68,7 +69,7 @@ kiso auth                # 查看已存的登录信息（已打码）
 | `alt+enter` | 停止当前运行，改发这一条 |
 | `@` | 引用项目里的文件 |
 | `ctrl+o` | 展开 / 收起工具输出 |
-| `ctrl+t` | 折叠 / 展开 thinking |
+| `ctrl+t` | 隐藏 / 显示 thinking（会记住） |
 | `ctrl+r` | 查看完整对话记录 |
 | `ctrl+g` | 用 `$EDITOR` 编辑输入框 |
 | `ctrl+x` | 复制上一条回答 |
@@ -82,6 +83,7 @@ kiso auth                # 查看已存的登录信息（已打码）
 | `/model` | 切换模型和思考档位 |
 | `/mode` | 切换审批模式 |
 | `/status` | 会话编号、上下文用量、当前模型和版本 |
+| `/settings` | 当前生效的设置、每项的来源和怎么改 |
 | `/compact` | 压缩较早的对话，腾出上下文 |
 | `/resume` | 切到另一个会话 |
 | `/clear` | 开一个新会话（旧的仍可恢复） |

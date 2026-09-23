@@ -38,7 +38,6 @@ import {
 	escapeTerminal,
 	stripAnsi,
 	foldThinking,
-	foldThinkingRow,
 	foldResult,
 	renderTerminalGap,
 	renderToolSummary,
@@ -514,16 +513,13 @@ class ThinkingBlock implements Component {
 		const p = palette();
 		const text = escapeTerminal(this.cell.text).trim();
 		if (text === "") return [];
-		// §2.3 — ctrl+t folded this block. The row is the pipe's own fold,
-		// fitted: `foldThinkingRow` is the single source of the shape and
-		// with unlimited room it IS `foldThinking`, so thinking has two
-		// renderings in the product and not three. It is width-aware here
-		// because a row must measure ≤ W and the pipe's line does not —
-		// cutting it from the right would take the `/think` suffix, which
-		// is the one part of a folded block that says how to read the rest.
-		// It keeps the block's own indent, so a folded block sits in the
-		// column an unfolded one does (DC-47).
-		if (this.cell.folded) return [`${THINK_COL}${foldThinkingRow(this.cell.text, Math.max(1, W - THINK_COL.length))}`];
+		// §2.3 / 0.40.6 — ctrl+t hid thinking. Hidden is ONE italic line in
+		// the block's own column (DC-47): `thinking…` while it runs,
+		// `thinking… · /think` once it settles. The text itself is never
+		// drawn, live or settled (0.40.5 folded only settled blocks, into a
+		// 100-character preview, while the open one kept streaming). The
+		// pipe keeps its own one-line fold (render.ts foldThinking).
+		if (this.cell.folded) return [`${THINK_COL}${p.dim}${p.italic}${this.cell.done ? "thinking… · /think" : "thinking…"}${p.italicEnd}${p.reset}`];
 		// DC-47 — THINKING GOES ONE LEVEL DEEPER THAN PROSE, and the
 		// reason is a law rather than a taste.
 		//

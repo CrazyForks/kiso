@@ -36,18 +36,16 @@ describe("the op profile gets a window, and says whose it is", () => {
 		expect(statedContextWindow()).toEqual({ tokens: 1_000_000, source: "model", from: "deepseek-flash" });
 	});
 
-	it("the source is said: inferred from the model, not stated for this endpoint", () => {
+	it("the source is said: inferred from the model, not stated for this endpoint (0.40.6, declared re-pin: the short /model-row form is retired with its caller)", () => {
 		setAgentModel(op.model, op.baseUrl);
-		expect(windowSourceNote(statedContextWindow(), "long")).toBe("window 1M, inferred from the model (deepseek-flash) — not stated for this endpoint");
-		expect(windowSourceNote(statedContextWindow(), "short")).toBe("ctx 1M inferred");
+		expect(windowSourceNote(statedContextWindow())).toBe("window 1M, inferred from the model (deepseek-flash) — not stated for this endpoint");
 	});
 
 	it("a figure the user set wins, and is said as theirs", () => {
 		setAgentModel(op.model, op.baseUrl);
 		setConfiguredWindow(1_048_576);
 		expect(statedContextWindow()).toEqual({ tokens: 1_048_576, source: "set" });
-		expect(windowSourceNote(statedContextWindow(), "long")).toBe("window 1,048,576, as you set it");
-		expect(windowSourceNote(statedContextWindow(), "short")).toBe("ctx 1,048,576");
+		expect(windowSourceNote(statedContextWindow())).toBe("window 1,048,576, as you set it");
 	});
 
 	it("a /model row reads with its OWN configured figure, not the live one", () => {
@@ -83,14 +81,12 @@ describe("unknown stays unknown — and says what it assumes", () => {
 		setAgentModel("unregistered-model-nobody-publishes-a-window-for", FORWARDER);
 		expect(knownContextWindow()).toBeNull();
 		expect(contextWindowTokens()).toBe(128_000); // CW-1 batch 2 (declared re-pin): the fallback is 128K, down from 200K
-		expect(windowSourceNote(statedContextWindow(), "short")).toBe("ctx ?");
-		expect(windowSourceNote(statedContextWindow(), "long")).toBe("window unknown — compaction assumes 128K; set contextWindow on the profile to state it");
+		expect(windowSourceNote(statedContextWindow())).toBe("window unknown — compaction assumes 128K; set contextWindow on the profile to state it");
 	});
 
 	it("the route's own row is named as the registry's", () => {
 		setAgentModel("deepseek-flash", "https://api.deepseek.com");
-		expect(windowSourceNote(statedContextWindow(), "long")).toBe("window 1M, the registry's for this endpoint");
-		expect(windowSourceNote(statedContextWindow(), "short")).toBe("ctx 1M");
+		expect(windowSourceNote(statedContextWindow())).toBe("window 1M, the registry's for this endpoint");
 	});
 });
 

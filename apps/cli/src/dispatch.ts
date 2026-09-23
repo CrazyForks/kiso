@@ -16,6 +16,10 @@ import { agentBaseUrl, currentProfileName, setCurrentProfileName, currentModelNa
 import { adapterOptionsFor } from "./auth/adapter-options.js";
 import { profileProviderLabel, providerLabel } from "./provider-label.js";
 import { installedVersion, versionStatusLine } from "./stale-version.js";
+import { preferences, setPreference } from "./preferences.js";
+import { settingsRows } from "./settings.js";
+import { floorOn, settingsLayers } from "./state.js";
+import { currentGround } from "@vincemakes/kiso-tui-cells/render";
 import { queuedSwitchLines } from "./state.js";
 import { contextWindowTokens, microcompactThresholdFor, startStatusSpinner, statedContextWindow, windowSourceNote } from "./chat.js";
 import { authForProfile, directWriteProfile, profileAvailable, resolveContextWindow, unavailableReason, type ModelProfile } from "./config.js";
@@ -113,15 +117,6 @@ function signInNote(p: ModelProfile): string {
 		// unavailable — the availability mark says so; the env name still names what would sign it in
 	}
 	return p.apiKeyEnv ?? "no key";
-}
-
-/** CW-1 (owner, 2026-09-23): a profile's window on its /model row — the
- *  profile's own stated figure first, then the registry's chain for its
- *  model, endpoint and upstream; `inferred` marks the one no row states
- *  for that endpoint. */
-function windowNoteOf(p: ModelProfile): string {
-	const w = statedContextWindow({ model: p.model, ...(p.baseUrl !== undefined ? { baseUrl: p.baseUrl } : {}), ...(p.upstream !== undefined ? { upstream: p.upstream } : {}) }, { configured: resolveContextWindow(mergedConfig, p) });
-	return windowSourceNote(w, "short");
 }
 
 /** Everything dispatch touches that chat() owns. */
@@ -431,18 +426,15 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 		return;
 	}
 	if (trimmed === "\x14think") {
-		// §2.3 — ctrl+t folds the committed thinking blocks, and folds them
-		// back. DC-50's mechanism, not a second one: one boolean, then the
-		// session is reprinted, so the blocks already on screen obey the
-		// switch rather than only the next ones.
-		//
-		// The folded row is `foldThinking`'s, which is what the PIPE writes
-		// — so thinking has two renderings in the product and not three,
-		// and the pipe's byte-identity gate is this row's gate too.
-		//
-		// The live `thinking…` placeholder is NOT touched: it belongs to
-		// the live region, and this switch is about committed blocks.
+		// §2.3 / 0.40.6 — ctrl+t hides thinking (one italic line per block,
+		// the open one included) and shows it again. DC-50's mechanism: one
+		// boolean, then the session is reprinted, so the blocks already on
+		// screen obey the switch. The choice is REMEMBERED (preferences.json)
+		// — the owner, 2026-09-23, after the reference implementation's
+		// persisted toggle; shown stays the default. The pipe keeps its own
+		// one-line fold whatever the choice.
 		body.toggleThinking();
+		setPreference("thinking", body.thinkingHidden() ? "hidden" : "shown");
 		ctx.input.prompt();
 		return;
 	}
@@ -530,6 +522,34 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 		});
 		return;
 	}
+	if (trimmed === "/settings") {
+		// 0.40.6 — what kiso runs with, each value's layer, and how to change
+		// it (settings.ts). Read-only: the config file stays the human's.
+		ctx.chainRef.current = ctx.chainRef.current.then(async () => {
+			const w = statedContextWindow();
+			const profile = currentProfileName;
+			bodyLog(
+				settingsRows({
+					user: settingsLayers.user,
+					project: settingsLayers.project,
+					env: process.env,
+					...(settingsLayers.modeFlag !== undefined ? { modeFlag: settingsLayers.modeFlag } : {}),
+					...(settingsLayers.modelFlag !== undefined ? { modelFlag: settingsLayers.modelFlag } : {}),
+					mode: getMode(),
+					model: { label: `${agentModel}${providerLabel(agentBaseUrl, upstreamOf(agentBaseUrl))}${profile === null ? "" : ` · profile ${profile}`}`, profile, switched: settingsLayers.modelSwitched },
+					ground: currentGround(),
+					floorOn,
+					window: windowSourceNote(w).replace(/^window /, ""),
+					thinkingHidden: body.thinkingHidden(),
+					thinkingRemembered: preferences().thinking !== undefined,
+					version: versionStatusLine(installedVersion(), VERSION).replace(/^version /, ""),
+				}).join("\n\n"),
+				"words",
+			);
+			ctx.input.prompt();
+		});
+		return;
+	}
 	if (trimmed === "/status") {
 		// B area: session id, durable event count, and the ~ context
 		// estimate — all read straight from the live session, nothing
@@ -542,7 +562,7 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 			// CW-1: the percentage names its denominator and who stated it — a
 			// window inferred from the model reads differently from one the
 			// registry states for this endpoint.
-			bodyLog(`ctx ${ctxPct} · ${windowSourceNote(statedContextWindow(), "long")}`);
+			bodyLog(`ctx ${ctxPct} · ${windowSourceNote(statedContextWindow())}`);
 			// The owner, 2026-09-21: /status is where "what am I actually
 			// running on" is answered, so the identity is spelled out HERE —
 			// the model, the host the request goes to, the profile it came
@@ -669,9 +689,11 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 									// profile key is what `/model <name>` takes, not what a chooser
 									// reading a list needs. What remains is what the chooser CANNOT
 									// infer: availability, and which one is live.
-									// CW-1: the window rides LAST — availability and the live mark
-									// are what a narrow row must keep.
-									const marks = [...(profileAvailable(profile) ? [] : ["unavailable"]), ...(name === currentProfileName ? ["current"] : []), windowNoteOf(profile)];
+									// 0.40.6 (the owner, 2026-09-23: "who told you to write ctx"):
+									// the window rode here in 0.40.3–0.40.5 and cut `unavailable`
+									// to `unavailabl…` on the owner's rows. It lives on /status and
+									// /settings, where there is room to say it and its source.
+									const marks = [...(profileAvailable(profile) ? [] : ["unavailable"]), ...(name === currentProfileName ? ["current"] : [])];
 									const host = profileProviderLabel(profile.kind, profile.baseUrl, profile.upstream);
 									return { label: `${profile.kind}/${profile.model}${host === "" ? "" : ` ${host}`}`, note: marks.join(" · "), ...effortAxis(profile) };
 								}),
@@ -723,7 +745,7 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 						const p = configModels[name]!;
 						const hostOf = profileProviderLabel(p.kind, p.baseUrl, p.upstream);
 						bodyLog(
-							`  ${name} → ${p.kind}/${p.model}${hostOf === "" ? "" : ` ${hostOf}`} · ${signInNote(p)} ${profileAvailable(p) ? "(available)" : "(unavailable)"} · ${effortNote(p)} · ${windowNoteOf(p)}`,
+							`  ${name} → ${p.kind}/${p.model}${hostOf === "" ? "" : ` ${hostOf}`} · ${signInNote(p)} ${profileAvailable(p) ? "(available)" : "(unavailable)"} · ${effortNote(p)}`,
 						);
 					}
 				}
@@ -817,6 +839,7 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 							setAgentModel(profile.model, profile.baseUrl);
 							setCurrentModelName(arg);
 							setCurrentProfileName(direct === null ? null : profName);
+							settingsLayers.modelSwitched = true;
 							// §2.5: the ONE source a reload reads for the model — a
 							// switch made here must survive the rebuild.
 							setModelChoice(arg);

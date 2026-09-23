@@ -86,49 +86,53 @@ describe("T-Q3 / slice ⓪ — the extraction changed no bytes", () => {
 		// The computed stop is max(name) + 4 and `/compact` is still the
 		// longest name, so every pre-move row keeps its exact padding too.
 		expect(helpRows().map(plain)).toEqual([
-			"/help       print this list of commands",
-			"/think      show the last full thinking block",
-			"/last       show the most recent tool call's input and output",
-			"/rewrap     re-print the recent prose at the current width",
+			"/help        print this list of commands",
+			"/think       show the last full thinking block",
+			"/last        show the most recent tool call's input and output",
+			"/rewrap      re-print the recent prose at the current width",
 			// E1 §3 — a DECLARED ADDITION in the same class as /clear,
 			// /resume and /rewrap: the pre-move rows keep their exact bytes
 			// and the computed stop is unchanged, because `/compact` is
 			// still the longest name.
-			"/copy       copy the last answer (raw markdown) — ctrl+x does the same",
-			"/status     show session id, event count, and context estimate",
+			"/copy        copy the last answer (raw markdown) — ctrl+x does the same",
+			"/status      show session id, event count, and context estimate",
+			// 0.40.6 — a DECLARED ADDITION: /settings is nine characters, one more
+			// than /compact, so the computed stop moves one column and every row
+			// above and below carries one more space (a padding re-pin, no words).
+			"/settings    show the settings in force, each value's source, and how to change it",
 			// 0.39.1 — a DECLARED ADDITION, and a repair rather than a new
 			// feature: `/context` has been dispatchable since TUI2-R1 slice
 			// 6 and was never listed, so the only way to learn it existed
 			// was to read the source. The computed stop does not move:
 			// `/compact` is eight characters and `/context` is eight.
-			"/context    show where the context went — the per-request rent ledger",
-			"/mode       show the approval tier; /mode <name> switches (default/accept-edits/plan/dontAsk/bypass)",
-			"/model      list model profiles; /model <name|provider/model> switches",
-			"/compact    summarize the older conversation to free context",
-			"/clear      start a fresh conversation (the old session stays resumable)",
-			"/resume     switch to another session; /resume <id> goes directly",
+			"/context     show where the context went — the per-request rent ledger",
+			"/mode        show the approval tier; /mode <name> switches (default/accept-edits/plan/dontAsk/bypass)",
+			"/model       list model profiles; /model <name|provider/model> switches",
+			"/compact     summarize the older conversation to free context",
+			"/clear       start a fresh conversation (the old session stays resumable)",
+			"/resume      switch to another session; /resume <id> goes directly",
 			// §2.5 — a DECLARED ADDITION in the same class as /clear, /resume,
 			// /rewrap and /copy. It sits beside /resume because both answer
 			// "put me somewhere else without losing this", and the computed
 			// stop does not move: `/compact` is eight characters and
 			// `/reload` is seven, so every pre-move row keeps its padding.
-			"/reload     reread extensions, skills and config into this session",
+			"/reload      reread extensions, skills and config into this session",
 			// 0.40.0 — three DECLARED ADDITIONS in the same class: the two
 			// skill commands, and the `/<name>` rule a person needs before
 			// installing a skill named like a command (the command wins).
 			// The computed stop does not move: `/compact` is eight
 			// characters and `/skills` and `/<name>` are seven.
-			"/skills     list the installed skills, and any that cannot load",
-			"/skill      run a skill as your turn: /skill <name> [args]",
-			"/<name>     runs the skill <name> when no command above has that name",
+			"/skills      list the installed skills, and any that cannot load",
+			"/skill       run a skill as your turn: /skill <name> [args]",
+			"/<name>      runs the skill <name> when no command above has that name",
 			// §2.3 — a DECLARED ADDITION in the same class: the switch is
 			// beside the shell gestures because that is where a reader
 			// looks for a key, and a gesture the sheet does not name is a
 			// gesture nobody uses.
-			"ctrl+t      fold the thinking blocks, and fold them back",
+			"ctrl+t       hide thinking to one line, and show it again (remembered)", // 0.40.6 (declared re-pin)
 			// §2.4 — the same class again: the row names the variables because
 			// they are what a reader has to set for the key to do anything.
-			"ctrl+g      edit the composer in $VISUAL or $EDITOR — the text comes back unsent",
+			"ctrl+g       edit the composer in $VISUAL or $EDITOR — the text comes back unsent",
 			// §2.2 — three DECLARED ADDITIONS in the same class as /clear,
 			// /resume, /rewrap and /copy. `!` is not a slash command, but it
 			// is what a reader is looking for when they look here, and a
@@ -136,19 +140,19 @@ describe("T-Q3 / slice ⓪ — the extraction changed no bytes", () => {
 			// (DC-30, DC-36). The computed stop does not move: `/compact` is
 			// eight characters and `!!<cmd>` is seven, so every pre-move row
 			// keeps its exact padding.
-			"!<cmd>      run a shell command and send it with its output as your turn",
-			"!!<cmd>     run one and show it here only — the model never sees it",
-			"\\!          send a line that really starts with ! (the only escape)",
+			"!<cmd>       run a shell command and send it with its output as your turn",
+			"!!<cmd>      run one and show it here only — the model never sees it",
+			"\\!           send a line that really starts with ! (the only escape)",
 			// slice ⑥ appends the ask gesture to the keys row — the KC1/KC2/KC3
 			// precedent (the row is where a gesture is taught, and the row
 			// costs nothing). Everything before " · 1-4 answers an ask" is
 			// the hand-transcribed pre-move literal.
-			"exit        leave the session\nkeys        enter sends \u00b7 ctrl+J newline (shift+enter where encoded) \u00b7 esc stops the run \u00b7 alt+\u23ce stops it and sends this instead \u00b7 @ files \u00b7 1-4 answers an ask",
+			"exit         leave the session\nkeys         enter sends \u00b7 ctrl+J newline (shift+enter where encoded) \u00b7 esc stops the run \u00b7 alt+\u23ce stops it and sends this instead \u00b7 @ files \u00b7 1-4 answers an ask",
 		]);
 	});
 
 	it("the last row still carries its own newline — two rows from one bodyLog call", () => {
-		expect(helpRows()).toHaveLength(22); // 8 extracted + the mini-spec pair + /rewrap (R4) + /copy (E1 §3) + the three §2.2 shell rows + §2.3's ctrl+t + §2.4's ctrl+g + §2.5's /reload + 0.39.1's /context repair + 0.40.0's three skill rows
+		expect(helpRows()).toHaveLength(23); // 0.40.6 (declared re-pin): + /settings // 8 extracted + the mini-spec pair + /rewrap (R4) + /copy (E1 §3) + the three §2.2 shell rows + §2.3's ctrl+t + §2.4's ctrl+g + §2.5's /reload + 0.39.1's /context repair + 0.40.0's three skill rows
 		expect(helpRows().filter((r) => r.includes("\n"))).toHaveLength(1);
 	});
 

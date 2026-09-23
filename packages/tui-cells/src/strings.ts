@@ -517,6 +517,8 @@ const HELP_TABLE: readonly (readonly [string, string])[] = [
 	["/rewrap", "re-print the recent prose at the current width"],
 	["/copy", "copy the last answer (raw markdown) — ctrl+x does the same"],
 	["/status", "show session id, event count, and context estimate"],
+	// 0.40.6: what kiso runs with, and where each value came from
+	["/settings", "show the settings in force, each value's source, and how to change it"],
 	// A command with no row is a command nobody can find. `/context` has
 	// been dispatchable since TUI2-R1 slice 6 and was never listed here,
 	// so the only way to learn it existed was to read the source.
@@ -540,7 +542,7 @@ const HELP_TABLE: readonly (readonly [string, string])[] = [
 	// looking for when they look here, even though `!` is not one.
 	// §2.3: the switch belongs beside ctrl+o's job, and a gesture the
 	// sheet does not name is a gesture nobody uses (DC-30, DC-36).
-	["ctrl+t", "fold the thinking blocks, and fold them back"],
+	["ctrl+t", "hide thinking to one line, and show it again (remembered)"],
 	// §2.4: the composer, in your own editor. It names the variables
 	// because that is what a reader has to set for it to work.
 	["ctrl+g", "edit the composer in $VISUAL or $EDITOR — the text comes back unsent"],

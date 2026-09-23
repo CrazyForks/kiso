@@ -445,6 +445,14 @@ newline · `@` files · `esc` stop · `alt+⏎ / ctrl+⏎` redirect · `/` comma
 complete · `?` this sheet · `alt+←→ / ctrl+←→` word motion · `alt+⌫ / alt+d`
 delete word · `ctrl+x` copy the last answer · `ctrl+z / ctrl+y` undo / redo ·
 `ctrl+v` attach a clipboard image (macOS).
+**Thinking, hidden (0.40.6).** `ctrl+t` hides the model's thinking: each
+block becomes one italic line — `thinking…` while it runs, `thinking… ·
+/think` once it settles — and none of its text is drawn. Press it again
+to show thinking. The choice is remembered in `~/.kiso/preferences.json`
+(kiso's own file; `config.json` is never written), so the next session
+starts the same way. Shown is the default. The session keeps every
+thinking block whole either way: `/think` prints the last one.
+
 In a panel, in the product's own words: `panels: ↑↓ move · ⏎ confirms · digits
 act on their row · t types`. Space selects at the cursor and never commits, so
 a stray one cannot answer anything.

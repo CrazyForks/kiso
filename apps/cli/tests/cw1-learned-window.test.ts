@@ -82,8 +82,7 @@ describe("the chain: what you set, then what this endpoint refused at, then the 
 		expect(statedContextWindow()).toEqual({ tokens: 131_072, source: "learned", observedAt: "2026-09-23" });
 		expect(knownContextWindow()).toBe(131_072);
 		expect(contextWindowTokens()).toBe(131_072);
-		expect(windowSourceNote(statedContextWindow(), "long")).toBe("window 131,072, learned from this endpoint's refusal (2026-09-23)");
-		expect(windowSourceNote(statedContextWindow(), "short")).toBe("ctx 131,072");
+		expect(windowSourceNote(statedContextWindow())).toBe("window 131,072, learned from this endpoint's refusal (2026-09-23)");
 	});
 
 	it("a figure the user set still wins over a learned one", () => {
@@ -104,7 +103,7 @@ describe("the chain: what you set, then what this endpoint refused at, then the 
 	it("an unknown model falls back to 128K, and says so", () => {
 		setAgentModel("unregistered-model-nobody-publishes-a-window-for", FORWARDER);
 		expect(contextWindowTokens()).toBe(128_000);
-		expect(windowSourceNote(statedContextWindow(), "long")).toBe("window unknown — compaction assumes 128K; set contextWindow on the profile to state it");
+		expect(windowSourceNote(statedContextWindow())).toBe("window unknown — compaction assumes 128K; set contextWindow on the profile to state it");
 	});
 });
 

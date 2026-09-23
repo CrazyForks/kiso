@@ -29,6 +29,7 @@ Sign in once:
 ```bash
 kiso login deepseek      # or anthropic / openai / zai
 kiso login chatgpt       # a ChatGPT subscription: a browser sign-in, no key
+kiso login --endpoint https://gateway.example/v1   # a gateway: its key, sent to it alone
 kiso auth                # what is stored, masked
 ```
 
@@ -67,7 +68,7 @@ Say what you want done. The model has six tools — read, list, search, write, e
 | `alt+enter` | stop the run and send this instead |
 | `@` | reference a file |
 | `ctrl+o` | expand / collapse tool output |
-| `ctrl+t` | fold / unfold thinking |
+| `ctrl+t` | hide / show thinking (remembered) |
 | `ctrl+r` | the full transcript |
 | `ctrl+g` | edit the prompt in `$EDITOR` |
 | `ctrl+x` | copy the last answer |
@@ -81,6 +82,7 @@ Say what you want done. The model has six tools — read, list, search, write, e
 | `/model` | switch the model and its effort |
 | `/mode` | switch the approval mode |
 | `/status` | session id, context use, model and version |
+| `/settings` | the settings in force, where each came from, how to change it |
 | `/compact` | summarize the older conversation to free context |
 | `/resume` | switch to another session |
 | `/clear` | start a fresh session (the old one stays resumable) |

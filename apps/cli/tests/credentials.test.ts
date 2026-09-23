@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { AuthError, deleteCredential, getCredential, maskSecret, modifyAuthFile, providerIdOf, readAuthFile, setCredential } from "../src/auth/credentials.js";
+import { AuthError, deleteCredential, endpointCredentialId, getCredential, maskSecret, modifyAuthFile, providerIdOf, readAuthFile, setCredential } from "../src/auth/credentials.js";
 import { authForProfile, profileAvailable, unavailableReason, type ModelProfile } from "../src/config.js";
 
 /** The credential store (the sign-in plan, step 1): the file, its mode, the
@@ -156,10 +156,15 @@ describe("the resolve rule", () => {
 		const first: ModelProfile = { kind: "openai-responses", model: "gpt-5.5", apiKeyEnv: "OPENAI_KEY_FOR_TEST" };
 		expect(unavailableReason("openai", first)).toContain("run `kiso login openai` or set the env var OPENAI_KEY_FOR_TEST");
 	});
-	it("a keyless profile is an unauthenticated endpoint; a custom origin stays on env", () => {
+	// DECLARED RE-PIN (0.40.6). This asserted `not.toContain("kiso login")`:
+	// a custom origin's only door was its env var, and naming a VENDOR login
+	// there would store a key that never applies to it. The second half still
+	// holds and is what is pinned now; the first changed on purpose — a
+	// custom origin has its own login (`kiso login --endpoint`), keyed to it.
+	it("a keyless profile is an unauthenticated endpoint; a custom origin never names a vendor's login", () => {
 		expect(authForProfile("local", local)).toEqual({ type: "api-key", apiKey: "none", source: "none" });
 		expect(unavailableReason("c", custom)).toContain("set the env var CUSTOM_KEY");
-		expect(unavailableReason("c", custom)).not.toContain("kiso login");
+		expect(unavailableReason("c", custom)).not.toMatch(/kiso login (?!--endpoint http:\/\/localhost:11434`)/);
 	});
 	it("a secret is only ever rendered masked", () => {
 		expect(maskSecret("sk-abcdefgh1234")).toBe("••••1234");
@@ -235,5 +240,44 @@ describe("R1 — a stored credential never leaves the vendor's own origin", () =
 		setCredential("anthropic", { type: "api-key", key: "STORED-VENDOR-KEY", savedAt: 1 }, path);
 		const first: ModelProfile = { kind: "anthropic", model: "m", apiKeyEnv: KEY };
 		expect(authForProfile("first", first)).toEqual({ type: "api-key", apiKey: "STORED-VENDOR-KEY", source: "store" });
+	});
+});
+
+/** 0.40.6 — a gateway's key, stored under `endpoint:<origin>` by
+ *  `kiso login --endpoint <url>`, owns exactly that origin. */
+describe("the endpoint rule (0.40.6)", () => {
+	it("the store id is the ORIGIN: path, query and a default port are dropped; anything not http(s) is null", () => {
+		expect(endpointCredentialId("https://gateway.example/zen/go/v1?x=1")).toBe("endpoint:https://gateway.example");
+		expect(endpointCredentialId("https://gateway.example:443/v1")).toBe("endpoint:https://gateway.example");
+		expect(endpointCredentialId("https://gateway.example:8443/v1")).toBe("endpoint:https://gateway.example:8443");
+		expect(endpointCredentialId("http://127.0.0.1:4000")).toBe("endpoint:http://127.0.0.1:4000");
+		expect(endpointCredentialId("HTTPS://Gateway.Example/v1")).toBe("endpoint:https://gateway.example");
+		for (const bad of [undefined, "", "gateway.example", "ftp://gateway.example", "file:///etc/passwd", "not a url"]) expect(endpointCredentialId(bad), String(bad)).toBeNull();
+	});
+	const gw = (baseUrl: string, apiKeyEnv?: string, kind: ModelProfile["kind"] = "openai-compat"): ModelProfile => ({ kind, baseUrl, model: "m", ...(apiKeyEnv !== undefined ? { apiKeyEnv } : {}) });
+	it("a key stored for the profile's origin is used, before the env var; a keyless profile takes it too", () => {
+		setCredential("endpoint:https://gateway.example", { type: "api-key", key: "STORED-GW", savedAt: 1 }, path);
+		process.env.GW_KEY_FOR_TEST = "FROM-ENV";
+		try {
+			expect(authForProfile("gw", gw("https://gateway.example/zen/v1", "GW_KEY_FOR_TEST"))).toEqual({ type: "api-key", apiKey: "STORED-GW", source: "store" });
+			expect(authForProfile("gw", gw("https://gateway.example/v1"))).toEqual({ type: "api-key", apiKey: "STORED-GW", source: "store" });
+			expect(authForProfile("gw", gw("https://gateway.example", "GW_KEY_FOR_TEST", "anthropic"))).toEqual({ type: "api-key", apiKey: "STORED-GW", source: "store" });
+		} finally {
+			delete process.env.GW_KEY_FOR_TEST;
+		}
+	});
+	it("another origin never gets it — another port, another scheme, another host, a subdomain", () => {
+		setCredential("endpoint:https://gateway.example", { type: "api-key", key: "STORED-GW", savedAt: 1 }, path);
+		for (const other of ["https://gateway.example:8443/v1", "http://gateway.example/v1", "https://api.gateway.example/v1", "https://gateway.example.evil/v1", "http://127.0.0.1:4000"]) {
+			expect(profileAvailable(gw(other, "GW_UNSET_FOR_TEST")), other).toBe(false);
+			expect(authForProfile("gw", gw(other))).toEqual({ type: "api-key", apiKey: "none", source: "none" });
+		}
+	});
+	it("a vendor's origin is the vendor's: an endpoint entry for it is never read", () => {
+		setCredential("endpoint:https://api.deepseek.com", { type: "api-key", key: "SHOULD-NOT-BE-READ", savedAt: 1 }, path);
+		expect(profileAvailable(gw("https://api.deepseek.com/v1", "DEEPSEEK_UNSET_FOR_TEST"))).toBe(false);
+	});
+	it("the unavailable reason names both doors for a gateway", () => {
+		expect(unavailableReason("gw", gw("https://gateway.example/v1", "GW_UNSET_FOR_TEST"))).toContain("set the env var GW_UNSET_FOR_TEST, or run `kiso login --endpoint https://gateway.example`");
 	});
 });
