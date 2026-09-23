@@ -382,6 +382,11 @@ export interface PickSpec {
 	/** shown INSTEAD of the options when there are none. The copy is the
 	 *  caller's and is reproduced verbatim. */
 	readonly emptyNote?: string;
+	/** MP-1 (0.40.7): the row the cursor OPENS on — the session's current
+	 *  profile or tier. Absent (or out of range) opens on the first row.
+	 *  Opening on row 0 is how one Enter used to switch the account that
+	 *  pays without anyone choosing to. */
+	readonly initial?: number;
 }
 
 /** The pick panel's runtime state \u2014 the editor owns it, the compositor

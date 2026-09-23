@@ -44,7 +44,12 @@ kiso help                      this help
 
   `kiso sessions` prints the same rows on a terminal (its PIPED output is
   unchanged — that is a machine interface). `/model` with no argument
-  opens the same kind of picker over your configured profiles.
+  opens the same kind of picker over your configured profiles, with the
+  cursor on the profile the session is on (`/mode`'s on the tier in
+  force), so Enter on a panel opened to look changes nothing. A switch
+  that moves the bill — another endpoint, or another credential there —
+  adds one line under the switch notice: `paid by @api.deepseek.com ·
+  stored key from the next turn — was @…` (0.40.7, finding MP-1).
 - Tools: read file · list directory · search text · write/edit file · shell.
   Writes and shell sit behind the approval policy: the run **pauses**,
   asks, persists the decision, and resumes the same run (ADR-0024).
