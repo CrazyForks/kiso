@@ -27,6 +27,11 @@ changed, the hashing did not). Both generations are valid reads
 (R1d-1): a v1 sidecar has no canonical block and reads as defaults at
 every consumer — never a crash. The canonical schema, the pricing
 table, and the derivation surfaces are documented in `docs/usage.md`.
+Later generations each add one field, all readable side by side: v3
+`rent`, v4 `purpose`, v5 `usageKnown`, v6 `servedModel`, and v7 (0.40.7)
+`providerError` — on a `provider_error` record only, `{ code, status?,
+message }`, the message capped at 300 characters and redacted of
+credential-shaped strings before it is written.
 
 ## 2. Ledger layout
 

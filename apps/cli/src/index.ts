@@ -64,6 +64,7 @@ import { fauxSkip, readFauxScript } from "./faux-glue.js";
 import { chat, compactionDiscardedNotice, contextWindowTokens, displayCtxRatio, knownContextWindow, microcompactThresholdFor, statusModelLabel, unknownWindowNotice, windowLearnedNotice } from "./chat.js";
 import { recordLearnedWindow, useLearnedWindows } from "./learned-windows.js";
 import { preferences, usePreferences } from "./preferences.js";
+import { sweepStaleMergeDirs } from "./temp-sweep.js";
 import { settingsLayers } from "./state.js";
 import { providerHost } from "./provider-label.js";
 import { adapterOptionsFor } from "./auth/adapter-options.js";
@@ -78,6 +79,9 @@ import { armByteTrace } from "./byte-trace.js";
 import { tmpdir, homedir } from "node:os";
 import { clipboardImage } from "./clipboard.js";
 import { cardsFromListings } from "./session-cards.js";
+
+/** 0.40.7: the stale-merge-directory sweep runs once per process. */
+let tempSwept = false;
 
 // The moved exports stay reachable from this entry — the test imports
 // (project-trust, coding-agent) never change (B4: zero assertion changes).
@@ -803,11 +807,17 @@ async function makeAgent(sessionId: string | undefined, input?: LineInput, model
 	// channel and not an exported KISO_SESSIONS_DIR: a variable in
 	// process.env would reach every shell child, and a kiso started from a
 	// shell tool would then write into this project's folder.
-	process.env.KISO_DELEGATION_CONFIG_JSON = JSON.stringify({ checks: merged.checks ?? {}, profiles: Object.keys(merged.models ?? {}), sessionsDir: sessionsDir() });
+	process.env.KISO_DELEGATION_CONFIG_JSON = JSON.stringify({ checks: merged.checks ?? {}, evaluators: merged.evaluators ?? [], profiles: Object.keys(merged.models ?? {}), sessionsDir: sessionsDir() });
 	setConfigModels(merged.models ?? {});
 	// CW-1 batch 2: the windows endpoints stated by refusing — read before the
 	// first window is asked for (the unknown-window notice below).
 	useLearnedWindows();
+	// 0.40.7: the merge directories a killed kiso left in the temp dir —
+	// once per process, never this process's own (temp-sweep.ts)
+	if (!tempSwept) {
+		tempSwept = true;
+		sweepStaleMergeDirs();
+	}
 
 	const resolved = resolveModel(modelFlag, merged);
 	// AFTER the model resolves: the window a PROFILE states is about that
@@ -1350,7 +1360,7 @@ async function reloadAgent(
 			try {
 				rmSync(p, { recursive: true, force: true });
 			} catch {
-				// best-effort — the temp dir would be reaped by the OS
+				// best-effort — a survivor is removed by a later startup's sweep (temp-sweep.ts) once this process is gone
 			}
 		}
 		mergedTempPaths.push(...oldTemps);
@@ -1376,7 +1386,7 @@ async function reloadAgent(
 		try {
 			rmSync(p, { recursive: true, force: true });
 		} catch {
-			// best-effort — the temp dir would be reaped by the OS
+			// best-effort — a survivor is removed by a later startup's sweep (temp-sweep.ts) once this process is gone
 		}
 	}
 	if (announce) bodyLog(`[reload] ${loadedExtensions.length} extensions, ${skillCount()} skills — the conversation is unchanged`);
@@ -2222,7 +2232,7 @@ async function main(): Promise<void> {
 			try {
 				rmSync(p, { recursive: true, force: true });
 			} catch {
-				// best-effort — the temp dir would be reaped by the OS
+				// best-effort — a survivor is removed by a later startup's sweep (temp-sweep.ts) once this process is gone
 			}
 		}
 	}

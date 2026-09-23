@@ -7,7 +7,7 @@
  */
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { askDeclineAll, askView, projectTrustRows, projectTrustView, projectUntrustedNote, uncertainView, unansweredAskView, type AskResult, type AskSpec, type PanelVerdict, type PanelView, type SaferAnswer } from "@vincemakes/kiso-tui";
@@ -16,6 +16,7 @@ import { projectArtifacts, recordTrust, trustFor, type ProjectArtifacts } from "
 import type { AgentSession, KisoExtension } from "@vincemakes/kiso-runtime";
 import { bodyLog, currentAgentExtensions, dock, extensionsDir, kisoHome, mergedTempPaths, neverInherited, type LineInput } from "./state.js";
 import { guardSavedAllow } from "./protected-writes.js";
+import { mergeDirPrefix } from "./temp-sweep.js";
 import { loadUserConfig, resolveProjectTrustPolicy } from "./config.js";
 import { getMode } from "./mode.js";
 
@@ -411,7 +412,7 @@ function applyMcpMerge(root: string): void {
 	// the paths the previous set owned deleted the file the new set had just
 	// been merged into. One directory per merge, and the directory is what is
 	// recorded, so the cleanup removes exactly what that merge created.
-	const dir = mkdtempSync(join(tmpdir(), "kiso-mcp-"));
+	const dir = mkdtempSync(mergeDirPrefix("mcp")); // 0.40.7: the owner's pid in the name (temp-sweep.ts)
 	const temp = join(dir, "mcp.json");
 	writeFileSync(temp, `${JSON.stringify(merged, null, 2)}\n`, "utf8");
 	process.env.KISO_MCP_CONFIG = temp;
@@ -440,7 +441,7 @@ function applySkillsMerge(root: string): void {
 	originalUserSkillsDir ??= process.env.KISO_SKILLS_DIR ?? join(kisoHome(), "skills");
 	const userDir = originalUserSkillsDir;
 	const projectDir = join(root, "skills");
-	const merged = mkdtempSync(join(tmpdir(), "kiso-skills-"));
+	const merged = mkdtempSync(mergeDirPrefix("skills"));
 	mergedTempPaths.push(merged);
 	for (const dir of readdirSyncSafe(projectDir)) {
 		symlinkSync(join(projectDir, dir), join(merged, dir)); // project wins on collision

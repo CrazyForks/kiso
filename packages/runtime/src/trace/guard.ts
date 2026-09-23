@@ -29,7 +29,31 @@ import { cacheableHashes } from "./analyze.js";
 import { hashContext, hashSystemPrompt, hashToolSpecs, stablePrefixFingerprint } from "./hash.js";
 import { PRICING_TABLE_V1, canonicalizeUsageForModel } from "../usage/canonical.js";
 import { buildRentLedger, type RentParts } from "./rent.js";
-import { TRACE_SCHEMA_VERSION, type Outcome, type TraceRecord } from "./record.js";
+import { PROVIDER_ERROR_MESSAGE_MAX, TRACE_SCHEMA_VERSION, type Outcome, type ProviderErrorNote, type TraceRecord } from "./record.js";
+
+/** SMK0400-F1: what a provider error is allowed to leave in the ledger — a
+ *  message capped, and with anything credential-shaped removed first: an
+ *  `sk-`/`Bearer` token, an `api_key=`/`token:` value, and any unbroken run
+ *  of 32+ key characters (a provider that echoes a masked or whole key
+ *  back in its refusal must not get it written to disk). */
+export function redactProviderMessage(message: string): string {
+	return message
+		.replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, "$1 <redacted>")
+		.replace(/\b(api[_-]?key|access[_-]?token|token|secret|password|authorization)(["']?\s*[:=]\s*["']?)[^\s"',;]+/gi, "$1$2<redacted>")
+		.replace(/\bsk-[A-Za-z0-9_-]{6,}/g, "sk-<redacted>")
+		.replace(/[A-Za-z0-9_-]{32,}/g, "<redacted>")
+		.slice(0, PROVIDER_ERROR_MESSAGE_MAX);
+}
+
+/** SMK0400-F1: the note a `provider_error` record carries. The adapters
+ *  throw the structured error (code, message, status when there was one);
+ *  anything else thrown is named by its error name. */
+export function providerErrorNote(err: unknown): ProviderErrorNote {
+	const e = (typeof err === "object" && err !== null ? err : {}) as { code?: unknown; status?: unknown; message?: unknown; name?: unknown };
+	const code = typeof e.code === "string" && e.code !== "" ? e.code : typeof e.name === "string" && e.name !== "" ? e.name : "error";
+	const message = typeof e.message === "string" ? e.message : String(err);
+	return { code, ...(typeof e.status === "number" && Number.isInteger(e.status) ? { status: e.status } : {}), message: redactProviderMessage(message) };
+}
 import { TraceWriter } from "./writer.js";
 
 export interface RequestTracerDeps {
@@ -114,6 +138,8 @@ export class RequestTracer {
 		let reasoningTokens: number | undefined;
 		const toolCalls: string[] = [];
 		let outcome: Outcome = "ok";
+		// SMK0400-F1: what the provider said, when the outcome is its error
+		let providerError: ProviderErrorNote | undefined;
 
 		try {
 			for await (const ev of upstream) {
@@ -134,6 +160,7 @@ export class RequestTracer {
 			}
 		} catch (err) {
 			outcome = this.#classifyOutcome(err, options);
+			if (outcome === "provider_error") providerError = providerErrorNote(err);
 			throw err;
 		} finally {
 			if (record !== null) {
@@ -149,6 +176,7 @@ export class RequestTracer {
 					usageKnown,
 					servedModel,
 					reasoningTokens,
+					providerError,
 				});
 			}
 		}
@@ -246,6 +274,7 @@ export class RequestTracer {
 			usageKnown: boolean;
 			servedModel: string | null;
 			reasoningTokens: number | undefined;
+			providerError: ProviderErrorNote | undefined;
 		},
 	): void {
 		record.outcome = p.outcome;
@@ -280,6 +309,8 @@ export class RequestTracer {
 		// absent otherwise — writing the requested id here would manufacture
 		// the agreement the reconciliation exists to test.
 		if (p.servedModel !== null) record.servedModel = p.servedModel;
+		// SMK0400-F1: on a provider_error record only; absent otherwise
+		if (p.providerError !== undefined) record.providerError = p.providerError;
 		if (p.usageKnown) {
 			record.freshInput =
 				this.#provider === "anthropic"

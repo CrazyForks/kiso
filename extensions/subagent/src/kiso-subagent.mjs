@@ -392,9 +392,14 @@ function delegationConfig() {
 	try {
 		const raw = process.env.KISO_DELEGATION_CONFIG_JSON;
 		const parsed = raw === undefined ? {} : JSON.parse(raw);
-		return { checks: parsed.checks ?? {}, profiles: parsed.profiles ?? [], sessionsDir: typeof parsed.sessionsDir === "string" && parsed.sessionsDir !== "" ? parsed.sessionsDir : undefined };
+		return {
+			checks: parsed.checks ?? {},
+			evaluators: Array.isArray(parsed.evaluators) ? parsed.evaluators.filter((p) => typeof p === "string") : [],
+			profiles: parsed.profiles ?? [],
+			sessionsDir: typeof parsed.sessionsDir === "string" && parsed.sessionsDir !== "" ? parsed.sessionsDir : undefined,
+		};
 	} catch {
-		return { checks: {}, profiles: [], sessionsDir: undefined };
+		return { checks: {}, evaluators: [], profiles: [], sessionsDir: undefined };
 	}
 }
 
@@ -428,6 +433,18 @@ export function validateTask(task, cfg, parentCwd, manifestDir) {
 			const real = realpathSync(a.evaluator);
 			const project = realpathSync(parentCwd);
 			if (real === project || real.startsWith(project + sep)) return `refused: evaluator must live OUTSIDE the project (the child could reach it): ${a.evaluator}`;
+			// CS-1 (0.40.7): only a script the USER listed. The model chooses
+			// the task, so an unlisted path could be an interpreter
+			// (`/usr/bin/python3 <worktree>`) running code the child wrote —
+			// outside the shell tool and everything that reads shell lines.
+			const listed = (cfg.evaluators ?? []).some((p) => {
+				try {
+					return realpathSync(p) === real;
+				} catch {
+					return false;
+				}
+			});
+			if (!listed) return `refused: ${a.evaluator} is not a configured evaluator — the user lists evaluator scripts in "evaluators" in the kiso config (configured: ${(cfg.evaluators ?? []).join(", ") || "none"}); use a configured check instead, or omit acceptance`;
 		}
 	}
 	if (task.model !== undefined && !cfg.profiles.includes(task.model)) return `refused: unknown model profile ${JSON.stringify(task.model)} (configured: ${cfg.profiles.join(", ") || "none"})`;

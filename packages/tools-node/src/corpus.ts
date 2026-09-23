@@ -56,11 +56,18 @@ export const CORPUS_MAX_DEPTH = 8;
  *    id_ecdsa,          are different names and stay searchable, which is
  *    id_ed25519         correct: a public key is public.
  *    *.pem              the same, by extension
+ *    `.npmrc`, `.pypirc`, `.git-credentials`, `.htpasswd` — RO-F4, the
+ *                       owner's 0.40.7 ruling. `.npmrc` was OUT here ("tokens
+ *                       in it are normally `${VAR}` placeholders") while the
+ *                       read-only shell rule (0.40.0, B4) already called it a
+ *                       credential: two lists that disagreed, so a search
+ *                       exposed what `cat` asked about. One set now, used by
+ *                       both; a literal `_authToken=` is common enough.
+ *    and, by PATH (a name alone would be too broad — `config`,
+ *    `credentials`): `.aws/credentials`, `.config/gh/hosts.yml`,
+ *    `.docker/config.json`, `.kube/config` (isCredentialPath)
  *
  *  OUT, deliberately, so the omissions are decisions and not oversights:
- *    `.npmrc`   a config file by convention; tokens in it are normally
- *               `${VAR}` placeholders, so excluding it would cost more
- *               than it protects
  *    `*.key`    too many non-secret uses to be a credential by name
  *
  *  An explicit `read_file` of ANY of these is unchanged. Reading on
@@ -68,7 +75,16 @@ export const CORPUS_MAX_DEPTH = 8;
  *  from a search for "KEY" is exposure without intent, and only the
  *  second is what this prevents. */
 const ENV_TEMPLATES = new Set([".env.example", ".env.sample", ".env.template"]);
-const CREDENTIAL_NAMES = new Set([".envrc", ".netrc", "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"]);
+const CREDENTIAL_NAMES = new Set([".envrc", ".netrc", "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", ".npmrc", ".pypirc", ".git-credentials", ".htpasswd"]);
+const CREDENTIAL_PATHS = ["/.aws/credentials", "/.config/gh/hosts.yml", "/.docker/config.json", "/.kube/config"];
+
+/** RO-F4: the credential files named by their DIRECTORY as well — a path
+ *  (absolute or root-relative), folded to lower case as a case-insensitive
+ *  disk would. The read-only shell rule asks this same question. */
+export function isCredentialPath(path: string): boolean {
+	const folded = `/${path.split(sep).join("/")}`.toLowerCase();
+	return CREDENTIAL_PATHS.some((s) => folded.endsWith(s));
+}
 
 export function isCredentialName(name: string): boolean {
 	if (ENV_TEMPLATES.has(name)) return false;
@@ -143,7 +159,7 @@ export function ignoredBy(layers: readonly Layer[], full: string, isDir: boolean
  *  corpus rather than two walkers that agree by coincidence. */
 export function corpusSkips(declared: boolean, layers: readonly Layer[], full: string, name: string, isDir: boolean): boolean {
 	if (name === "node_modules" || name === ".git") return true;
-	if (isCredentialName(name)) return true;
+	if (isCredentialName(name) || isCredentialPath(full)) return true;
 	if (!declared) return name.startsWith(".");
 	return ignoredBy(layers, full, isDir);
 }

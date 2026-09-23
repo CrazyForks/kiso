@@ -68,14 +68,23 @@
  * as requested". That default is the whole defect: a field filled in with
  * the request manufactures the agreement the reconciliation exists to
  * test.
+ *
+ * SMK0400-F1 (0.40.7) — schemaVersion 7: a `provider_error` record gains
+ * `providerError` — the error's code, the HTTP status when there was one,
+ * and the provider's message (capped, and redacted of anything
+ * credential-shaped). Until now the record said only `provider_error`, so
+ * a failed request could not be named after the fact (the 0.40.0 smoke's
+ * two failures). OPTIONAL: absent on every other outcome, and on every
+ * record a v1–v6 writer produced.
  */
 
-/** schemaVersion: 6 for the `servedModel` statement (TRACE-F1);
+/** schemaVersion: 7 for the `providerError` statement (SMK0400-F1);
+ *  6 was the `servedModel` statement (TRACE-F1);
  *  5 was the `usageKnown` marker (F33-1). Version
  *  1 = the 1.2.0 shape, 2 = the 1.3.0 shape, 3 = the 0.2.1 shape; all
  *  kept for generation-compat reads (R1d-1, R2-1). Algorithm and shape
  *  changes bump it (ADR-0051 §6 OUT-side versioning). */
-export const TRACE_SCHEMA_VERSION = 6;
+export const TRACE_SCHEMA_VERSION = 7;
 
 /** The versions a reader may meet in a ledger. v1 and v2 records are
  *  accepted (generation-compat) and read as defaults — no canonical
@@ -95,7 +104,7 @@ export const TRACE_SCHEMA_VERSION = 6;
  * spec. Three lists to extend is the point: a bump that forgets one is a
  * bump that fails loudly rather than a reader that quietly narrows.
  */
-export const TRACE_SCHEMA_VERSIONS: Readonly<Set<number>> = new Set([1, 2, 3, 4, 5, 6]);
+export const TRACE_SCHEMA_VERSIONS: Readonly<Set<number>> = new Set([1, 2, 3, 4, 5, 6, 7]);
 
 import { PRICING_TABLE_V1, priceFor, pricingTableFor, validateCanonicalUsage } from "../usage/canonical.js";
 import type { CanonicalUsage } from "../usage/canonical.js";
@@ -119,7 +128,7 @@ export interface TraceSegment {
 /** That is the complete set for 1.2.0. */
 
 export interface TraceRecord {
-	schemaVersion: 6;
+	schemaVersion: 7;
 	kind: "request";
 	requestId: string; // crypto.randomUUID() per adapter call — W2's reverse-reference anchor
 	runId: string;
@@ -186,6 +195,10 @@ export interface TraceRecord {
 	 *  four days. The requested id stays in `model`; these are two facts,
 	 *  never merged. */
 	servedModel?: string;
+	/** SMK0400-F1 (v7) — on a `provider_error` record: what the provider
+	 *  said. `message` is capped at PROVIDER_ERROR_MESSAGE_MAX characters and
+	 *  redacted of credential-shaped strings before it is written. */
+	providerError?: ProviderErrorNote;
 	ts: number; // Date.now() at settle — added to the work-order field list (justification §1.5)
 }
 /** That is the complete set for 1.2.0. */
@@ -197,7 +210,7 @@ export interface TraceRecord {
 // checkable.
 
 export interface HeaderLine {
-	schemaVersion: 6;
+	schemaVersion: 7;
 	kind: "header";
 	sessionId: string;
 	kisoVersion: string;
@@ -205,7 +218,7 @@ export interface HeaderLine {
 }
 
 export interface RunEndLine {
-	schemaVersion: 6;
+	schemaVersion: 7;
 	kind: "run_end";
 	runId: string;
 	ts: number;
@@ -213,7 +226,7 @@ export interface RunEndLine {
 }
 
 export interface CrashLine {
-	schemaVersion: 6;
+	schemaVersion: 7;
 	kind: "crash";
 	ts: number;
 	note: string;
@@ -237,6 +250,7 @@ export const HASH_SPEC_BY_VERSION: Readonly<Record<number, HashSpec>> = {
 	4: { algorithm: "sha-256", output: "full-hex" }, // TUI2-R3v2 — `purpose` is a marker, not an input to any hash; re-pinned by the same ritual
 	5: { algorithm: "sha-256", output: "full-hex" }, // F33-1 — `usageKnown` is a marker, not an input to any hash; re-pinned by the same ritual
 	6: { algorithm: "sha-256", output: "full-hex" }, // TRACE-F1 — `servedModel` is the server's statement, not an input to any hash; re-pinned by the same ritual
+	7: { algorithm: "sha-256", output: "full-hex" }, // SMK0400-F1 — `providerError` is the provider's statement, not an input to any hash; re-pinned by the same ritual
 };
 
 export function hashSpecFor(version: number): HashSpec {
@@ -301,10 +315,24 @@ export const TRACE_RECORD_FIELDS_V5 = [...TRACE_RECORD_FIELDS_V4, "usageKnown"] 
 /** TRACE-F1 (v6): the model the SERVER said it served. A v5 ledger has none
  *  on any record, which reads as "nobody asked the server" — the true
  *  statement about a ledger written before the adapters read the field. */
-export const TRACE_RECORD_FIELDS = [...TRACE_RECORD_FIELDS_V5, "servedModel"] as const;
+export const TRACE_RECORD_FIELDS_V6 = [...TRACE_RECORD_FIELDS_V5, "servedModel"] as const;
+
+/** SMK0400-F1 (v7): what the provider said on a `provider_error` record. */
+export const TRACE_RECORD_FIELDS = [...TRACE_RECORD_FIELDS_V6, "providerError"] as const;
 
 /** The fields the closed-set check does not require to be present. */
-export const TRACE_RECORD_OPTIONAL = ["purpose", "usageKnown", "servedModel"] as const;
+export const TRACE_RECORD_OPTIONAL = ["purpose", "usageKnown", "servedModel", "providerError"] as const;
+
+/** SMK0400-F1: the shape of `providerError`. */
+export interface ProviderErrorNote {
+	/** the structured error's code (`rate_limit`, `network`, …), or the
+	 *  thrown error's name when it carried none */
+	code: string;
+	/** the HTTP status, when the failure had one */
+	status?: number;
+	message: string;
+}
+export const PROVIDER_ERROR_MESSAGE_MAX = 300;
 
 export const TRACE_SEGMENT_FIELDS = ["role", "seqRange", "estTokens", "freshness"] as const;
 
@@ -378,7 +406,9 @@ export function validateTraceRecord(v: unknown): v is TraceRecord {
 						? TRACE_RECORD_FIELDS_V4
 						: version === 5
 							? TRACE_RECORD_FIELDS_V5
-							: TRACE_RECORD_FIELDS;
+							: version === 6
+								? TRACE_RECORD_FIELDS_V6
+								: TRACE_RECORD_FIELDS;
 	if (!hasClosedKeys(v, fields, ["lineageLink", ...TRACE_RECORD_OPTIONAL])) return false;
 	if (v.purpose !== undefined && (typeof v.purpose !== "string" || v.purpose === "")) return false;
 	// F33-R8: the completeness marker is a BOOLEAN. It was accepted as
@@ -390,6 +420,14 @@ export function validateTraceRecord(v: unknown): v is TraceRecord {
 	// reconcile as a contradiction against every requested id; absent is the
 	// honest "the server said nothing".
 	if (v.servedModel !== undefined && (typeof v.servedModel !== "string" || v.servedModel === "")) return false;
+	// SMK0400-F1: closed keys; a non-empty code; an integer status when
+	// stated; the message a string within the cap (the writer caps it)
+	if (v.providerError !== undefined) {
+		const e = v.providerError;
+		if (!isRecord(e) || !hasClosedKeys(e, ["code", "message", "status"], ["status"])) return false;
+		if (typeof e.code !== "string" || e.code === "" || typeof e.message !== "string" || e.message.length > PROVIDER_ERROR_MESSAGE_MAX) return false;
+		if (e.status !== undefined && !Number.isInteger(e.status)) return false;
+	}
 	if (v.kind !== "request") return false;
 	if (typeof v.requestId !== "string" || typeof v.runId !== "string") return false;
 	if (!isNonNegInt(v.requestIndex) || !isNonNegInt(v.retryAttempt)) return false;
@@ -446,7 +484,9 @@ export function validateTraceRecord(v: unknown): v is TraceRecord {
 			if (expected !== null && Math.abs(c.costUsd - expected) > 1e-6) return false;
 		}
 	}
-	if (version === TRACE_SCHEMA_VERSION) {
+	// SMK0400-F1: `>= 6`, not `=== TRACE_SCHEMA_VERSION` — the bump to 7
+	// must not stop checking the rent lines of the v6 records already written
+	if (version >= 6) {
 		// the rent block: every line validates (closed fields, non-empty
 		// surface, non-negative integer chars, the estTokens == ceil(chars/4)
 		// cross-check — R6). v1/v2 sidecars have no block (R2-1).

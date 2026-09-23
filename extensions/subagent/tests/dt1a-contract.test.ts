@@ -174,6 +174,11 @@ describe("DT-1a — acceptance: named checks or a parent-held evaluator, run by 
 		const evaluator = join(outside, "evaluate.sh");
 		writeFileSync(evaluator, "#!/bin/sh\ntest -f \"$1/src/ok.txt\"\n", "utf8");
 		chmodSync(evaluator, 0o755);
+		// DECLARED RE-PIN (CS-1, 0.40.7): an evaluator runs only when the USER
+		// listed it — this case used to pass any existing path outside the
+		// project. The script is listed here; the unlisted case is pinned in
+		// cs1-evaluator-allowlist.test.ts.
+		process.env.KISO_DELEGATION_CONFIG_JSON = JSON.stringify({ checks: {}, evaluators: [evaluator], profiles: [] });
 		const ran = await delegateWith([{ role: "implementer", task: "write ok", acceptance: { evaluator } }], home);
 		expect(ran.isError, ran.content).toBe(false);
 		expect(ran.content).toContain("verification: PASSED");

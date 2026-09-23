@@ -147,6 +147,13 @@ export interface KisoConfig {
 	 *  in the child's worktree. A model never supplies a command; it names
 	 *  one of these. `{ "test": "npm test", "lint": "npm run lint" }`. */
 	readonly checks?: Readonly<Record<string, string>>;
+	/** CS-1 (0.40.7): the evaluator scripts a delegated task may name —
+	 *  absolute paths, `["/abs/path/to/evaluate.sh"]`. The PARENT runs the
+	 *  one a task names with the child's worktree as its argument. A path
+	 *  the user did not list is refused: the model chooses the task, so an
+	 *  unlisted path could be an interpreter running code the child wrote.
+	 *  Same layers as `checks`. */
+	readonly evaluators?: readonly string[];
 }
 
 /** The resolved, merged config — project wins over user, both validated. */
@@ -183,6 +190,7 @@ export function parseConfig(text: string, source: string): KisoConfig {
 		floor?: "catastrophe" | "off";
 		protectedPaths?: readonly string[];
 		checks?: Record<string, string>;
+		evaluators?: string[];
 	} = {};
 	const obj = raw as Record<string, unknown>;
 	const fail = (key: string, why: string): never => {
@@ -230,6 +238,13 @@ export function parseConfig(text: string, source: string): KisoConfig {
 			if (typeof cmd !== "string" || cmd.trim() === "") fail(`checks.${name}`, "expected a non-empty command string");
 		}
 		out.checks = obj.checks as Record<string, string>;
+	}
+	if (obj.evaluators !== undefined) {
+		if (!Array.isArray(obj.evaluators)) fail("evaluators", "expected a list of absolute paths to evaluator scripts");
+		for (const path of obj.evaluators as unknown[]) {
+			if (typeof path !== "string" || !path.startsWith("/")) fail("evaluators", `expected an absolute path, got ${JSON.stringify(path)}`);
+		}
+		out.evaluators = obj.evaluators as string[];
 	}
 	if (obj.model !== undefined) {
 		if (typeof obj.model !== "string" || obj.model === "") fail("model", "expected a profile name or provider/model string");
@@ -344,6 +359,8 @@ export function mergeConfigs(user: KisoConfig | null, project: KisoConfig | null
 		...(p.projectTrust !== undefined ? { projectTrust: p.projectTrust } : {}),
 		// DT-1a: checks merge per name — a (trusted) project's check wins over the user's
 		...(u.checks !== undefined || p.checks !== undefined ? { checks: { ...(u.checks ?? {}), ...(p.checks ?? {}) } } : {}),
+		// CS-1: the evaluator lists join — either layer's script may be named
+		...(u.evaluators !== undefined || p.evaluators !== undefined ? { evaluators: [...(u.evaluators ?? []), ...(p.evaluators ?? [])] } : {}),
 	};
 }
 

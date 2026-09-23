@@ -128,6 +128,9 @@ export class PanelInput {
 	 *  (restored at close — commit AND cancel), the panel takes the
 	 *  keys and the input row's lead, the composer's own bands close. */
 	begin(view: PanelView, onCommit: (v: PanelVerdict) => void, opts?: { safer?: () => Promise<SaferAnswer> }): void {
+		// MP-1 (0.40.7): a pick opens on the row its caller names as current
+		const initial = view.pick?.initial;
+		const start = view.pick !== undefined && initial !== undefined && Number.isInteger(initial) && initial >= 0 && initial < view.pick.options.length ? initial : 0;
 		this.#panel = {
 			view,
 			phase: "options",
@@ -136,7 +139,7 @@ export class PanelInput {
 			safer: opts?.safer,
 			saferRun: null,
 			ask: view.ask === undefined ? null : askStart(view.ask),
-			pick: view.pick === undefined ? null : { cursor: 0, phase: "options" as const, level: startLevel(view.pick.options[0]) },
+			pick: view.pick === undefined ? null : { cursor: start, phase: "options" as const, level: startLevel(view.pick.options[start]) },
 			onCommit,
 			stash: this.host.stash(),
 		};

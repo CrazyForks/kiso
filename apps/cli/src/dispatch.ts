@@ -116,6 +116,14 @@ function effortAxis(p: ModelProfile): Pick<PickOption, "levels" | "level" | "dis
  *  paid by the stored key read `DEEPSEEK_API_KEY (available)` with that
  *  variable unset — and after 0.40.6's endpoint login every gateway row
  *  would have named a variable nobody exports any more. */
+/** MP-1 (0.40.7): who a profile's requests are billed to — the endpoint
+ *  and the credential that pays there (`@api.deepseek.com · stored key`). */
+function payeeOf(p: ModelProfile): string {
+	const host = profileProviderLabel(p.kind, p.baseUrl, p.upstream);
+	const who = signInNote(p).replace(/, expired — renews on use$/, "");
+	return host === "" ? who : `${host} · ${who}`;
+}
+
 function signInNote(p: ModelProfile): string {
 	try {
 		const auth = authForProfile("?", p);
@@ -621,6 +629,8 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 								{
 									header: `mode — current: ${current}`,
 									options: OFFERED_MODES.map((name) => ({ label: name, note: [MODE_NOTE[name], ...(name === current ? ["current"] : [])].join(" · ") })),
+									// MP-1 (0.40.7): the cursor opens on the tier in force
+									...(OFFERED_MODES.indexOf(current) >= 0 ? { initial: OFFERED_MODES.indexOf(current) } : {}),
 								},
 								// DC-12 (design §4): a panel WAITING ON A HUMAN says ❯.
 								ctx.isRunning() ? "❯ run paused" : `▸ ${current}`,
@@ -712,6 +722,9 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 								// "openai/…" hint failed with "no such model profile"
 								// on exactly the fresh-install path that shows it.
 								typeHint: names.length === 0 ? "type provider/model directly (e.g. openai-compat/deepseek-reasoner)" : "type provider/model directly",
+								// MP-1 (0.40.7): the cursor opens on the session's own
+								// profile — opening on row 0 plus one Enter changed who pays
+								...(currentProfileName !== null && names.indexOf(currentProfileName) >= 0 ? { initial: names.indexOf(currentProfileName) } : {}),
 								// the zero-profile copy is TODAY'S, verbatim: the
 								// user who sees it is exactly the user who needs
 								// the path spelled out
@@ -844,6 +857,10 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 								// display — a direct provider/model has none.
 								profileName: direct === null ? profName : null,
 							};
+							// MP-1 (0.40.7): who pays BEFORE the switch, read while the
+							// session still names the outgoing profile
+							const prevProfile = currentProfileName !== null ? configModels[currentProfileName] : undefined;
+							const payeeBefore = prevProfile !== undefined ? payeeOf(prevProfile) : null;
 							ctx.session.setModelBinding(binding);
 							setLastBinding(binding);
 							setAgentModel(profile.model, profile.baseUrl);
@@ -870,6 +887,12 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 							// model beside the previous model's figure.
 							ctx.modelSwitched();
 							body.notice(`model → ${profName} (${profile.model}${providerLabel(profile.baseUrl, profile.upstream) === "" ? "" : ` ${providerLabel(profile.baseUrl, profile.upstream)}`}${effortTok !== undefined ? ` · ${effortTok}` : ""}) — takes effect on the next turn`);
+							// MP-1 (0.40.7): when the switch changes WHO PAYS — another
+							// endpoint, or another credential for it — say so, once,
+							// under the switch line. A switch between two models on the
+							// same account says nothing more.
+							const payeeAfter = payeeOf(profile);
+							if (payeeBefore !== null && payeeBefore !== payeeAfter) body.notice(`paid by ${payeeAfter} from the next turn — was ${payeeBefore}`);
 						}
 					}
 				} catch (err) {
