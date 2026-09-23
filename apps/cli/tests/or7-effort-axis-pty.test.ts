@@ -25,7 +25,7 @@
  * without spending one.
  */
 
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -91,13 +91,9 @@ describe("OR-7 — the pick panel's effort axis", () => {
 		// the status row carries the applied level once the panel is gone
 		expect(settledScreen(raw).join("\n"), "the row names the level it is bound to").toContain("claude-opus-5 · max");
 
-		// ── the durable half: the session's own profile records the effort,
-		// so a fresh process resumes bound to it ──
-		const meta = JSON.parse(readFileSync(join(dirs.home, "sessions", "axis-a.meta.json"), "utf8")) as {
-			profile: { modelId: string; revision: number; reasoning: { thinking: string; effort: string } };
-		};
-		expect(meta.profile.modelId).toBe("claude-opus-5");
-		expect(meta.profile.reasoning.effort, "the effort is a durable fact, not a screen state").toBe("max");
-		expect(meta.profile.revision).toBeGreaterThanOrEqual(2);
+		// ── the durable half, DC-60 (declared): this session never received a
+		// turn, so nothing of it is on disk — the model and effort land with
+		// its first durable event (packages/runtime/tests/dc60-no-empty-sessions) ──
+		expect(existsSync(join(dirs.home, "sessions", "axis-a.meta.json")), "a session with no event writes nothing").toBe(false);
 	}, 240_000);
 });

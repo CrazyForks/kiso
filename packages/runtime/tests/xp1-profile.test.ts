@@ -40,10 +40,18 @@ function freshDir(): string {
 }
 
 describe("XP-1 — the sidecar's fail-closed lifecycle", () => {
-	it("a NEW session writes revision 1 before any durable event", async () => {
+	it("a NEW session writes revision 1 with its first durable event — and nothing at open (DC-60)", async () => {
+		// DC-60, a declared change: this read "writes revision 1 before any
+		// durable event" and pinned the write at OPEN — which left a sidecar
+		// for every session that never began. Revision 1 now lands with the
+		// first durable event, still before it.
 		const dir = freshDir();
 		const agent = createAgent({ model: "faux-y", store: new SessionStore(dir), tools: [], adapter: DONE });
-		await agent.session({ id: "s1" });
+		const session = await agent.session({ id: "s1" });
+		expect(readProfile(dir, "s1").kind).toBe("absent");
+		for await (const _ of session.run("go")) {
+			// the first durable event
+		}
 		const meta = readProfile(dir, "s1");
 		expect(meta.kind).toBe("ok");
 		if (meta.kind === "ok") {
@@ -153,6 +161,10 @@ describe("XP-1 — /model records the next revision durably", () => {
 		const dir = freshDir();
 		const agent = createAgent({ model: "faux-y", store: new SessionStore(dir), tools: [], adapter: DONE });
 		const session = await agent.session({ id: "s7" });
+		// DC-60: revision 1 lands with the first durable event
+		for await (const _ of session.run("go")) {
+			// the first turn
+		}
 		session.setModelBinding({ adapter: DONE, model: "switched-z", reasoning: { thinking: "default", effort: "max" } });
 		const meta = readProfile(dir, "s7");
 		expect(meta.kind).toBe("ok");

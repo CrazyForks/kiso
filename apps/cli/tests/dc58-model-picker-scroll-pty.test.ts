@@ -11,7 +11,7 @@
  * still say `model-nine-ish` and the notice would name `p9`.
  */
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { isolatedEnv } from "../../../tests/helpers/isolated-cli.mjs";
@@ -60,8 +60,9 @@ describe("DC-58 — /model on a real pty: twelve profiles, one screen, arrows th
 		expect(t, "the block names the rows on screen and the gesture that moves them").toContain("— ↑↓ scrolls");
 		expect(t, "and it names the whole list, not nine of twelve").toMatch(/↕ \d+-\d+ \/ 12/);
 		expect(t, "the notice names the TWELFTH profile — the reach is the list").toContain("model → p12 (");
-		// the durable half: the session's profile records p12's own model
-		const meta = JSON.parse(readFileSync(join(dirs.home, "sessions", "scroll-a.meta.json"), "utf8")) as { profile: { modelId: string } };
-		expect(meta.profile.modelId, "row nine could never have written this").toBe("model-twelve");
+		// the durable half, DC-60 (declared): this session never received a
+		// turn, so nothing of it is on disk — the selection lands with its
+		// first durable event (packages/runtime/tests/dc60-no-empty-sessions)
+		expect(existsSync(join(dirs.home, "sessions", "scroll-a.meta.json")), "a session with no event writes nothing").toBe(false);
 	}, 240_000);
 });
