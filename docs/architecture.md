@@ -84,6 +84,17 @@ It must not decide: anything about the model/tool cycle, event semantics,
 or durability. A second host (server, IDE, script) must get the identical
 agent semantics by driving the same runtime surface.
 
+## 1b. Hosting — `packages/server` (R3, 2026-09-23)
+
+A product backend that keeps many sessions alive in one process uses the
+hosted-session service instead of writing its own registry: one run per
+session, observers with exact replay from a sequence number, approve /
+abort / resume routed to the right run, drain and close. It sits ABOVE
+the composition step — the product hands it an agent factory — and below
+any transport. It is not a second agent: every run it drives is a
+session's own `run()` / `resume()`. kiso-code does not use it (one
+session per process, no observers).
+
 ## 2. Composition — two homes, on purpose
 
 Composition is split between "what" and "how":

@@ -1,0 +1,41 @@
+/**
+ * The service's typed refusals. A transport maps each to its own status
+ * (409 / 409 / 503 in the two products that wrote these by hand); the
+ * service itself knows no status code.
+ */
+
+/** A run is already in flight for this session — one run per session. */
+export class InFlightError extends Error {
+	readonly sessionId: string;
+	readonly runId: string;
+	constructor(sessionId: string, runId: string) {
+		super(`session ${sessionId} already has a run in flight (${runId})`);
+		this.name = "InFlightError";
+		this.sessionId = sessionId;
+		this.runId = runId;
+	}
+}
+
+/** The log holds a run that never reached its terminal — a previous
+ *  process died inside it. It must be resumed (recovery drives ONE run to
+ *  its terminal) before a new turn starts; `run(..., { resumeFirst: true })`
+ *  does that in one call. The one thing the service never does is resume
+ *  silently. */
+export class OpenRunError extends Error {
+	readonly sessionId: string;
+	readonly runId: string;
+	constructor(sessionId: string, runId: string) {
+		super(`session ${sessionId} still has an open run (${runId}) — resume it before starting a new turn`);
+		this.name = "OpenRunError";
+		this.sessionId = sessionId;
+		this.runId = runId;
+	}
+}
+
+/** drain() was called: no new run or resume starts in this process. */
+export class DrainingError extends Error {
+	constructor() {
+		super("the service is draining — no new run starts in this process");
+		this.name = "DrainingError";
+	}
+}

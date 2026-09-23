@@ -18,6 +18,8 @@ const PACKAGES = [
 	"@vincemakes/kiso-core",
 	"@vincemakes/kiso-evals",
 	"@vincemakes/kiso-runtime",
+	// R3 (2026-09-23): the hosted-session service.
+	"@vincemakes/kiso-server",
 	"@vincemakes/kiso-tools-node",
 	"@vincemakes/kiso-provider-anthropic",
 	"@vincemakes/kiso-provider-openai",
