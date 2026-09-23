@@ -91,3 +91,51 @@ export function describeSearchMiss(text: string, search: string): string {
 		`  your search wanted: "${fragment(rest)}"`,
 	].join("\n");
 }
+
+/**
+ * ACI-3 — the text a refused edit needs to be retried WITHOUT reading the
+ * file again. On the owner's disk every edit_file refusal was followed by
+ * a read before the retry: two extra requests per failure, 319 failures.
+ * The refusal already knows the file; showing the few lines where the
+ * search should land costs a couple of KB once instead of a whole read.
+ *
+ * Whole lines only (a cut mid-line is a lie about the file), `context`
+ * lines each side of the search's own span, cut at a line boundary under
+ * `maxChars`. Centred on the best partial match — the longest matching
+ * prefix at its earliest occurrence, the place describeSearchMiss names —
+ * and null when that prefix is too short to say where the caller aimed.
+ */
+export interface Region {
+	/** 1-based, inclusive. */
+	readonly from: number;
+	readonly to: number;
+	readonly body: string;
+}
+
+export function regionForSearch(text: string, search: string, context = 6, maxChars = 1500): Region | null {
+	if (search.length === 0) return null;
+	const matched = longestMatchingPrefix(text, search);
+	// A prefix of a character or two lands anywhere: its region would be
+	// noise that costs context. A quarter of the search (at most 16 chars)
+	// is where the match starts to say WHERE the caller was aiming.
+	if (matched === 0 || matched < Math.min(16, Math.ceil(search.length / 4))) return null;
+	return regionAt(text, text.indexOf(search.slice(0, matched)), search.split("\n").length, context, maxChars);
+}
+
+/** The whole lines from `context` before `offset`'s line to `context` after
+ *  the `span` lines that start there. */
+export function regionAt(text: string, offset: number, span: number, context = 6, maxChars = 1500): Region {
+	const lines = text.split("\n");
+	const last = text.endsWith("\n") ? lines.length - 1 : lines.length;
+	const at = lineAt(text, offset);
+	const from = Math.max(1, at - context);
+	let to = Math.max(from, Math.min(last, at + Math.max(span, 1) - 1 + context));
+	let body = lines.slice(from - 1, to).join("\n");
+	while (body.length > maxChars && to > from) {
+		to -= 1;
+		body = lines.slice(from - 1, to).join("\n");
+	}
+	// one line longer than the cap on its own: the honest answer is the cut, said
+	if (body.length > maxChars) body = `${body.slice(0, maxChars)}… (line ${from} continues)`;
+	return { from, to, body };
+}

@@ -147,6 +147,7 @@
   "packages/runtime/tests/state-probe-lock.test.ts",
   "packages/runtime/tests/zombie-holder-lock.test.ts",
   "packages/tools-node/tests/aci2-edit-uniqueness.test.ts",
+  "packages/tools-node/tests/aci3-retry-ready.test.ts",
   "packages/tools-node/tests/aci4-corpus-tools.test.ts",
   "packages/tools-node/tests/astra-f7-apikeyenv-strip.test.ts",
   "packages/tools-node/tests/corpus.test.ts",
