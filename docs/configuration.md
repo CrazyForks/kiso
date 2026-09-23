@@ -205,3 +205,36 @@ The bound is per EVENT, so a long think that keeps streaming is never touched. D
 120,000 ms; a profile may raise it for a backend that thinks silently at high effort,
 or set `0` to disable the watchdog for that profile. `KISO_STREAM_IDLE_MS` overrides
 every profile (the test rigs use it).
+
+## Signing in
+
+`kiso login <provider>` stores a credential in `~/.kiso/auth.json` (mode
+0600) — an API key for `anthropic` / `openai` / `deepseek` / `zai`, the
+subscription OAuth sign-in for `chatgpt`:
+
+```bash
+kiso login chatgpt      # the subscription: a browser round trip, no key
+kiso login deepseek     # a vendor key, typed once and stored
+kiso auth               # what is stored, masked
+kiso logout deepseek    # remove it
+```
+
+**A stored credential never leaves the vendor's own origin.** Point a profile
+at a gateway or any other custom endpoint and it authenticates with that
+profile's own env var alone — the key you signed in with is not forwarded
+there. Anyone who signed in and then retargeted a profile needs that key in
+the environment.
+
+**A stored credential OWNS its provider.** An unusable stored one is a loud
+error, never a silent fall back to the environment variable — what you signed
+in with is what runs. Without one the env layer still works: `ANTHROPIC_API_KEY`
+or `OPENAI_API_KEY` alone is enough (with both exported, OpenAI wins), and
+`OPENAI_BASE_URL` retargets any compatible endpoint.
+
+**Changed in 0.36.0.** That ownership now holds on the environment-selected
+route too. Starting kiso with only `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` in
+the environment used to run on THAT key even when a credential was stored for
+a recognised origin (`api.openai.com`, `api.deepseek.com`, `api.z.ai`); the
+env key won by accident rather than by rule. The stored one wins there now.
+`kiso logout <provider>` removes it and the env var takes over again, exactly
+as the message has always said.

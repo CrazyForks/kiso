@@ -360,3 +360,10 @@ territory only if evidence ever demands it.
 
 Companions: `docs/concepts.md` (the invariants), `docs/sdk.md` (the
 public surface), `docs/adrs/` (the decision record).
+
+## Why another one
+
+Because every agent framework hands you code and API docs, and none of them
+hand you the reasoning. When the model changes next quarter and a design
+decision stops paying for itself, the docs cannot tell you which one to pull
+out. The ADRs can.

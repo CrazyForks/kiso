@@ -201,3 +201,42 @@ tree stays CJK-free — `README.zh.md` is the only exemption)
 → demo start-and-exit gate. **2,958 tests green (407 files)** — 2,326 unit,
 632 PTY. 39 ADRs (index: `docs/adrs/README.md`).
 6 incident fixtures running on the real runtime.
+
+## Providers — what is verified, and what is not
+
+Support is stated by the evidence behind it, not by the presence of code.
+
+| provider | sign-in | status |
+|---|---|---|
+| DeepSeek and other OpenAI-compatible endpoints | `kiso login deepseek`, or a key in the env | **real vendor legs.** The credential-store path ran against the vendor on 2026-09-08, and the bench's task runs are on `deepseek-v4-flash`. |
+| Anthropic | `kiso login anthropic` — API key only | **API key only**: the vendor prohibits third-party subscription sign-in. The current model line is registered with dated, sourced context windows, effort levels, thinking modes and prices (read 2026-09-07). Finding MG1-F1: the signed and redacted thinking-block replay is verified byte-identically through OpenRouter's Anthropic-format endpoint, not against the first-party beta surface. |
+| OpenAI Responses, first-party | `kiso login openai` — API key | **offline-verified; real integration PENDING.** Proven against recorded byte rigs; the package README's support table says `unrun` until a real leg lands. |
+| ChatGPT subscription | `kiso login chatgpt` — OAuth | **real leg 2026-09-09** on the owner's subscription: the stored sign-in drove a tool call and the next turn, effort passthrough (`xhigh` accepted, `none` refused by name), a mid-stream cancel with the durable void, and a vendor error mapped (`400 invalid_request`) with the session surviving. A subscription run is priced `null` (a subscription is not billed per token) and measured against the presets' 272,000-token window. |
+| GLM through OpenRouter | a key in the env (`OPENROUTER_API_KEY`); no `kiso login` provider yet | **real leg 2026-09-09** (`z-ai/glm-5.3-flash`, the compat table's second row): the env key drove streaming with the think shown, a tool call and the next turn, `/model glm high` accepted and `xhigh` refused by name (`native: low/medium/high`), esc mid-stream recorded `aborted by user`, a wrong model id mapped to `invalid_request 400` with the session surviving. Three findings fixed on the way: the adapter dropped OpenRouter's `reasoning` deltas (GLM-F1), read an aborted stream as a provider error (COMPAT-F1 — DeepSeek had the same defect), and filed a transport body cut as non-retryable (COMPAT-F2). The upstream cut one long answer mid-body that evening; the retry recovered. Priced from OpenRouter's models API (2026-09-09). |
+
+Prompt caching is **off by default** on Anthropic profiles: turning it on
+changes the request bytes and the bill, and the default flips only after a
+paired bench on a live leg proves the saving. For efficiency numbers — same
+model, same tasks, three agents, protocol and honest footnotes included — see
+[bench/README.md](../bench/README.md). Nothing from it is summarized here.
+
+## What is delivered, and the gate that proves it
+
+Every row is proven by a gate in this repository.
+
+| capability | delivered by | proven in |
+|---|---|---|
+| survives `kill -9` | event-sourced sessions; resume continues the interrupted run | `apps/cli/tests/kill9.test.ts` |
+| durable human approvals | pauses persist across processes; verdicts never lost | `packages/runtime/tests/approvals.test.ts` |
+| crash-consistent execution | durable receipts keyed by `executionId`; a confirmed success is never re-run (exactly-once within the framework's own window — the rest is explicit human-resolved uncertainty) | `packages/core/tests/execution-gate.test.ts` |
+| extensions | policies / tools / hooks / systemPrompt / dispose | `packages/runtime/tests/extensions.test.ts` |
+| built-in extension layer | mcp, skills and subagent load in-process at startup, ask joins them on a terminal; a user copy shadows loudly | `apps/cli/tests/builtin-layer.test.ts` |
+| MCP bridge | official extension — built-in since 0.1.45, kernel untouched | `extensions/mcp/tests` |
+| subagents | official extension — role-policy children, worktree isolation, the delegation contract | `extensions/subagent/tests` |
+| skills | official extension — two-tier progressive loading | `extensions/skills/tests` |
+| task | official extension — opt-in since 0.3.0, durable long-horizon working memory | `extensions/task/tests`, `apps/cli/tests/task-e2e.test.ts` |
+| stored credentials | a credential owns its provider; no silent env fallback; `auth.json` at mode 0600 | `apps/cli/tests/credentials.test.ts`, `apps/cli/tests/oauth-chatgpt.test.ts` |
+| the Responses dialect | both targets against recorded byte rigs — request bytes, streaming, tool turns, reasoning replay, cancel, error mapping, retry authority | `packages/provider-openai-responses/tests/or1-*.test.ts` |
+| context economy | microcompact + `/compact` model summary + prompt-cache byte discipline | `packages/core/tests/prompt-cache.test.ts`, `packages/core/tests/summarize.test.ts` |
+| project `.kiso` trust | content-digest gate, one ask, sticky refusal | `apps/cli/tests/project-trust.test.ts` |
+| markdown under the mono discipline | a zero-dependency renderer streams assistant prose under BLOCK-FREEZE — a closed block commits to scrollback and is never re-rendered; attributes over colour, raw markdown bytes in a pipe | `packages/tui-cells/tests/tui2-md-*.test.ts`, `packages/tui/tests/tui2-md-compositor.test.ts` |
