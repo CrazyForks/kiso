@@ -223,15 +223,25 @@ subscription OAuth sign-in for `chatgpt`:
 ```bash
 kiso login chatgpt      # the subscription: a browser round trip, no key
 kiso login deepseek     # a vendor key, typed once and stored
+kiso login --endpoint https://gateway.example/v1   # a gateway's own key
 kiso auth               # what is stored, masked
 kiso logout deepseek    # remove it
 ```
 
 **A stored credential never leaves the vendor's own origin.** Point a profile
-at a gateway or any other custom endpoint and it authenticates with that
-profile's own env var alone — the key you signed in with is not forwarded
-there. Anyone who signed in and then retargeted a profile needs that key in
-the environment.
+at a gateway or any other custom endpoint and the vendor key you signed in
+with is not forwarded there — that profile authenticates with a key stored
+for the gateway itself, or with its own env var.
+
+**A gateway has its own sign-in (0.40.6).** `kiso login --endpoint <url>`
+stores an API key for that URL's ORIGIN — scheme, host and port; the path is
+not part of it — under `endpoint:<origin>` in the same file. Every profile
+whose `baseUrl` is on that origin uses it, before its `apiKeyEnv`, the same
+order a vendor key takes; no other origin ever receives it — not another
+port, not a subdomain, not a local forwarder in front of the gateway. So a
+gateway profile starts from plain `kiso`, with no env var exported first.
+A vendor's own origin is refused there (use `kiso login <provider>`).
+`kiso logout --endpoint <url>` removes it; `kiso auth` lists it masked.
 
 **A stored credential OWNS its provider.** An unusable stored one is a loud
 error, never a silent fall back to the environment variable — what you signed

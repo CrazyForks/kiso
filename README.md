@@ -29,6 +29,7 @@ Sign in once:
 ```bash
 kiso login deepseek      # or anthropic / openai / zai
 kiso login chatgpt       # a ChatGPT subscription: a browser sign-in, no key
+kiso login --endpoint https://gateway.example/v1   # a gateway: its key, sent to it alone
 kiso auth                # what is stored, masked
 ```
 

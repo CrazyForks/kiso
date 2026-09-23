@@ -29,6 +29,7 @@ kiso
 ```bash
 kiso login deepseek      # 也可以是 anthropic / openai / zai
 kiso login chatgpt       # ChatGPT 订阅，浏览器登录，不需要密钥
+kiso login --endpoint https://gateway.example/v1   # 网关：密钥只发给这个网关
 kiso auth                # 查看已存的登录信息（已打码）
 ```
 

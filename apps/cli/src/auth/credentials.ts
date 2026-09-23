@@ -154,6 +154,29 @@ function originOf(baseUrl: string | undefined): string | null {
 	}
 }
 
+/**
+ * 0.40.6 — the store id for a GATEWAY's own key: `endpoint:<origin>`.
+ *
+ * A vendor's credential is stored under the vendor and only ever reaches
+ * the vendor's origin (R1 above). A gateway has no vendor identity, so its
+ * key is stored under the one thing that names where it may go — its
+ * ORIGIN (scheme, host, port). `kiso login --endpoint <url>` writes it; a
+ * profile whose endpoint has exactly that origin reads it; no other origin
+ * ever does, a local forwarder in front of the gateway included. Null for
+ * anything that is not an http(s) URL — never a guess.
+ */
+export function endpointCredentialId(url: string | undefined): string | null {
+	if (url === undefined) return null;
+	let u: URL;
+	try {
+		u = new URL(url);
+	} catch {
+		return null;
+	}
+	if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+	return `endpoint:${u.origin}`;
+}
+
 export function authPath(): string {
 	return join(kisoHome(), "auth.json");
 }

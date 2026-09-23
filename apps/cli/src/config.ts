@@ -34,7 +34,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { kisoHome } from "./state.js";
 import type { Mode } from "./mode.js";
-import { AuthError, getCredential, providerIdOf } from "./auth/credentials.js";
+import { AuthError, effectiveBaseUrl, endpointCredentialId, getCredential, providerIdOf } from "./auth/credentials.js";
 import { BUILTIN_MANIFESTS } from "@vincemakes/kiso-runtime/internal";
 
 /** OR-1: `openai-responses` is a DIALECT, not a vendor — the same kind
@@ -389,10 +389,30 @@ export function authForProfile(name: string, p: ModelProfile): ProfileAuth {
 	if (providerId !== null && !manifestTakesKey(providerId)) {
 		throw new ConfigError(`model ${name}: unavailable — not signed in: run \`kiso login ${providerId}\` (this provider takes no API key)`);
 	}
+	// 0.40.6: a GATEWAY's own key, stored for exactly this profile's origin
+	// (`kiso login --endpoint <url>`). The rule a vendor credential follows:
+	// stored first, the env var only when nothing is stored — and it goes to
+	// that origin alone (credentials.ts endpointCredentialId).
+	const endpointId = providerId === null ? endpointCredentialId(effectiveBaseUrl(p.kind, p.baseUrl)) : null;
+	if (endpointId !== null) {
+		let stored;
+		try {
+			stored = getCredential(endpointId);
+		} catch (err) {
+			if (err instanceof AuthError) throw new ConfigError(`model ${name}: ${err.message}`);
+			throw err;
+		}
+		if (stored?.type === "api-key") return { type: "api-key", apiKey: stored.key, source: "store" };
+	}
 	if (p.apiKeyEnv === undefined) return { type: "api-key", apiKey: "none", source: "none" };
 	const fromEnv = process.env[p.apiKeyEnv];
 	if (fromEnv !== undefined) return { type: "api-key", apiKey: fromEnv, source: "env" };
-	const hint = providerId !== null ? `run \`kiso login ${providerId}\` or set the env var ${p.apiKeyEnv}` : `set the env var ${p.apiKeyEnv}`;
+	const hint =
+		providerId !== null
+			? `run \`kiso login ${providerId}\` or set the env var ${p.apiKeyEnv}`
+			: endpointId !== null
+				? `set the env var ${p.apiKeyEnv}, or run \`kiso login --endpoint ${endpointId.slice("endpoint:".length)}\``
+				: `set the env var ${p.apiKeyEnv}`;
 	throw new ConfigError(`model ${name}: unavailable — no credential: ${hint} (configs never store keys, only the env-var name)`);
 }
 
