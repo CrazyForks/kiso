@@ -63,6 +63,25 @@ async function collect(): Promise<AdapterEvent[]> {
 }
 
 describe("a failure AFTER the headers is retryable (openai-compat)", () => {
+	it("0.40.7: an error FRAME inside the stream is a transport failure — retryable, not `unknown`", async () => {
+		// the gateway's own words from finding-stream-error-frame-2026-09-17
+		reply = (res) => {
+			openStream(res);
+			res.write(`data: ${JSON.stringify({ error: { message: "Upstream stream ended before terminal chunk" } })}\n\n`);
+			res.end();
+		};
+		await expect(collect()).rejects.toMatchObject({ code: "network", retryable: true });
+	});
+
+	it("0.40.7: an error frame that SAYS the context is too long keeps that verdict — final, not retried", async () => {
+		reply = (res) => {
+			openStream(res);
+			res.write(`data: ${JSON.stringify({ error: { message: "This model's maximum context length is 131072 tokens" } })}\n\n`);
+			res.end();
+		};
+		await expect(collect()).rejects.toMatchObject({ code: "context_overflow", retryable: false });
+	});
+
 	it("a stream that ENDS with no finish_reason THROWS retryable rather than stopping the run", async () => {
 		// `[DONE]` and a clean `end()`: the most innocent-looking close a
 		// gateway can produce. The protocol still mandates a finish_reason,
