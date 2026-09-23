@@ -35,8 +35,9 @@ import type { AgentSession, Run } from "@vincemakes/kiso-runtime";
 import type { UserInputVia } from "@vincemakes/kiso-core";
 import { dispatch, type DispatchCtx, abortBangCommand } from "./dispatch.js";
 import { paintWindowTitle } from "./window-title.js";
-import { agentBaseUrl, agentModel, body, bodyLog, configuredWindow, dock, retryOnRow, retryShown, setRetryShown, floorOn, protectedFiles, upstreamOf, type LineInput } from "./state.js";
+import { agentBaseUrl, agentModel, body, bodyLog, configuredWindow, dock, retryOnRow, retryShown, setRetryShown, floorOn, protectedFiles, upstreamOf, VERSION, type LineInput } from "./state.js";
 import { attachImages } from "./attachments.js";
+import { installedVersion, staleVersionNotice } from "./stale-version.js";
 import { learnedWindowFor } from "./learned-windows.js";
 import { lookupContextWindow, lookupModelMetadata, type ContextWindowSource } from "@vincemakes/kiso-runtime/internal";
 import { addDontAskAgainRule, askPanel, fixHintFor, pendingAsk, resolveUncertains } from "./trust-ui.js";
@@ -1469,6 +1470,11 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 					stopSpinner();
 					paintIdle();
 					currentRun = null;
+					// 0.40.5: the kiso on disk may no longer be the one this
+					// session runs (an upgrade since it started) — said once per
+					// installed version (stale-version.ts).
+					const stale = staleVersionNotice(installedVersion(), VERSION, session.id);
+					if (stale !== null) body.notice(stale);
 					// round 8: a faux script that ran out of declared turns exits
 					// loudly with a non-zero status — never a silent status 0.
 					// round 4 (adversarial): the exhaustion is a CONTROLLED rejection of
