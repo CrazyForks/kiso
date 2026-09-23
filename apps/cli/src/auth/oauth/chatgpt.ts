@@ -17,7 +17,7 @@
  * endpoint — the Responses adapter is the second half of this step.
  */
 import { createServer } from "node:http";
-import type { LoginInteraction, OAuthCredential, OAuthFlow } from "./index.js";
+import { type LoginInteraction, type OAuthCredential, type OAuthFlow, RefreshRejectedError } from "./index.js";
 import { generatePkce, randomState } from "./pkce.js";
 
 export const CHATGPT = {
@@ -101,7 +101,10 @@ interface TokenSet {
 async function readTokenResponse(response: Response, operation: "exchange" | "refresh"): Promise<TokenSet> {
 	if (!response.ok) {
 		const text = await response.text().catch(() => "");
-		throw new Error(`ChatGPT sign-in: token ${operation} failed (${response.status})${text ? `: ${text.slice(0, 200)}` : ""}`);
+		const message = `ChatGPT sign-in: token ${operation} failed (${response.status})${text ? `: ${text.slice(0, 200)}` : ""}`;
+		// the endpoint's own refusal of the refresh token — the sign-in is over
+		if (operation === "refresh" && (response.status === 400 || response.status === 401)) throw new RefreshRejectedError(message);
+		throw new Error(message);
 	}
 	const json = (await response.json()) as { access_token?: unknown; refresh_token?: unknown; expires_in?: unknown };
 	if (typeof json.access_token !== "string" || typeof json.refresh_token !== "string" || typeof json.expires_in !== "number") {

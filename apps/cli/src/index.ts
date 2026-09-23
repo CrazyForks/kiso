@@ -2070,7 +2070,10 @@ async function main(): Promise<void> {
 					const lines = [`credentials: ${authPath()}${rows.length === 0 ? " (none stored)" : ""}`];
 					for (const [id, cred] of rows) {
 						if (cred.type === "api-key") lines.push(`  ${id.padEnd(10)} api-key ${maskSecret(cred.key)}  saved ${new Date(cred.savedAt).toISOString().slice(0, 10)}`);
-						else lines.push(`  ${id.padEnd(10)} oauth   ${cred.accountId ?? ""}  expires ${new Date(cred.expires).toISOString()}${cred.expires < Date.now() ? " (expired)" : ""}`);
+						else
+							lines.push(
+								`  ${id.padEnd(10)} oauth   ${cred.accountId ?? ""}  expires ${new Date(cred.expires).toISOString()}${cred.refreshRejectedAt !== undefined ? ` (renewal refused — run kiso login ${id})` : cred.expires < Date.now() ? " (expired — renews on use)" : ""}`,
+							);
 					}
 					const envs = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"].filter((k) => process.env[k] !== undefined);
 					lines.push(`env vars set: ${envs.length ? envs.join(", ") : "none"} (a stored credential owns its provider; env applies only when nothing is stored)`);

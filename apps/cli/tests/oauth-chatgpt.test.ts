@@ -13,6 +13,7 @@ import { generatePkce, randomState } from "../src/auth/oauth/pkce.js";
 import { CHATGPT, accountIdOf, chatgptFlow, createAuthorizationFlow, credentialFromTokens, decodeJwtPayload, parseAuthorizationInput, startCallbackServer } from "../src/auth/oauth/chatgpt.js";
 import { AuthError, deleteCredential, getCredential, setCredential } from "../src/auth/credentials.js";
 import { FRESH_WINDOW_MS, ensureFresh } from "../src/auth/refresh.js";
+import { RefreshRejectedError } from "../src/auth/oauth/index.js";
 import { createHash } from "node:crypto";
 
 const jwt = (payload: Record<string, unknown>): string => `h.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.s`;
@@ -189,6 +190,15 @@ describe("the whole flow against local doubles", () => {
 		expect(after.accountId).toBe("acct-123");
 		tokens.fail(401);
 		await expect(chatgptFlow.refresh(before, tokens.url)).rejects.toThrow(/token refresh failed \(401\)/);
+		// 0.40.7: 400 and 401 are the endpoint REFUSING the refresh token;
+		// anything else is a failure to get an answer, and stays a plain error
+		await expect(chatgptFlow.refresh(before, tokens.url)).rejects.toBeInstanceOf(RefreshRejectedError);
+		tokens.fail(400);
+		await expect(chatgptFlow.refresh(before, tokens.url)).rejects.toBeInstanceOf(RefreshRejectedError);
+		tokens.fail(503);
+		const unavailable = await chatgptFlow.refresh(before, tokens.url).catch((e: unknown) => e);
+		expect(unavailable).toBeInstanceOf(Error);
+		expect(unavailable).not.toBeInstanceOf(RefreshRejectedError);
 		tokens.fail(null);
 	});
 });
@@ -238,6 +248,41 @@ describe("ensureFresh — when a refresh happens", () => {
 		await expect(ensureFresh("chatgpt", flow, path, now)).rejects.toThrow(/signed out of chatgpt.*kiso login chatgpt/);
 		expect((getCredential("chatgpt", path) as { access?: string }).access).toBe("A"); // the old credential stays until a login replaces it
 		await expect(ensureFresh("nothing", flow, path, now)).rejects.toThrow(AuthError);
+	});
+	it("0.40.7: a REFUSED refresh is remembered and never re-sent; a network failure is not remembered", async () => {
+		const now = 1_000_000_000_000;
+		setCredential("chatgpt", { type: "oauth", access: "A", refresh: "R", expires: now + 1000, accountId: "a", savedAt: 1 }, path);
+		let calls = 0;
+		const offline = fakeFlow(async () => {
+			calls += 1;
+			throw new Error("getaddrinfo ENOTFOUND");
+		});
+		await expect(ensureFresh("chatgpt", offline, path, now)).rejects.toThrow(/signed out of chatgpt/);
+		expect((getCredential("chatgpt", path) as { refreshRejectedAt?: number }).refreshRejectedAt, "offline is not a refusal").toBeUndefined();
+		const refused = fakeFlow(async () => {
+			calls += 1;
+			throw new RefreshRejectedError("token refresh failed (401)");
+		});
+		await expect(ensureFresh("chatgpt", refused, path, now)).rejects.toThrow(/signed out of chatgpt.*kiso login chatgpt/);
+		expect((getCredential("chatgpt", path) as { refreshRejectedAt?: number }).refreshRejectedAt).toBe(now);
+		expect((getCredential("chatgpt", path) as { access?: string }).access, "the entry stays until a login replaces it").toBe("A");
+		expect(calls).toBe(2);
+		await expect(ensureFresh("chatgpt", refused, path, now + 5000)).rejects.toThrow(/refused when kiso tried to renew it.*kiso login chatgpt/);
+		expect(calls, "a refused refresh token is not sent again").toBe(2);
+		// a new login replaces the entry, and the mark goes with it
+		setCredential("chatgpt", { type: "oauth", access: "B", refresh: "R2", expires: now + 3_600_000, accountId: "a", savedAt: 2 }, path);
+		expect(await ensureFresh("chatgpt", refused, path, now)).toMatchObject({ access: "B" });
+	});
+	it("0.40.7: a refusal that lands after a new login does not mark the new sign-in (R2a's generation rule)", async () => {
+		const now = 1_000_000_000_000;
+		setCredential("chatgpt", { type: "oauth", access: "A", refresh: "R", expires: now + 1000, accountId: "a", savedAt: 1 }, path);
+		const refusedAfterLogin = fakeFlow(async () => {
+			setCredential("chatgpt", { type: "oauth", access: "NEW", refresh: "RN", expires: now + 3_600_000, accountId: "a", savedAt: 2 }, path);
+			throw new RefreshRejectedError("token refresh failed (400)");
+		});
+		await expect(ensureFresh("chatgpt", refusedAfterLogin, path, now)).rejects.toThrow(AuthError);
+		expect(getCredential("chatgpt", path)).toMatchObject({ access: "NEW" });
+		expect((getCredential("chatgpt", path) as { refreshRejectedAt?: number }).refreshRejectedAt).toBeUndefined();
 	});
 	it("a concurrent refresh that already wrote a fresher token wins", async () => {
 		const now = 1_000_000_000_000;

@@ -33,6 +33,10 @@ export type Credential =
 			readonly expires: number;
 			readonly accountId?: string;
 			readonly savedAt: number;
+			/** 0.40.7: when the token endpoint REFUSED this credential's
+			 *  refresh token. Set only by that refusal (never by a network
+			 *  failure); a new login replaces the whole entry and so clears it. */
+			readonly refreshRejectedAt?: number;
 	  };
 
 export interface AuthFile {
