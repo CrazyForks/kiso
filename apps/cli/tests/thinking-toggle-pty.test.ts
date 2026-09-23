@@ -1,5 +1,6 @@
 /**
- * §2.3 — ctrl+t folds the thinking blocks, and folds them back.
+ * §2.3 — ctrl+t hides the thinking blocks, and shows them again (0.40.6: one
+ * italic line each, remembered — v0406-thinking-pref-pty.test.ts).
  *
  * On a terminal a completed thinking block is full paragraphs, indented
  * one column deeper than prose (DC-47). That is the right default — the
@@ -56,10 +57,9 @@ describe("§2.3 — ctrl+t folds the committed thinking blocks", () => {
 		// ① the default: the thinking reached the screen as its own words
 		expect(out, "the block rendered in full").toContain("leaves nothing behind");
 
-		// ② the fold: foldThinking's shape — the leading ellipsis, the
-		//    first 100 characters, and the way back to the whole thing
-		expect(out, "the folded line carries its own way back").toContain("/think");
-		expect(out, "and it is the first 100 characters").toContain("Weighing the two shapes for this.");
+		// ② the fold — 0.40.6 (declared re-pin): hidden is one italic
+		//    line, `thinking… · /think`, no longer the first 100 characters
+		expect(out, "the hidden line carries its own way back").toContain("thinking… · /think");
 
 		// ③ the answer is untouched by either press — the toggle is about
 		//    the reasoning, never the prose beside it

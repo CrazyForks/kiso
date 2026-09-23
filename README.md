@@ -67,7 +67,7 @@ Say what you want done. The model has six tools — read, list, search, write, e
 | `alt+enter` | stop the run and send this instead |
 | `@` | reference a file |
 | `ctrl+o` | expand / collapse tool output |
-| `ctrl+t` | fold / unfold thinking |
+| `ctrl+t` | hide / show thinking (remembered) |
 | `ctrl+r` | the full transcript |
 | `ctrl+g` | edit the prompt in `$EDITOR` |
 | `ctrl+x` | copy the last answer |

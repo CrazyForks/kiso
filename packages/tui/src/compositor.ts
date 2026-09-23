@@ -329,8 +329,9 @@ export class Body {
 	#lastTool: { name: string; input: Record<string, unknown>; result: { content: string; isError: boolean } } | null = null;
 	#pendingCalls = new Map<string, { name: string; input: Record<string, unknown>; result: { content: string; isError: boolean } }>();
 	#pipeBuf = ""; // the passthrough's thinking buffer
-	// §2.3 — the ctrl+t switch. A block that completes AFTER the press
-	// inherits it, so the session stays one way up rather than mixing.
+	// §2.3 / 0.40.6 — the ctrl+t switch: thinking hidden (and remembered by
+	// the CLI). A block that opens or completes AFTER the press inherits it,
+	// so the session stays one way up rather than mixing.
 	#thinkingFolded = false;
 	/** TUI2-MD ⑤ — the markdown scanner of the message currently
 	 *  streaming, and the cell index its first block landed at. Null
@@ -501,7 +502,9 @@ export class Body {
 		if (last !== undefined && last.kind === "thinking" && !last.done) {
 			last.text += text;
 		} else {
-			this.#cells.push({ kind: "thinking", text, done: false, turn: this.#turns.length - 1 });
+			// 0.40.6: a block opened while thinking is hidden is hidden from its
+			// first character — the text is never streamed to the screen.
+			this.#cells.push({ kind: "thinking", text, done: false, turn: this.#turns.length - 1, folded: this.#thinkingFolded });
 			// R7 (owner-ruled 2026-08-31): thinking is WORDS, not work — a
 			// cell like prose.
 			const t0 = this.#turns[this.#turns.length - 1];
@@ -1577,7 +1580,15 @@ export class Body {
 		return this.#expandedAll;
 	}
 
-	/** §2.3 — ctrl+t: the committed thinking blocks fold, and fold back.
+	/** §2.3 — ctrl+t: thinking hidden, and shown again.
+	 *
+	 *  0.40.6 (the owner, 2026-09-23): hidden is ONE italic line per block,
+	 *  live and settled alike — `thinking…` while it runs, `thinking… ·
+	 *  /think` once it settles — and the choice is remembered (the CLI
+	 *  writes it to preferences.json; `setThinkingHidden` restores it at
+	 *  start). It used to fold only SETTLED blocks, into a 100-character
+	 *  preview, while an open block kept streaming its text: the part the
+	 *  owner wanted gone was exactly the part it left.
 	 *
 	 *  DC-50's mechanism exactly: one boolean, then the session is printed
 	 *  again, so the blocks ALREADY on screen obey the switch rather than
@@ -1590,11 +1601,27 @@ export class Body {
 	 *  either, which is the same exemption `toggleExpanded` states for a
 	 *  card that is still growing. */
 	toggleThinking(): void {
-		this.#thinkingFolded = !this.#thinkingFolded;
+		this.setThinkingHidden(!this.#thinkingFolded);
+	}
+
+	/** 0.40.6: the thinking display, set — at start from the remembered
+	 *  choice, and by ctrl+t. Every thinking block obeys it, the open one
+	 *  included; the session is reprinted only when something is on it. */
+	setThinkingHidden(hidden: boolean): void {
+		this.#thinkingFolded = hidden;
+		let any = false;
 		for (const cell of this.#cells) {
-			if (cell.kind === "thinking" && cell.done) cell.folded = this.#thinkingFolded;
+			if (cell.kind === "thinking") {
+				cell.folded = hidden;
+				any = true;
+			}
 		}
-		this.#reprint();
+		if (any) this.#reprint();
+	}
+
+	/** 0.40.6: whether thinking is hidden — for the preference and /settings. */
+	thinkingHidden(): boolean {
+		return this.#thinkingFolded;
 	}
 
 	/** W18: the status row's right-aligned hint is part of the status

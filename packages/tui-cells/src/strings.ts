@@ -540,7 +540,7 @@ const HELP_TABLE: readonly (readonly [string, string])[] = [
 	// looking for when they look here, even though `!` is not one.
 	// §2.3: the switch belongs beside ctrl+o's job, and a gesture the
 	// sheet does not name is a gesture nobody uses (DC-30, DC-36).
-	["ctrl+t", "fold the thinking blocks, and fold them back"],
+	["ctrl+t", "hide thinking to one line, and show it again (remembered)"],
 	// §2.4: the composer, in your own editor. It names the variables
 	// because that is what a reader has to set for it to work.
 	["ctrl+g", "edit the composer in $VISUAL or $EDITOR — the text comes back unsent"],

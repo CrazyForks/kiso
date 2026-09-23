@@ -16,6 +16,7 @@ import { agentBaseUrl, currentProfileName, setCurrentProfileName, currentModelNa
 import { adapterOptionsFor } from "./auth/adapter-options.js";
 import { profileProviderLabel, providerLabel } from "./provider-label.js";
 import { installedVersion, versionStatusLine } from "./stale-version.js";
+import { setPreference } from "./preferences.js";
 import { queuedSwitchLines } from "./state.js";
 import { contextWindowTokens, microcompactThresholdFor, startStatusSpinner, statedContextWindow, windowSourceNote } from "./chat.js";
 import { authForProfile, directWriteProfile, profileAvailable, resolveContextWindow, unavailableReason, type ModelProfile } from "./config.js";
@@ -422,18 +423,15 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 		return;
 	}
 	if (trimmed === "\x14think") {
-		// §2.3 — ctrl+t folds the committed thinking blocks, and folds them
-		// back. DC-50's mechanism, not a second one: one boolean, then the
-		// session is reprinted, so the blocks already on screen obey the
-		// switch rather than only the next ones.
-		//
-		// The folded row is `foldThinking`'s, which is what the PIPE writes
-		// — so thinking has two renderings in the product and not three,
-		// and the pipe's byte-identity gate is this row's gate too.
-		//
-		// The live `thinking…` placeholder is NOT touched: it belongs to
-		// the live region, and this switch is about committed blocks.
+		// §2.3 / 0.40.6 — ctrl+t hides thinking (one italic line per block,
+		// the open one included) and shows it again. DC-50's mechanism: one
+		// boolean, then the session is reprinted, so the blocks already on
+		// screen obey the switch. The choice is REMEMBERED (preferences.json)
+		// — the owner, 2026-09-23, after the reference implementation's
+		// persisted toggle; shown stays the default. The pipe keeps its own
+		// one-line fold whatever the choice.
 		body.toggleThinking();
+		setPreference("thinking", body.thinkingHidden() ? "hidden" : "shown");
 		ctx.input.prompt();
 		return;
 	}

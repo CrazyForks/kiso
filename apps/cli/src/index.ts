@@ -63,6 +63,7 @@ import { isFirstRun, scaffoldFirstRun } from "./first-run.js";
 import { fauxSkip, readFauxScript } from "./faux-glue.js";
 import { chat, compactionDiscardedNotice, contextWindowTokens, displayCtxRatio, knownContextWindow, microcompactThresholdFor, statusModelLabel, unknownWindowNotice, windowLearnedNotice } from "./chat.js";
 import { recordLearnedWindow, useLearnedWindows } from "./learned-windows.js";
+import { preferences, usePreferences } from "./preferences.js";
 import { providerHost } from "./provider-label.js";
 import { adapterOptionsFor } from "./auth/adapter-options.js";
 import { loadProjectConfig, loadUserConfig, mergeConfigs, resolveAutoCompact, resolveContextWindow, resolveModel } from "./config.js";
@@ -1829,6 +1830,10 @@ async function main(): Promise<void> {
 			onDock: () => dock.redraw(), // v2d-B: the freeze scrolls the dock up — re-pin it
 		}),
 	);
+	// 0.40.6: the choices kiso remembers (preferences.json) — today ctrl+t's
+	// thinking display, restored before the first block can be drawn.
+	usePreferences();
+	body.setThinkingHidden(preferences().thinking === "hidden");
 	// REL-0152-D11: pasting an image sends no bytes, so an empty paste is
 	// the signal to go and look at the clipboard. What comes back is a
 	// PATH, which the turn's attachment scan then picks up exactly as it

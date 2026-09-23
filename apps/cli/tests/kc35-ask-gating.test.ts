@@ -125,7 +125,7 @@ describe("T-Q3 / slice ⓪ — the extraction changed no bytes", () => {
 			// beside the shell gestures because that is where a reader
 			// looks for a key, and a gesture the sheet does not name is a
 			// gesture nobody uses.
-			"ctrl+t      fold the thinking blocks, and fold them back",
+			"ctrl+t      hide thinking to one line, and show it again (remembered)", // 0.40.6 (declared re-pin)
 			// §2.4 — the same class again: the row names the variables because
 			// they are what a reader has to set for the key to do anything.
 			"ctrl+g      edit the composer in $VISUAL or $EDITOR — the text comes back unsent",
