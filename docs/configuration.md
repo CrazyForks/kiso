@@ -121,6 +121,27 @@ a broken config file fails loudly with the file named.
   levels and max output are facts about a route and are never inferred
   this way.
 
+- **Headers an endpoint needs (0.40.4).** `"headers"` on a profile sends
+  those headers with every request to its `baseUrl` — a gateway that
+  routes a conversation by a session header, say. `{session}` in a value
+  becomes the kiso session's id: one conversation keeps one id across
+  `/model` and `/resume`, and two conversations never share one. Names are
+  case-insensitive (kept lower-case). A credential header (`authorization`,
+  `proxy-authorization`, `x-api-key`, `api-key`, `cookie`) or a framing
+  header (`host`, `content-type`, `content-length`, `transfer-encoding`,
+  `connection`) is refused: the key comes from `apiKeyEnv` or
+  `kiso login`, never from the config file.
+
+  ```jsonc
+  "gw": {
+    "kind": "openai-compat",
+    "model": "some-model",
+    "baseUrl": "https://gateway.example/v1",
+    "apiKeyEnv": "GATEWAY_KEY",
+    "headers": { "x-gateway-session": "{session}" }
+  }
+  ```
+
 - **Sign-in and the OpenAI Responses dialect (OR-1, 0.31.0).**
   `kiso login <provider>` stores a credential in `~/.kiso/auth.json`
   (mode 0600): an API key for `anthropic` / `openai` / `deepseek` /

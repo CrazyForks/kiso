@@ -45,6 +45,10 @@ interface PendingToolCall {
 export interface OpenAICompatProviderConfig {
 	readonly apiKey?: string;
 	readonly baseUrl?: string;
+	/** Headers the endpoint needs on every request, as the profile names
+	 *  them (a gateway's session header, say). Sent as the SDK's default
+	 *  headers; the credential stays in `apiKey`, never here. */
+	readonly headers?: Readonly<Record<string, string>>;
 	/** MG-1 (A5): the adapter's replay identity — providerId as the runtime
 	 *  resolved it (deepseek / zai / openai / custom). Absent = "custom"
 	 *  with the baseUrl origin as the endpoint term. */
@@ -71,6 +75,7 @@ export function createOpenAICompatProvider(config: OpenAICompatProviderConfig = 
 	const client = new OpenAI({
 		...(config.apiKey !== undefined ? { apiKey: config.apiKey } : {}),
 		...(config.baseUrl !== undefined ? { baseURL: config.baseUrl } : {}),
+		...(config.headers !== undefined ? { defaultHeaders: { ...config.headers } } : {}),
 		// CX-1 F8: ONE retry authority — the kernel. The SDK's implicit two
 		// retries used to run beneath the kernel's budget (maxRetries = 0
 		// still made three requests) and beneath the request trace.

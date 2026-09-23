@@ -54,6 +54,7 @@ const PROFILE_SAMPLE: Record<string, unknown> = {
 	streamIdleMs: 30_000,
 	contextWindow: 123_456,
 	upstream: "https://upstream.invalid/v1",
+	headers: { "x-gateway-session": "{session}" },
 };
 
 const CONFIG_SAMPLE: Record<string, unknown> = {

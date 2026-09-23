@@ -65,6 +65,10 @@ export interface AgentDefinition {
 	 *  breakpoints) — OFF by default; the openai-compat path ignores it
 	 *  (that dialect's caching is server-automatic). Type-only additive. */
 	readonly promptCaching?: boolean;
+	/** Headers the endpoint needs on every request (a gateway's session
+	 *  header, say), passed to whichever provider builds the adapter.
+	 *  Never a credential — that is `apiKey` / `oauth`. Type-only additive. */
+	readonly headers?: Readonly<Record<string, string>>;
 	readonly maxTurns?: number;
 	readonly maxTokens?: number;
 	readonly temperature?: number;
@@ -317,10 +321,12 @@ export async function buildAdapter(
 		readonly promptCaching?: boolean;
 		readonly oauth?: () => Promise<{ readonly access: string; readonly accountId: string }>;
 		readonly promptCacheKey?: string;
+		readonly headers?: Readonly<Record<string, string>>;
 	} = {},
 ): Promise<Adapter> {
-	// resolveAdapter consumes only provider/apiKey/baseUrl from the
-	// definition — the rest is irrelevant for a bare adapter build.
+	// resolveAdapter consumes only the provider-side fields of the
+	// definition (credential, endpoint, caching, headers) — the rest is
+	// irrelevant for a bare adapter build.
 	return resolveAdapter({ provider, ...opts } as AgentDefinition);
 }
 
@@ -338,6 +344,7 @@ async function resolveAdapter(definition: AgentDefinition): Promise<Adapter> {
 				...(definition.apiKey !== undefined ? { apiKey: definition.apiKey } : {}),
 				...(definition.baseUrl !== undefined ? { baseUrl: definition.baseUrl } : {}),
 				...(definition.promptCaching !== undefined ? { promptCaching: definition.promptCaching } : {}),
+				...(definition.headers !== undefined ? { headers: definition.headers } : {}),
 			});
 		}
 		case "openai-compat": {
@@ -348,6 +355,7 @@ async function resolveAdapter(definition: AgentDefinition): Promise<Adapter> {
 			return createOpenAICompatProvider({
 				...(definition.apiKey !== undefined ? { apiKey: definition.apiKey } : {}),
 				...(definition.baseUrl !== undefined ? { baseUrl: definition.baseUrl } : {}),
+				...(definition.headers !== undefined ? { headers: definition.headers } : {}),
 				...(scope !== undefined
 					? { scope: { providerId: scope.providerId, ...(scope.endpoint !== undefined ? { endpoint: scope.endpoint } : {}) } }
 					: {}),
@@ -369,6 +377,7 @@ async function resolveAdapter(definition: AgentDefinition): Promise<Adapter> {
 				...(definition.oauth !== undefined ? { oauth: definition.oauth } : {}),
 				...(definition.baseUrl !== undefined ? { baseUrl: definition.baseUrl } : {}),
 				...(definition.promptCacheKey !== undefined ? { promptCacheKey: definition.promptCacheKey } : {}),
+				...(definition.headers !== undefined ? { headers: definition.headers } : {}),
 			});
 		}
 		default:

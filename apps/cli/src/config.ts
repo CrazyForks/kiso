@@ -84,6 +84,34 @@ export interface ModelProfile {
 	 * the registry looks for this model's window when `baseUrl` has no row.
 	 */
 	readonly upstream?: string;
+	/**
+	 * Headers the endpoint needs on every request — a gateway that routes a
+	 * conversation by a session header, say. `{session}` in a value becomes
+	 * the kiso session's id, so one conversation keeps one id across /model
+	 * and /resume, and two conversations never share one. Names are
+	 * lower-cased. A credential header is refused by name: a key never lives
+	 * in this file (`apiKeyEnv` and `kiso login` are the doors), and the
+	 * framing headers belong to the adapter.
+	 */
+	readonly headers?: Readonly<Record<string, string>>;
+}
+
+/** Header names a profile may not set: credentials (a key never lives in the
+ *  config file) and the framing the adapter owns. */
+const REFUSED_HEADERS = new Set(["authorization", "proxy-authorization", "x-api-key", "api-key", "cookie", "host", "content-length", "content-type", "transfer-encoding", "connection"]);
+
+function parseHeaders(field: string, raw: unknown, fail: (key: string, why: string) => never): Record<string, string> {
+	if (raw === null || typeof raw !== "object" || Array.isArray(raw)) fail(field, "expected an object of header names to string values");
+	const out: Record<string, string> = {};
+	for (const [name, value] of Object.entries(raw as Record<string, unknown>)) {
+		if (!/^[A-Za-z0-9-]+$/.test(name)) fail(`${field}.${name}`, "expected a header name of letters, digits and dashes");
+		const lower = name.toLowerCase();
+		if (REFUSED_HEADERS.has(lower)) fail(`${field}.${name}`, "a credential or framing header cannot be set here — the key comes from apiKeyEnv or kiso login");
+		if (lower in out) fail(`${field}.${name}`, "named twice (header names are case-insensitive)");
+		if (typeof value !== "string" || /[\r\n\0]/.test(value)) fail(`${field}.${name}`, "expected a one-line string value");
+		out[lower] = value;
+	}
+	return out;
 }
 
 export interface AutoCompactConfig {
@@ -236,6 +264,7 @@ export function parseConfig(text: string, source: string): KisoConfig {
 				fail(`models.${name}.contextWindow`, "expected a positive token count");
 			if (p.upstream !== undefined && (typeof p.upstream !== "string" || p.upstream.trim() === ""))
 				fail(`models.${name}.upstream`, "expected the URL or name of what this endpoint forwards to");
+			const headers = p.headers === undefined ? undefined : parseHeaders(`models.${name}.headers`, p.headers, fail);
 			models[name] = {
 				kind: p.kind as ProfileKind,
 				model: p.model as string,
@@ -245,6 +274,7 @@ export function parseConfig(text: string, source: string): KisoConfig {
 				...(typeof p.streamIdleMs === "number" ? { streamIdleMs: p.streamIdleMs } : {}),
 				...(typeof p.contextWindow === "number" ? { contextWindow: p.contextWindow } : {}),
 				...(typeof p.upstream === "string" ? { upstream: p.upstream.trim() } : {}),
+				...(headers !== undefined ? { headers } : {}),
 			};
 		}
 		out.models = models;

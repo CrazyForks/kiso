@@ -48,6 +48,23 @@ export interface AdapterOptions {
 	readonly promptCaching?: boolean;
 	readonly oauth?: () => Promise<{ readonly access: string; readonly accountId: string }>;
 	readonly promptCacheKey?: string;
+	readonly headers?: Readonly<Record<string, string>>;
+}
+
+/** The profile's headers with `{session}` replaced by the session id. A
+ *  header that names `{session}` when there is no session (`kiso sessions`,
+ *  which streams nothing) is left out, never sent with the placeholder in
+ *  it. Undefined when nothing is left. */
+export function expandProfileHeaders(headers: Readonly<Record<string, string>> | undefined, sessionId: string | undefined): Readonly<Record<string, string>> | undefined {
+	if (headers === undefined) return undefined;
+	const out: Record<string, string> = {};
+	for (const [name, value] of Object.entries(headers)) {
+		if (value.includes("{session}")) {
+			if (sessionId === undefined) continue;
+			out[name] = value.split("{session}").join(sessionId);
+		} else out[name] = value;
+	}
+	return Object.keys(out).length === 0 ? undefined : out;
 }
 
 export function adapterOptionsFor(profile: ModelProfile, auth: AdapterAuth, sessionId?: string): AdapterOptions {
@@ -61,6 +78,7 @@ export function adapterOptionsFor(profile: ModelProfile, auth: AdapterAuth, sess
 	// own environment variable, and a profile with no baseUrl then sent the
 	// stored vendor key wherever that variable pointed.
 	const url = effectiveBaseUrl(profile.kind, profile.baseUrl);
+	const headers = expandProfileHeaders(profile.headers, sessionId);
 	return {
 		...credential,
 		...(url !== undefined ? { baseUrl: url } : {}),
@@ -71,5 +89,9 @@ export function adapterOptionsFor(profile: ModelProfile, auth: AdapterAuth, sess
 		// cache.
 		...(sessionId !== undefined ? { promptCacheKey: sessionId } : {}),
 		...(profile.promptCaching !== undefined ? { promptCaching: profile.promptCaching } : {}),
+		// The endpoint's own headers (a gateway's session header, say), with
+		// the session id where the profile wrote `{session}` — the same id
+		// as the cache key above, so one conversation is one lane end to end.
+		...(headers !== undefined ? { headers } : {}),
 	};
 }

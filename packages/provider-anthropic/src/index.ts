@@ -24,6 +24,10 @@ import { connectionFailure, mapApiError, parseRetryAfter, streamFailure } from "
 export interface AnthropicProviderConfig {
 	readonly apiKey?: string;
 	readonly baseUrl?: string;
+	/** Headers the endpoint needs on every request, as the profile names
+	 *  them (a gateway's session header, say). Sent as the SDK's default
+	 *  headers; the credential stays in `apiKey`, never here. */
+	readonly headers?: Readonly<Record<string, string>>;
 	/** PH-1c.1: opt-in prompt caching (see AnthropicAdapterOptions). */
 	readonly promptCaching?: boolean;
 }
@@ -39,6 +43,7 @@ export function createAnthropicProvider(config: AnthropicProviderConfig = {}): A
 	const client = new Anthropic({
 		...(config.apiKey !== undefined ? { apiKey: config.apiKey } : {}),
 		...(config.baseUrl !== undefined ? { baseURL: config.baseUrl } : {}),
+		...(config.headers !== undefined ? { defaultHeaders: { ...config.headers } } : {}),
 		// CX-1 F8: ONE retry authority — the kernel (see the openai factory).
 		maxRetries: 0,
 	});
