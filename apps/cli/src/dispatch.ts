@@ -12,9 +12,10 @@ import type { AgentSession } from "@vincemakes/kiso-runtime";
 import { MODES, MODE_NOTE, OFFERED_MODES, getMode, setMode } from "./mode.js";
 import { clipboardWrite, lastAnswer } from "./clipboard.js";
 import { protectedBangReason, protectedShellVerdict } from "./protected-shell.js";
-import { agentBaseUrl, currentProfileName, setCurrentProfileName, currentModelName, agentModel, body, bodyLog, codingToolOptions, protectedFiles, kisoHome, configModels, dock, lastBinding, loadedSkillsCatalog, mergedConfig, readContextLedger, retryOnRow, sessionsDir, setAgentModel, setConfiguredWindow, setCurrentModelName, setModelChoice, setRetryShown, upstreamOf, type LineInput , setLastBinding } from "./state.js";
+import { agentBaseUrl, currentProfileName, setCurrentProfileName, currentModelName, agentModel, body, bodyLog, codingToolOptions, protectedFiles, kisoHome, configModels, dock, lastBinding, loadedSkillsCatalog, mergedConfig, readContextLedger, retryOnRow, sessionsDir, setAgentModel, setConfiguredWindow, setCurrentModelName, setModelChoice, setRetryShown, upstreamOf, VERSION, type LineInput , setLastBinding } from "./state.js";
 import { adapterOptionsFor } from "./auth/adapter-options.js";
 import { profileProviderLabel, providerLabel } from "./provider-label.js";
+import { installedVersion, versionStatusLine } from "./stale-version.js";
 import { queuedSwitchLines } from "./state.js";
 import { contextWindowTokens, microcompactThresholdFor, startStatusSpinner, statedContextWindow, windowSourceNote } from "./chat.js";
 import { authForProfile, directWriteProfile, profileAvailable, resolveContextWindow, unavailableReason, type ModelProfile } from "./config.js";
@@ -557,6 +558,9 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 			// variable; until then, a label that cannot lie.)
 			const profileOf = currentProfileName === null ? "" : ` · profile ${currentProfileName}`;
 			bodyLog(`model ${agentModel}${providerLabel(agentBaseUrl, upstreamOf(agentBaseUrl))}${profileOf}`);
+			// 0.40.5: the version this session RUNS, and the installed one when
+			// an upgrade (or a rollback) since start-up made them differ.
+			bodyLog(versionStatusLine(installedVersion(), VERSION));
 			ctx.input.prompt();
 		});
 		return;

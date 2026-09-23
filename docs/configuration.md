@@ -16,6 +16,13 @@ sections are the short form of this page.
 
 Node **>= 22** (the OpenAI-compat provider and the CLI declare it in `engines`).
 
+**After an upgrade, restart the sessions that were open.** A running
+session keeps the code it started with; `kiso --version` in another shell
+prints the version on disk, not the one the session runs. Since 0.40.5 a
+session notices: after a turn it says once `✦ kiso <new> is installed —
+this session runs <old>; exit and resume it (kiso resume <id>) to use it`,
+and `/status` names both versions until it is restarted.
+
 ## Model configuration (`~/.kiso/config.json`, 0.1.23)
 
 The config surface (ADR-0045) holds named model profiles — schema v1,
