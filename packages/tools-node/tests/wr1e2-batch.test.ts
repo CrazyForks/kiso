@@ -6,9 +6,11 @@
  * before publish. What changes is the SHAPE: one expectedRevision, N
  * disjoint hunks, one postimage, one atomic publish, one new token.
  *
- * Hunk semantics (P0, frozen before GREEN): every hunk resolves
- * against the SAME snapshot expectedRevision validated — never against
- * earlier hunks' output. Exactly-once literal match per hunk (ACI-2); all
+ * Hunk semantics (P0, frozen before GREEN; ACI-3 supersedes the first
+ * sentence): every hunk resolves against the SAME snapshot
+ * expectedRevision validated — never against earlier hunks' output.
+ * Since ACI-3 the hunks apply IN ORDER, each against the result of the
+ * ones before it, still all or nothing. Exactly-once literal match per hunk (ACI-2); all
  * spans determined before staging; overlaps refuse (duplicate searches
  * both resolve to that same one place and therefore overlap — never silently
  * retargeted). Shape errors (mixed forms, empty, >32) are
@@ -69,14 +71,17 @@ describe("WR-1E2 — one snapshot, N disjoint hunks, one publish", () => {
 		expect(readFileSync(join(root, "f.ts"), "utf8")).toBe(ORIGINAL);
 	});
 
-	it("④ overlapping spans refuse — duplicate searches resolve to the SAME one place, never a silent retarget", async () => {
+	it("④ a duplicate search never silently retargets — after hunk 1 its text is gone, and the call refuses whole", async () => {
+		// ACI-3 (declared): hunks now apply IN ORDER, so the duplicate is
+		// refused because hunk 2 no longer finds "alpha" — not as an
+		// "overlap" against one snapshot. Still nothing is written.
 		const { root, edit } = ws();
 		const dup = await edit.execute(
 			{ path: "f.ts", expectedRevision: rev(ORIGINAL), edits: [{ search: "alpha", replace: "A" }, { search: "alpha", replace: "B" }] },
 			undefined as never,
 		);
 		expect(kindOf(dup)).toBe("precondition");
-		expect(dup.content).toContain("overlap");
+		expect(dup.content.split("\n")[0]).toContain("(hunk 2, after hunk 1 applied)");
 		const cross = await edit.execute(
 			{ path: "f.ts", expectedRevision: rev(ORIGINAL), edits: [{ search: "alpha one", replace: "X" }, { search: "one\nbeta", replace: "Y" }] },
 			undefined as never,
@@ -85,15 +90,18 @@ describe("WR-1E2 — one snapshot, N disjoint hunks, one publish", () => {
 		expect(readFileSync(join(root, "f.ts"), "utf8")).toBe(ORIGINAL);
 	});
 
-	it("⑤ stale expectedRevision refuses BEFORE any hunk classification", async () => {
+	it("⑤ a stale expectedRevision refuses FIRST — the staleness is the headline, and nothing is applied", async () => {
+		// ACI-3 (declared): below the headline the refusal now reports where
+		// each hunk stands in the file as it is — reported, never applied.
 		const { root, edit } = ws();
 		const r = await edit.execute(
 			{ path: "f.ts", expectedRevision: rev("SOMETHING ELSE"), edits: [{ search: "NOPE", replace: "A" }] },
 			undefined as never,
 		);
 		expect(kindOf(r)).toBe("precondition");
-		expect(r.content).toContain("changed since");
-		expect(r.content).not.toContain("hunk");
+		expect(r.content.split("\n")[0]).toContain("changed since");
+		expect(r.content.split("\n")[0]).not.toContain("hunk");
+		expect(r.content).toContain("hunk 1: not found");
 		expect(readFileSync(join(root, "f.ts"), "utf8")).toBe(ORIGINAL);
 	});
 

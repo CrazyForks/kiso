@@ -33,7 +33,7 @@ import { strippedShellEnv } from "./secret-env.js";
 import { contentRevision, normalizeRevision, postEffectEscape, precondition, publishNewFile, revalidateBeforeRename } from "./wr1.js";
 import { isProtectedPath, protectedIdentity, protectedRefusalText, readUnlessProtected } from "./protected.js";
 import { CORPUS_MAX_DEPTH, globToRegExp, walkCorpus } from "./corpus.js";
-import { describeSearchMiss } from "./search-miss.js";
+import { describeSearchMiss, regionForSearch } from "./search-miss.js";
 
 /**
  * TUI2-R1 (C) — THE SHELL PROGRESS SIDECAR.
@@ -1030,11 +1030,49 @@ function describeMatchLines(text: string, offsets: readonly number[], exhaustive
 	return `${shown.length === 1 && tail === "" ? "line" : "lines"} ${shown.join(", ")}${tail}`;
 }
 
+/**
+ * ACI-3 — a stale citation's refusal, made retry-ready: where each hunk
+ * stands in the file AS IT IS, applied in order the way the edit would
+ * apply them. On the owner's disk 102 refusals were "changed since": 41
+ * cited a revision older than one they had already been shown, 40 cited
+ * one no tool had returned in the session, 21 met a real outside change.
+ * Every one was followed by a read. A hunk that still matches once needs
+ * nothing more than the new revision; one that does not gets the text
+ * where it should land. At most three regions: the rest are named.
+ */
+function staleReport(text: string, hunks: readonly { search: string; replace: string }[], single: boolean): string {
+	const out = ["the file as it is now:"];
+	let running = text;
+	let regions = 0;
+	for (let i = 0; i < hunks.length; i += 1) {
+		const h = hunks[i]!;
+		const name = single ? "the search" : `hunk ${i + 1}`;
+		const { count, offsets } = occurrencesOf(running, h.search);
+		if (count === 1) {
+			out.push(`  ${name}: matches once, ${describeMatchLines(running, offsets, true)}`);
+			running = running.slice(0, offsets[0]!) + h.replace + running.slice(offsets[0]! + h.search.length);
+			continue;
+		}
+		if (count > 1) {
+			out.push(`  ${name}: matches ${count} places (${describeMatchLines(running, offsets, count <= ACI2_OFFSETS_KEPT)}) — make it unique`);
+			continue;
+		}
+		const miss = describeSearchMiss(running, h.search);
+		out.push(`  ${name}: not found${miss ? `\n${miss.replace(/^/gm, "  ")}` : ""}`);
+		if (regions >= 3) continue;
+		const region = regionForSearch(running, h.search);
+		if (region === null) continue;
+		regions += 1;
+		out.push(`    lines ${region.from}–${region.to}:\n${region.body}`);
+	}
+	return out.join("\n");
+}
+
 export function editFileTool(opts: WorkspaceToolsOptions): Tool<{ path: string; search?: string; replace?: string; edits?: readonly { search: string; replace: string }[]; expectedRevision?: string }> {
 	return defineTool<{ path: string; search?: string; replace?: string; edits?: readonly { search: string; replace: string }[]; expectedRevision?: string }>({
 		name: "edit_file",
 		description:
-			"Edit a workspace file at its latest revision (expectedRevision). ONE of: search+replace (must match exactly once), or edits (1-32 disjoint hunks resolved against the same snapshot, applied atomically).",
+			"Edit a file at its latest revision (expectedRevision): search+replace (must match once) OR edits (1-32 hunks, applied in order, all or nothing). A refusal shows the current text and ends on its [rev:X].",
 		parameters: {
 			type: "object",
 			properties: {
@@ -1043,10 +1081,13 @@ export function editFileTool(opts: WorkspaceToolsOptions): Tool<{ path: string; 
 				replace: { type: "string", description: "Replacement text (single-hunk form)" },
 				edits: {
 					type: "array",
-					description: "Batch form: 1-32 {search, replace} hunks, every search resolved against the SAME snapshot",
+					description: "Batch form: 1-32 {search, replace} hunks, applied in order",
 					items: {
 						type: "object",
-						properties: { search: { type: "string" }, replace: { type: "string" } },
+						// ACI-3: `expectedRevision` inside a hunk is tolerated and ignored —
+						// the call's own governs (5 refusals on the owner's disk, every
+						// one with the top-level token present too).
+						properties: { search: { type: "string" }, replace: { type: "string" }, expectedRevision: { type: "string" } },
 						required: ["search", "replace"],
 						additionalProperties: false,
 					},
@@ -1101,7 +1142,7 @@ export function editFileTool(opts: WorkspaceToolsOptions): Tool<{ path: string; 
 			let preservedMode: number | undefined;
 			try {
 				if (!existsSync(full)) {
-					return precondition(`edit_file: ${path} no longer exists — it was deleted since you read it`);
+					return precondition(`edit_file: ${path} does not exist — to create it, use write_file with expectedRevision:"absent" (if you read it before, it was deleted since)`);
 				}
 				// WR-1: ONE byte snapshot feeds BOTH the validation and the
 				// mutation — no internal window between what was checked and
@@ -1126,31 +1167,39 @@ export function editFileTool(opts: WorkspaceToolsOptions): Tool<{ path: string; 
 				const bytes = readUnlessProtected(full, guard);
 				if (bytes === null) return precondition(protectedRefusalText("edit_file", path));
 				const current = contentRevision(bytes);
-				if (current !== expectedRevision) {
-					return precondition(`edit_file: ${path} changed since ${expectedRevision} — read it again and cite its [rev:…] line, then re-apply the change`);
-				}
 				const text = bytes.toString("utf8");
-				// WR-1E2: EVERY hunk resolves against THIS snapshot — never the
-				// output of an earlier hunk. All spans are known before any
-				// staging; overlaps refuse. Since ACI-2 a non-unique search is
-				// already refused above, so the overlap left to catch is two
-				// hunks aimed at the same unique text — never retargeted.
-				const spans: { start: number; end: number; replace: string }[] = [];
+				if (current !== expectedRevision) {
+					// ACI-3: the refusal carries the file as it is where each hunk
+					// should land, and its current revision last — the retry needs
+					// no read. The headline is unchanged (bench parsers read it).
+					return precondition(
+						`edit_file: ${path} changed since ${expectedRevision} — the file as it is now is below; re-apply the change against it, citing the [rev:…] on the last line\n${staleReport(text, hunks, edits === undefined)}\n[${current}]`,
+					);
+				}
+				// ACI-3 (superseding WR-1E2's one-snapshot rule): the hunks apply
+				// IN ORDER, each against the result of the ones before it — the
+				// way a person writes a second change after the first, and the
+				// reference implementation's multi-edit. 57 refusals on the
+				// owner's disk were "two hunks overlap": a second hunk written
+				// against the first one's output. Still all or nothing: nothing is
+				// written unless every hunk resolves, and each must match exactly
+				// once in the text it meets (ACI-2).
+				let edited = text;
 				for (let i = 0; i < hunks.length; i += 1) {
 					const h = hunks[i]!;
-					const { count, offsets } = occurrencesOf(text, h.search);
+					const { count, offsets } = occurrencesOf(edited, h.search);
+					const which = hunks.length === 1 && edits === undefined ? "" : i === 0 ? " (hunk 1)" : ` (hunk ${i + 1}, after ${i === 1 ? "hunk 1" : `hunks 1–${i}`} applied)`;
 					if (count === 0) {
 						// WR-1A ④: the WORLD lacks the pattern (the input is
 						// fine) and nothing ran — precondition; the note never
-						// rides an edit that wrote nothing.
-						// The headline says WHAT failed; the detail says WHERE.
-						// A refusal that names the divergence costs one line
-						// here and saves a whole file read at the caller.
-						const headline = hunks.length === 1 && edits === undefined
-							? `edit_file: pattern not found in ${path}`
-							: `edit_file: pattern not found in ${path} (hunk ${i + 1})`;
-						const detail = describeSearchMiss(text, h.search);
-						return precondition(detail ? `${headline}\n${detail}` : headline);
+						// rides an edit that wrote nothing. The headline says WHAT
+						// failed; the detail says WHERE; ACI-3: the region is the
+						// text the hunk met, and the file's revision ends it.
+						const detail = describeSearchMiss(edited, h.search);
+						const region = regionForSearch(edited, h.search);
+						const seen = i === 0 ? "the file now has" : `the text hunk ${i + 1} met`;
+						const block = region === null ? "" : `\n${seen}, lines ${region.from}–${region.to}:\n${region.body}`;
+						return precondition(`edit_file: pattern not found in ${path}${which}${detail ? `\n${detail}` : ""}${block}\n[${current}]`);
 					}
 					// ACI-2: more than one resolution is a QUESTION, not an edit.
 					// Taking the first one wrote the wrong place and reported
@@ -1158,30 +1207,17 @@ export function editFileTool(opts: WorkspaceToolsOptions): Tool<{ path: string; 
 					// have. The refusal carries the count and the lines so the
 					// call can be fixed without reading the file again.
 					if (count > 1) {
-						const lines = describeMatchLines(text, offsets, count <= ACI2_OFFSETS_KEPT);
-						const where = hunks.length === 1 && edits === undefined ? lines : `hunk ${i + 1}, ${lines}`;
+						const lines = describeMatchLines(edited, offsets, count <= ACI2_OFFSETS_KEPT);
+						const where = which === "" ? lines : `${which.slice(2, -1)}, ${lines}`;
 						return precondition(
-							`edit_file: pattern matches ${count} places in ${path} (${where}) — include enough surrounding text to make it unique`,
+							`edit_file: pattern matches ${count} places in ${path} (${where}) — include enough surrounding text to make it unique\n[${current}]`,
 						);
 					}
-					spans.push({ start: offsets[0]!, end: offsets[0]! + h.search.length, replace: h.replace });
-				}
-				const bySpan = [...spans].sort((a, b) => a.start - b.start);
-				for (let i = 1; i < bySpan.length; i += 1) {
-					if (bySpan[i]!.start < bySpan[i - 1]!.end) {
-						return precondition(`edit_file: two hunks overlap in ${path} — make the searches disjoint`);
-					}
+					edited = edited.slice(0, offsets[0]!) + h.replace + edited.slice(offsets[0]! + h.search.length);
 				}
 				// E group: safe replacement — never rewrite a shared external inode via a hard link.
 				// round 8: the edited file keeps its mode.
 				preservedMode = statSync(full).mode & 0o7777;
-				// The postimage: replacements applied highest-offset-first, so
-				// earlier spans never shift later coordinates — deterministic
-				// under any hunk ORDER (one observed state, one postimage).
-				let edited = text;
-				for (const sp of [...bySpan].reverse()) {
-					edited = edited.slice(0, sp.start) + sp.replace + edited.slice(sp.end);
-				}
 				writeFileSync(tmp, edited, "utf8");
 				chmodSync(tmp, preservedMode);
 				// WR-1A ③: revalidate against the citation right before the
