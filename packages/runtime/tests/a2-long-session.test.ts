@@ -111,5 +111,5 @@ describe("A2 — the long-session gate: thirty-two fires in one run, the context
 			expect(sizes[k]!, `request ${k} after the first fire`).toBeLessThanOrEqual(bound);
 			if (k > 0) expect(sizes[k]!, `request ${k} grew past the one before it`).toBeLessThanOrEqual(sizes[k - 1]!);
 		}
-	});
+	}, 60_000); // 32 fires in one run: ~2s alone, past vitest's 5s default under the full suite's load
 });
