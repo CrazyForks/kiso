@@ -64,6 +64,7 @@ import { fauxSkip, readFauxScript } from "./faux-glue.js";
 import { chat, compactionDiscardedNotice, contextWindowTokens, displayCtxRatio, knownContextWindow, microcompactThresholdFor, statusModelLabel, unknownWindowNotice, windowLearnedNotice } from "./chat.js";
 import { recordLearnedWindow, useLearnedWindows } from "./learned-windows.js";
 import { preferences, usePreferences } from "./preferences.js";
+import { settingsLayers } from "./state.js";
 import { providerHost } from "./provider-label.js";
 import { adapterOptionsFor } from "./auth/adapter-options.js";
 import { loadProjectConfig, loadUserConfig, mergeConfigs, resolveAutoCompact, resolveContextWindow, resolveModel } from "./config.js";
@@ -780,6 +781,10 @@ async function makeAgent(sessionId: string | undefined, input?: LineInput, model
 	const userCfg = loadUserConfig();
 	const projectCfg = loadProjectConfig(process.cwd(), project !== null);
 	const merged = mergeConfigs(userCfg, projectCfg);
+	// 0.40.6: /settings names each value's layer from these
+	settingsLayers.user = userCfg;
+	settingsLayers.project = projectCfg;
+	settingsLayers.modelFlag = modelFlag;
 	const secretEnvNames = secretEnvNamesOf(merged.models ?? {});
 	const builtIn = await builtInLayer(user, proj, input !== undefined && process.stdin.isTTY ? askUi(input) : undefined, secretEnvNames);
 	setExtensionLists(builtIn, user, proj, [...builtIn, ...user, ...proj]);
@@ -1689,6 +1694,7 @@ async function main(): Promise<void> {
 			process.exit(2);
 		}
 		setMode(m);
+		settingsLayers.modeFlag = m;
 		args.splice(modeFlag, 2);
 	} else {
 		setMode(modeFromEnv() ?? loadUserConfig()?.mode ?? "default");

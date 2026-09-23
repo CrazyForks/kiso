@@ -510,6 +510,17 @@ export const queuedSwitchLines: string[] = [];
 /** E1: the extensions loaded by makeAgent — their names feed the banner. */
 /** 0.40.0: whether the catastrophe floor is on (floor.ts) — the user
  *  config's `floor`, read where the chain is assembled. */
+/** 0.40.6: what /settings needs to name each value's layer — the two config
+ *  files as read, the command-line flags as given, and whether /model
+ *  changed the binding in this session. */
+export const settingsLayers: {
+	user: import("./config.js").KisoConfig | null;
+	project: import("./config.js").KisoConfig | null;
+	modeFlag: string | undefined;
+	modelFlag: string | undefined;
+	modelSwitched: boolean;
+} = { user: null, project: null, modeFlag: undefined, modelFlag: undefined, modelSwitched: false };
+
 export let floorOn = true;
 export function setFloorOn(value: boolean): void {
 	floorOn = value;

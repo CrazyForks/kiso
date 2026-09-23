@@ -128,6 +128,7 @@
   "apps/cli/tests/update-line-onscreen-pty.test.ts",
   "apps/cli/tests/user-invoked-skills-pty.test.ts",
   "apps/cli/tests/v0406-model-rows-pty.test.ts",
+  "apps/cli/tests/v0406-settings.test.ts",
   "apps/cli/tests/v0406-thinking-pref-pty.test.ts",
   "apps/cli/tests/xp1-binding-change.test.ts",
   "apps/cli/tests/xp1-status-truth-pty.test.ts",

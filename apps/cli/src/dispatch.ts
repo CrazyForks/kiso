@@ -16,7 +16,10 @@ import { agentBaseUrl, currentProfileName, setCurrentProfileName, currentModelNa
 import { adapterOptionsFor } from "./auth/adapter-options.js";
 import { profileProviderLabel, providerLabel } from "./provider-label.js";
 import { installedVersion, versionStatusLine } from "./stale-version.js";
-import { setPreference } from "./preferences.js";
+import { preferences, setPreference } from "./preferences.js";
+import { settingsRows } from "./settings.js";
+import { floorOn, settingsLayers } from "./state.js";
+import { currentGround } from "@vincemakes/kiso-tui-cells/render";
 import { queuedSwitchLines } from "./state.js";
 import { contextWindowTokens, microcompactThresholdFor, startStatusSpinner, statedContextWindow, windowSourceNote } from "./chat.js";
 import { authForProfile, directWriteProfile, profileAvailable, resolveContextWindow, unavailableReason, type ModelProfile } from "./config.js";
@@ -519,6 +522,34 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 		});
 		return;
 	}
+	if (trimmed === "/settings") {
+		// 0.40.6 — what kiso runs with, each value's layer, and how to change
+		// it (settings.ts). Read-only: the config file stays the human's.
+		ctx.chainRef.current = ctx.chainRef.current.then(async () => {
+			const w = statedContextWindow();
+			const profile = currentProfileName;
+			bodyLog(
+				settingsRows({
+					user: settingsLayers.user,
+					project: settingsLayers.project,
+					env: process.env,
+					...(settingsLayers.modeFlag !== undefined ? { modeFlag: settingsLayers.modeFlag } : {}),
+					...(settingsLayers.modelFlag !== undefined ? { modelFlag: settingsLayers.modelFlag } : {}),
+					mode: getMode(),
+					model: { label: `${agentModel}${providerLabel(agentBaseUrl, upstreamOf(agentBaseUrl))}${profile === null ? "" : ` · profile ${profile}`}`, profile, switched: settingsLayers.modelSwitched },
+					ground: currentGround(),
+					floorOn,
+					window: windowSourceNote(w).replace(/^window /, ""),
+					thinkingHidden: body.thinkingHidden(),
+					thinkingRemembered: preferences().thinking !== undefined,
+					version: versionStatusLine(installedVersion(), VERSION).replace(/^version /, ""),
+				}).join("\n\n"),
+				"words",
+			);
+			ctx.input.prompt();
+		});
+		return;
+	}
 	if (trimmed === "/status") {
 		// B area: session id, durable event count, and the ~ context
 		// estimate — all read straight from the live session, nothing
@@ -808,6 +839,7 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 							setAgentModel(profile.model, profile.baseUrl);
 							setCurrentModelName(arg);
 							setCurrentProfileName(direct === null ? null : profName);
+							settingsLayers.modelSwitched = true;
 							// §2.5: the ONE source a reload reads for the model — a
 							// switch made here must survive the rebuild.
 							setModelChoice(arg);

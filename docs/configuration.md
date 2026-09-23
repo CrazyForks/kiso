@@ -23,6 +23,14 @@ session notices: after a turn it says once `✦ kiso <new> is installed —
 this session runs <old>; exit and resume it (kiso resume <id>) to use it`,
 and `/status` names both versions until it is restarted.
 
+**What is in force, and why (0.40.6).** `/settings` in a session lists
+each setting — the model, the mode, the theme, the floor, the window,
+compaction, project trust, the thinking display, the version — with its
+current value, the layer it came from (a flag, an environment variable,
+the project config, your config, a choice remembered from `ctrl+t`, or
+the default) and how to change it. It only reads: your config file stays
+yours to edit.
+
 ## Model configuration (`~/.kiso/config.json`, 0.1.23)
 
 The config surface (ADR-0045) holds named model profiles — schema v1,

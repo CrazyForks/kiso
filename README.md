@@ -81,6 +81,7 @@ Say what you want done. The model has six tools — read, list, search, write, e
 | `/model` | switch the model and its effort |
 | `/mode` | switch the approval mode |
 | `/status` | session id, context use, model and version |
+| `/settings` | the settings in force, where each came from, how to change it |
 | `/compact` | summarize the older conversation to free context |
 | `/resume` | switch to another session |
 | `/clear` | start a fresh session (the old one stays resumable) |
