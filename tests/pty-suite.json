@@ -193,6 +193,18 @@
   {
    "file": "apps/cli/tests/a2-cli-surfaces.test.ts",
    "reason": "spawns nothing. It calls compactionDiscardedNotice, unknownWindowNotice and statusModelLabel and asserts the strings they return. The classifier follows its import of ../src/state.js, which carries one execFileSync(\"git\", [\"ls-files\"]) for @-file completion; this test calls only setAgentModel, an assignment that cannot reach it. Verified: no child_process, no spawn, no pty helper in the file."
+  },
+  {
+   "file": "apps/cli/tests/usage-once-upstream.test.ts",
+   "reason": "spawns nothing. It calls callUsageMeter, usageFromEvent, parseConfig and the provider-label functions and asserts their values. The classifier follows its import of ../src/chat.js into ../src/state.js, which carries one execFileSync(\"git\", [\"ls-files\"]) for @-file completion; this test calls none of it. Verified: no child_process, no spawn, no pty helper in the file."
+  },
+  {
+   "file": "apps/cli/tests/cw1-window-by-identity.test.ts",
+   "reason": "spawns nothing. It calls the window chain (knownContextWindow, contextWindowTokens, statedContextWindow, windowSourceNote, windowLabel), the state setters and upstreamOf, and asserts their values. The classifier follows its import of ../src/chat.js into ../src/state.js, which carries one execFileSync(\"git\", [\"ls-files\"]) for @-file completion; this test calls none of it. Verified: no child_process, no spawn, no pty helper in the file."
+  },
+  {
+   "file": "apps/cli/tests/cw1-learned-window.test.ts",
+   "reason": "spawns nothing. It calls the learned-windows store (useLearnedWindows, recordLearnedWindow, learnedWindowFor) against mkdtemp files and the window chain (statedContextWindow, contextWindowTokens, windowSourceNote, windowLearnedNotice), and asserts their values. The classifier follows its import of ../src/chat.js into ../src/state.js, which carries one execFileSync(\"git\", [\"ls-files\"]) for @-file completion; this test calls none of it. Verified: no child_process, no spawn, no pty helper in the file."
   }
  ]
 }

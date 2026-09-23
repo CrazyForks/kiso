@@ -575,6 +575,80 @@ export function lookupModelMetadata(model: string, endpoint?: string): ModelMeta
 	return null;
 }
 
+/**
+ * CW-1 — names one set of weights answers to across routes, each a dated
+ * vendor statement. The key is the FOLDED name a route serves (vendor
+ * prefix off, lower case); the value names the registry row.
+ */
+const MODEL_ALIASES: Readonly<Record<string, { readonly is: string; readonly asOf: string; readonly source: string }>> = {
+	// The pricing table: `deepseek-flash` IS DeepSeek-V4.1-Flash. Gateways
+	// serve it by the version name (`deepseek-v4.1-flash`).
+	"deepseek-v4.1-flash": { is: "deepseek-flash", asOf: "2026-09-17", source: "https://api-docs.deepseek.com/quick_start/pricing/" },
+};
+
+/** CW-1: the aliases, for the gate that holds each one to a dated source
+ *  and a registered target. */
+export function modelAliases(): Readonly<Record<string, { readonly is: string; readonly asOf: string; readonly source: string }>> {
+	return MODEL_ALIASES;
+}
+
+/** CW-1: a model id reduced to the weights it names — `deepseek/DeepSeek-V4.1-Flash`
+ *  and `deepseek-v4.1-flash` are both `deepseek-flash`. A variant suffix
+ *  (`:free`) is NOT folded: a variant may serve a smaller window. */
+export function modelIdentity(model: string): string {
+	const folded = model.slice(model.lastIndexOf("/") + 1).toLowerCase();
+	return MODEL_ALIASES[folded]?.is ?? folded;
+}
+
+/** Where a resolved window came from — the source a display names. */
+export type ContextWindowSource = "route" | "upstream" | "model";
+
+export interface ResolvedContextWindow {
+	readonly tokens: number;
+	readonly source: ContextWindowSource;
+	/** the registry row's model id the figure was read from */
+	readonly from: string;
+}
+
+/**
+ * CW-1 (owner, 2026-09-23) — the context window for a route the registry
+ * has no row for.
+ *
+ * Rows are keyed by (model, endpoint) because a route can answer
+ * differently from the vendor — gpt-5.5 is 1,050,000 at the first-party
+ * API and 272,000 at the subscription backend. The same key made every
+ * forwarder, relay and gateway a miss: `deepseek-v4.1-flash` behind a local
+ * forwarder to a model gateway read `ctx ?`, and the tiers compacted a 1M model
+ * against the CLI's 200K fallback. A window belongs to the weights; a
+ * route can only cap it lower. In order:
+ *
+ *   route    — this model's row at this endpoint (lookupModelMetadata);
+ *   upstream — its row at the endpoint a forwarder names as its upstream;
+ *   model    — every row of the same model identity, at any endpoint;
+ *              where rows disagree, the SMALLEST — the one figure no row
+ *              contradicts.
+ *
+ * A null window falls through; after the last step, null. Only the window
+ * resolves this way: price, reasoning wire fields and max output are
+ * facts about a route and stay on lookupModelMetadata.
+ */
+export function lookupContextWindow(model: string, endpoint?: string, upstream?: string): ResolvedContextWindow | null {
+	const route = lookupModelMetadata(model, endpoint);
+	if (route !== null && route.capabilities.contextWindow !== null) return { tokens: route.capabilities.contextWindow, source: "route", from: route.model };
+	if (upstream !== undefined) {
+		const up = lookupModelMetadata(model, upstream);
+		if (up !== null && up.capabilities.contextWindow !== null) return { tokens: up.capabilities.contextWindow, source: "upstream", from: up.model };
+	}
+	const identity = modelIdentity(model);
+	let found: ResolvedContextWindow | null = null;
+	for (const entry of ENTRIES) {
+		const tokens = entry.capabilities.contextWindow;
+		if (tokens === null || modelIdentity(entry.model) !== identity) continue;
+		if (found === null || tokens < found.tokens) found = { tokens, source: "model", from: entry.model };
+	}
+	return found;
+}
+
 function originOf(endpoint: string): string {
 	try {
 		return new URL(endpoint).origin;

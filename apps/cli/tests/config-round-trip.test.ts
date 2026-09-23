@@ -53,6 +53,7 @@ const PROFILE_SAMPLE: Record<string, unknown> = {
 	promptCaching: true,
 	streamIdleMs: 30_000,
 	contextWindow: 123_456,
+	upstream: "https://upstream.invalid/v1",
 };
 
 const CONFIG_SAMPLE: Record<string, unknown> = {
@@ -143,5 +144,15 @@ describe("the parsed window REACHES the running program", () => {
 		// window, so `ctx ?` is the honest answer and must survive.
 		const out = statusRow({ p: profile({}) });
 		expect(out).toContain("ctx ~?");
+		expect(out).toContain("window unknown — compaction assumes 128K"); // CW-1 batch 2 (declared re-pin): the fallback is 128K, down from 200K
+	});
+
+	it("CW-1: a registered model at an unregistered endpoint gets the MODEL's window, said as inferred", () => {
+		// the owner's op profile, 2026-09-23: deepseek-v4.1-flash through a
+		// forwarder the registry has no row for read `ctx ?`
+		const out = statusRow({ p: profile({ model: "deepseek-v4.1-flash" }) });
+		expect(out).toMatch(/ctx ~\d+%/);
+		expect(out).not.toContain("ctx ~?");
+		expect(out).toContain("window 1M, inferred from the model (deepseek-flash) — not stated for this endpoint");
 	});
 });

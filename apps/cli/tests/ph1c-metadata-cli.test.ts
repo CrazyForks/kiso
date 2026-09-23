@@ -36,7 +36,7 @@ describe("PH-F15 — the window follows the live model", () => {
 		setAgentModel("gpt-4o");
 		expect(contextWindowTokens()).toBe(128_000);
 		setAgentModel("some-unregistered-model");
-		expect(contextWindowTokens()).toBe(200_000); // the default, not a guess
+		expect(contextWindowTokens()).toBe(128_000); // the default, not a guess — CW-1 batch 2 (declared re-pin): the fallback is 128K, down from 200K
 	});
 
 	it("OR-1: the window follows the live ENDPOINT too — gpt-5.5 is 1,050,000 at the first-party API and 272,000 at the subscription backend", () => {

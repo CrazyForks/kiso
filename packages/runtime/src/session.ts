@@ -45,6 +45,7 @@ import {
 } from "@vincemakes/kiso-core";
 import { executionLedger } from "./ledger.js";
 import { overflowBelt, type OverflowMeasure } from "./overflow-belt.js";
+import { windowLearner } from "./window-learner.js";
 import { assessTasks, type TaskAssessment } from "./task-assessment.js";
 
 /** TV-1A — the session-level evidence policy: the PURE projection defaults
@@ -454,8 +455,9 @@ export class AgentSession {
 		readonly signal?: AbortSignalLike;
 		readonly onProgress?: (progress: import("./summarize.js").SummaryProgress) => void;
 	}): Promise<{ readonly result: Awaited<ReturnType<typeof summarizeConversation>>; readonly path: "in-band" | "serialized" }> {
+		const learned = this.#learning(this.#adapter);
 		const common = {
-			adapter: this.#adapter,
+			adapter: learned,
 			model: this.#model,
 			maxOutputTokens: args.budget,
 			...(args.signal !== undefined ? { signal: args.signal } : {}),
@@ -469,7 +471,7 @@ export class AgentSession {
 			// The in-band call carries the run's whole context, so the overflow
 			// belt applies to it; the serialised fallback below is small, and
 			// its failures keep their own classification.
-			const inBandAdapter = overflowBelt(this.#adapter, () => this.overflowMeasure());
+			const inBandAdapter = overflowBelt(learned, () => this.overflowMeasure());
 			const result = await summarizeConversation({ ...common, adapter: inBandAdapter, messages: args.messages, inBand: args.inBand, ...(args.reasoning !== undefined ? { reasoning: args.reasoning } : {}) });
 			return { result, path: "in-band" };
 		} catch (err) {
@@ -636,6 +638,27 @@ export class AgentSession {
 	 */
 	setMicrocompactThreshold(thresholdTokens: number): void {
 		this.#microcompact = { thresholdTokens };
+	}
+
+	/** CW-1 batch 2: the adapter as a run or a summary uses it — a refusal
+	 *  that states a cap is learned for the binding in force NOW, the one
+	 *  this adapter belongs to (a /model mid-run must not receive it). */
+	#learning(adapter: Adapter): Adapter {
+		const at = { model: this.#model, baseUrl: this.#baseUrl };
+		return windowLearner(adapter, (tokens) => this.#learnWindow(tokens, at));
+	}
+
+	/** CW-1 batch 2: a route stated its cap. The in-run tiers take it at once
+	 *  — the kernel's one overflow compaction runs next and must aim at the
+	 *  real window, not past it — and only ever DOWN; the caller is told, to
+	 *  keep it for the next session and to say so. */
+	#learnWindow(tokens: number, at: { readonly model: string; readonly baseUrl: string | undefined }): void {
+		const tiers = this.#config.contextPolicy?.tiers;
+		if (at.model === this.#model && at.baseUrl === this.#baseUrl) {
+			const current = this.#tiersWindow ?? tiers?.windowTokens;
+			if (current === undefined || tokens < current) this.#tiersWindow = tokens;
+		}
+		tiers?.onWindowLearned?.({ tokens, model: at.model, ...(at.baseUrl !== undefined ? { baseUrl: at.baseUrl } : {}) });
 	}
 
 	/** ADR-0055 Amendment 2 (decision 3): the overflow belt's measure at send
@@ -863,7 +886,7 @@ export class AgentSession {
 	run(input: string | readonly import("@vincemakes/kiso-core").ContentBlock[], options?: { signal?: AbortSignalLike; source?: import("@vincemakes/kiso-core").MessageSource; via?: import("@vincemakes/kiso-core").UserInputVia }): Run {
 		this.ensureHealthy();
 		if (this.#profilePending) this.#recordProfile(); // XP-1: legacy revision 1, before the first request
-		return new Run(this.#store, this.#adapter, this.#effectiveConfig(), this, input, options?.signal, false, options?.source, options?.via);
+		return new Run(this.#store, this.#learning(this.#adapter), this.#effectiveConfig(), this, input, options?.signal, false, options?.source, options?.via);
 	}
 
 	/**
@@ -874,7 +897,7 @@ export class AgentSession {
 	 */
 	resume(): Run {
 		this.ensureHealthy();
-		return new Run(this.#store, this.#adapter, this.#effectiveConfig(), this, undefined, undefined, true);
+		return new Run(this.#store, this.#learning(this.#adapter), this.#effectiveConfig(), this, undefined, undefined, true);
 	}
 
 	/**
@@ -1402,6 +1425,11 @@ export interface ContextPolicy {
 		 *  caller's own windowTokens counts as stated. Only a stated window
 		 *  arms the overflow belt. */
 		readonly statedWindow?: () => number | null;
+
+		/** CW-1 batch 2: told when an endpoint's refusal states its cap — the
+		 *  binding it was learned for rides along. The tiers have already
+		 *  taken it (only ever down); the caller keeps it for later sessions. */
+		readonly onWindowLearned?: (learned: { readonly tokens: number; readonly model: string; readonly baseUrl?: string }) => void;
 	};
 }
 

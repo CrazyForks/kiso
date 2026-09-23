@@ -41,15 +41,22 @@ export function providerHost(baseUrl?: string): string | null {
 
 /** `@commandcode.ai` — the provider named beside a model. `""` when the
  *  binding names no endpoint (the provider's own default origin), so a row
- *  that has nothing to say does not print a stray `@`. */
-export function providerLabel(baseUrl?: string): string {
+ *  that has nothing to say does not print a stray `@`.
+ *
+ *  With an `upstream` (a profile whose baseUrl is a local forwarder), the
+ *  label names who is billed FIRST and where the bytes go second:
+ *  `@gateway.example via 127.0.0.1:47821`. A name that is not a URL is shown as
+ *  written. */
+export function providerLabel(baseUrl?: string, upstream?: string): string {
 	const host = providerHost(baseUrl);
+	const up = upstream === undefined || upstream.trim() === "" ? null : (providerHost(upstream) ?? upstream.trim());
+	if (up !== null) return host === null || host === up ? `@${up}` : `@${up} via ${host}`;
 	return host === null ? "" : `@${host}`;
 }
 
 /** The same label for a PROFILE, which knows its kind as well as its URL: a
  *  profile with no baseUrl (a first-party provider) still names itself by
  *  providerId, because a row that shows two profiles must tell them apart. */
-export function profileProviderLabel(kind: string, baseUrl?: string): string {
-	return providerLabel(baseUrl) || `@${providerIdOf(kind, baseUrl)}`;
+export function profileProviderLabel(kind: string, baseUrl?: string, upstream?: string): string {
+	return providerLabel(baseUrl, upstream) || `@${providerIdOf(kind, baseUrl)}`;
 }

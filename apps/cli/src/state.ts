@@ -454,6 +454,14 @@ export let configModels: Readonly<Record<string, import("./config.js").ModelProf
 export function setConfigModels(models: Readonly<Record<string, import("./config.js").ModelProfile>>): void {
 	configModels = models;
 }
+/** CW-1: the upstream a forwarder at `baseUrl` names — a fact about the
+ *  ADDRESS, so a resumed session (no profile name in hand) finds it too:
+ *  the first profile at that address that names one. */
+export function upstreamOf(baseUrl: string | undefined): string | undefined {
+	if (baseUrl === undefined) return undefined;
+	for (const p of Object.values(configModels)) if (p.baseUrl === baseUrl && p.upstream !== undefined) return p.upstream;
+	return undefined;
+}
 /** The name of the model currently driving the session ("faux" or the
  *  profile name / provider/model write / env model). */
 /**

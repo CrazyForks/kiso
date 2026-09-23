@@ -12,11 +12,11 @@ import type { AgentSession } from "@vincemakes/kiso-runtime";
 import { MODES, MODE_NOTE, OFFERED_MODES, getMode, setMode } from "./mode.js";
 import { clipboardWrite, lastAnswer } from "./clipboard.js";
 import { protectedBangReason, protectedShellVerdict } from "./protected-shell.js";
-import { agentBaseUrl, currentProfileName, setCurrentProfileName, currentModelName, agentModel, body, bodyLog, codingToolOptions, protectedFiles, kisoHome, configModels, dock, lastBinding, loadedSkillsCatalog, mergedConfig, readContextLedger, retryOnRow, sessionsDir, setAgentModel, setConfiguredWindow, setCurrentModelName, setModelChoice, setRetryShown, type LineInput , setLastBinding } from "./state.js";
+import { agentBaseUrl, currentProfileName, setCurrentProfileName, currentModelName, agentModel, body, bodyLog, codingToolOptions, protectedFiles, kisoHome, configModels, dock, lastBinding, loadedSkillsCatalog, mergedConfig, readContextLedger, retryOnRow, sessionsDir, setAgentModel, setConfiguredWindow, setCurrentModelName, setModelChoice, setRetryShown, upstreamOf, type LineInput , setLastBinding } from "./state.js";
 import { adapterOptionsFor } from "./auth/adapter-options.js";
 import { profileProviderLabel, providerLabel } from "./provider-label.js";
 import { queuedSwitchLines } from "./state.js";
-import { contextWindowTokens, microcompactThresholdFor, startStatusSpinner } from "./chat.js";
+import { contextWindowTokens, microcompactThresholdFor, startStatusSpinner, statedContextWindow, windowSourceNote } from "./chat.js";
 import { authForProfile, directWriteProfile, profileAvailable, resolveContextWindow, unavailableReason, type ModelProfile } from "./config.js";
 import { shellTool } from "@vincemakes/kiso-tools-node";
 import { dirname, join } from "node:path";
@@ -112,6 +112,15 @@ function signInNote(p: ModelProfile): string {
 		// unavailable — the availability mark says so; the env name still names what would sign it in
 	}
 	return p.apiKeyEnv ?? "no key";
+}
+
+/** CW-1 (owner, 2026-09-23): a profile's window on its /model row — the
+ *  profile's own stated figure first, then the registry's chain for its
+ *  model, endpoint and upstream; `inferred` marks the one no row states
+ *  for that endpoint. */
+function windowNoteOf(p: ModelProfile): string {
+	const w = statedContextWindow({ model: p.model, ...(p.baseUrl !== undefined ? { baseUrl: p.baseUrl } : {}), ...(p.upstream !== undefined ? { upstream: p.upstream } : {}) }, { configured: resolveContextWindow(mergedConfig, p) });
+	return windowSourceNote(w, "short");
 }
 
 /** Everything dispatch touches that chat() owns. */
@@ -529,7 +538,10 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 			const ctxPct = Number.isFinite(ctxRatio) ? `~${Math.round(ctxRatio * 100)}%` : "~?";
 			bodyLog(`session ${ctx.session.id}`);
 			bodyLog(`${ctx.session.log.all.length} events`);
-			bodyLog(`ctx ${ctxPct}`);
+			// CW-1: the percentage names its denominator and who stated it — a
+			// window inferred from the model reads differently from one the
+			// registry states for this endpoint.
+			bodyLog(`ctx ${ctxPct} · ${windowSourceNote(statedContextWindow(), "long")}`);
 			// The owner, 2026-09-21: /status is where "what am I actually
 			// running on" is answered, so the identity is spelled out HERE —
 			// the model, the host the request goes to, the profile it came
@@ -544,7 +556,7 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 			// restored, not switched. (The real fix is to stop overloading that
 			// variable; until then, a label that cannot lie.)
 			const profileOf = currentProfileName === null ? "" : ` · profile ${currentProfileName}`;
-			bodyLog(`model ${agentModel}${providerLabel(agentBaseUrl)}${profileOf}`);
+			bodyLog(`model ${agentModel}${providerLabel(agentBaseUrl, upstreamOf(agentBaseUrl))}${profileOf}`);
 			ctx.input.prompt();
 		});
 		return;
@@ -653,8 +665,10 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 									// profile key is what `/model <name>` takes, not what a chooser
 									// reading a list needs. What remains is what the chooser CANNOT
 									// infer: availability, and which one is live.
-									const marks = [...(profileAvailable(profile) ? [] : ["unavailable"]), ...(name === currentProfileName ? ["current"] : [])];
-									const host = profileProviderLabel(profile.kind, profile.baseUrl);
+									// CW-1: the window rides LAST — availability and the live mark
+									// are what a narrow row must keep.
+									const marks = [...(profileAvailable(profile) ? [] : ["unavailable"]), ...(name === currentProfileName ? ["current"] : []), windowNoteOf(profile)];
+									const host = profileProviderLabel(profile.kind, profile.baseUrl, profile.upstream);
 									return { label: `${profile.kind}/${profile.model}${host === "" ? "" : ` ${host}`}`, note: marks.join(" · "), ...effortAxis(profile) };
 								}),
 								// PH-1a (finding PH-F4): the example must be a syntax
@@ -703,9 +717,9 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 				} else {
 					for (const name of names) {
 						const p = configModels[name]!;
-						const hostOf = profileProviderLabel(p.kind, p.baseUrl);
+						const hostOf = profileProviderLabel(p.kind, p.baseUrl, p.upstream);
 						bodyLog(
-							`  ${name} → ${p.kind}/${p.model}${hostOf === "" ? "" : ` ${hostOf}`} · ${signInNote(p)} ${profileAvailable(p) ? "(available)" : "(unavailable)"} · ${effortNote(p)}`,
+							`  ${name} → ${p.kind}/${p.model}${hostOf === "" ? "" : ` ${hostOf}`} · ${signInNote(p)} ${profileAvailable(p) ? "(available)" : "(unavailable)"} · ${effortNote(p)} · ${windowNoteOf(p)}`,
 						);
 					}
 				}
@@ -818,7 +832,7 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 							// (and the owner's) read `gpt-6-astra · CH 92%`, the new
 							// model beside the previous model's figure.
 							ctx.modelSwitched();
-							body.notice(`model → ${profName} (${profile.model}${providerLabel(profile.baseUrl) === "" ? "" : ` ${providerLabel(profile.baseUrl)}`}${effortTok !== undefined ? ` · ${effortTok}` : ""}) — takes effect on the next turn`);
+							body.notice(`model → ${profName} (${profile.model}${providerLabel(profile.baseUrl, profile.upstream) === "" ? "" : ` ${providerLabel(profile.baseUrl, profile.upstream)}`}${effortTok !== undefined ? ` · ${effortTok}` : ""}) — takes effect on the next turn`);
 						}
 					}
 				} catch (err) {

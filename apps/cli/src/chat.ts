@@ -35,15 +35,20 @@ import type { AgentSession, Run } from "@vincemakes/kiso-runtime";
 import type { UserInputVia } from "@vincemakes/kiso-core";
 import { dispatch, type DispatchCtx, abortBangCommand } from "./dispatch.js";
 import { paintWindowTitle } from "./window-title.js";
-import { agentBaseUrl, agentModel, body, bodyLog, configuredWindow, dock, retryOnRow, retryShown, setRetryShown, floorOn, protectedFiles, type LineInput } from "./state.js";
+import { agentBaseUrl, agentModel, body, bodyLog, configuredWindow, dock, retryOnRow, retryShown, setRetryShown, floorOn, protectedFiles, upstreamOf, type LineInput } from "./state.js";
 import { attachImages } from "./attachments.js";
-import { lookupModelMetadata } from "@vincemakes/kiso-runtime/internal";
+import { learnedWindowFor } from "./learned-windows.js";
+import { lookupContextWindow, lookupModelMetadata, type ContextWindowSource } from "@vincemakes/kiso-runtime/internal";
 import { addDontAskAgainRule, askPanel, fixHintFor, pendingAsk, resolveUncertains } from "./trust-ui.js";
 import { FauxExhaustionError, failOnFauxExhaustion } from "./faux-glue.js";
 import { OFFERED_MODES, getMode, setMode } from "./mode.js";
 
-/** B area: default context window for the ~ctx estimate (config overridable). */
-const DEFAULT_CONTEXT_WINDOW = 200_000;
+/** B area: default context window for the ~ctx estimate (config overridable).
+ *  CW-1 batch 2: 128,000, down from 200,000 — the figure a model nobody
+ *  states a window for is assumed to hold (the reference implementation's
+ *  default too). Too small costs an early compaction; too large costs a
+ *  refused request on a 128K model. Registered models never reach it. */
+const DEFAULT_CONTEXT_WINDOW = 128_000;
 
 /** The in-process fake provider's id, and the window we declare for it.
  *  Ours to state: faux is not a vendor's model, so "nobody published a
@@ -96,7 +101,9 @@ export function autoCompactFromEnv(): AutoCompact | undefined {
  * THE WINDOW SOMEBODY STATED, or null when nobody has.
  *
  * Three sources, in order: the config/profile window, KISO_CONTEXT_WINDOW,
- * and the metadata registry. Each is a claim someone made and dated. When
+ * and the metadata registry (CW-1: this endpoint's row, the upstream's,
+ * then the model's own — see lookupContextWindow). Each is a claim
+ * someone made and dated. When
  * none of them speaks, this returns NULL rather than a number — because
  * the question "how much of the window is left" has no answer without a
  * window, and every display that shows a percentage needs this one, not
@@ -108,9 +115,35 @@ export function autoCompactFromEnv(): AutoCompact | undefined {
  * confident `ctx left ~82%` against a figure nobody had measured.
  */
 export function knownContextWindow(of?: { readonly model: string; readonly baseUrl?: string }): number | null {
-	if (configuredWindow !== undefined) return configuredWindow;
+	return statedContextWindow(of)?.tokens ?? null;
+}
+
+/** CW-1: a stated window and WHO stated it — `set` is the user (profile,
+ *  config or KISO_CONTEXT_WINDOW), `faux` is ours, the rest are the
+ *  registry's steps (lookupContextWindow). */
+export interface StatedWindow {
+	readonly tokens: number;
+	readonly source: "set" | "faux" | "learned" | ContextWindowSource;
+	/** the registry row's model id, for the registry's steps */
+	readonly from?: string;
+	/** CW-1 batch 2: the day an endpoint's refusal stated it, for `learned` */
+	readonly observedAt?: string;
+}
+
+/** CW-1: `knownContextWindow` with its source — the chain the displays name.
+ *  The user's figure is the live binding's unless `own` carries a
+ *  profile's: the /model listing passes each row's, and a row with none
+ *  must not borrow the live one (`own: { configured: undefined }` — an
+ *  optional parameter defaulted to the live value would take it back,
+ *  since an explicit undefined selects the default). */
+export function statedContextWindow(
+	of?: { readonly model: string; readonly baseUrl?: string; readonly upstream?: string },
+	own?: { readonly configured: number | undefined },
+): StatedWindow | null {
+	const configured = own !== undefined ? own.configured : configuredWindow;
+	if (configured !== undefined) return { tokens: configured, source: "set" };
 	const env = Number.parseInt(process.env.KISO_CONTEXT_WINDOW ?? "", 10);
-	if (Number.isFinite(env) && env > 0) return env;
+	if (Number.isFinite(env) && env > 0) return { tokens: env, source: "set" };
 	const model = of?.model ?? agentModel;
 	// `faux` is OURS. The registry carries no row for it because it is not a
 	// vendor's model, but the reason the window is unknown elsewhere — nobody
@@ -118,9 +151,44 @@ export function knownContextWindow(of?: { readonly model: string; readonly baseU
 	// statement about our own artifact, with ourselves as the source, and it
 	// keeps faux mode showing a real percentage instead of the `ctx ?` that
 	// belongs to models whose capacity genuinely nobody states.
-	if (model === FAUX_MODEL) return FAUX_CONTEXT_WINDOW;
-	const known = lookupModelMetadata(model, of !== undefined ? of.baseUrl : agentBaseUrl)?.capabilities.contextWindow;
-	return known ?? null;
+	if (model === FAUX_MODEL) return { tokens: FAUX_CONTEXT_WINDOW, source: "faux" };
+	const baseUrl = of !== undefined ? of.baseUrl : agentBaseUrl;
+	// CW-1 batch 2: what this endpoint's own refusal stated, before any
+	// statement about the model — a measurement of the route.
+	const learned = learnedWindowFor(model, baseUrl);
+	if (learned !== undefined) return { tokens: learned.tokens, source: "learned", observedAt: learned.observedAt };
+	return lookupContextWindow(model, baseUrl, of?.upstream ?? upstreamOf(baseUrl));
+}
+
+/** CW-1: a window as the displays write it — `1M`, `1.05M`, `272K`,
+ *  `1,048,576` (a figure that is not round is shown whole). */
+export function windowLabel(tokens: number): string {
+	if (tokens >= 1_000_000 && tokens % 10_000 === 0) return `${tokens / 1_000_000}M`;
+	if (tokens % 1000 === 0) return `${tokens / 1000}K`;
+	return tokens.toLocaleString("en-US");
+}
+
+/** CW-1: the source, said. The short form rides a /model row; the long
+ *  form is /status's. Only the model step is marked in the short form —
+ *  it is the one figure no row states for this endpoint. */
+export function windowSourceNote(w: StatedWindow | null, form: "short" | "long"): string {
+	if (w === null) return form === "short" ? "ctx ?" : `window unknown — compaction assumes ${windowLabel(DEFAULT_CONTEXT_WINDOW)}; set contextWindow on the profile to state it`;
+	const size = windowLabel(w.tokens);
+	if (form === "short") return w.source === "model" ? `ctx ${size} inferred` : `ctx ${size}`;
+	switch (w.source) {
+		case "set":
+			return `window ${size}, as you set it`;
+		case "faux":
+			return `window ${size} (faux)`;
+		case "learned":
+			return `window ${size}, learned from this endpoint's refusal (${w.observedAt ?? "date unknown"})`;
+		case "route":
+			return `window ${size}, the registry's for this endpoint`;
+		case "upstream":
+			return `window ${size}, the registry's for the upstream`;
+		case "model":
+			return `window ${size}, inferred from the model (${w.from}) — not stated for this endpoint`;
+	}
 }
 
 export function contextWindowTokens(of?: { readonly model: string; readonly baseUrl?: string }): number {
@@ -143,8 +211,18 @@ export function contextWindowTokens(of?: { readonly model: string; readonly base
 	// asked again. The claim is true now because the switch path calls
 	// `microcompactThresholdFor` below, not because deriving a number
 	// from this function makes anything follow it.
-	const known = lookupModelMetadata(of?.model ?? agentModel, of !== undefined ? of.baseUrl : agentBaseUrl)?.capabilities.contextWindow;
-	if (known !== undefined && known !== null) return known;
+	//
+	// CW-1: the registry's steps are lookupContextWindow's — the route's row,
+	// the upstream's, then the model's own identity — the same chain
+	// `statedContextWindow` names for the displays.
+	const baseUrl = of !== undefined ? of.baseUrl : agentBaseUrl;
+	// CW-1 batch 2: faux is declared here too — it read the old 200K
+	// fallback by accident, and the fallback moving must not move it.
+	if ((of?.model ?? agentModel) === FAUX_MODEL) return FAUX_CONTEXT_WINDOW;
+	const learned = learnedWindowFor(of?.model ?? agentModel, baseUrl);
+	if (learned !== undefined) return learned.tokens;
+	const known = lookupContextWindow(of?.model ?? agentModel, baseUrl, upstreamOf(baseUrl));
+	if (known !== null) return known.tokens;
 	return DEFAULT_CONTEXT_WINDOW;
 }
 
@@ -201,10 +279,17 @@ export function statusModelLabel(session: { readonly reasoning?: { readonly effo
 }
 
 /** ADR-0055 Amendment 2 (decision 5): with no stated window the status row
- *  shows `ctx ?`, yet the compaction tiers still assume the 200K fallback
+ *  shows `ctx ?`, yet the compaction tiers still assume the fallback (128K
+ *  since CW-1 batch 2)
  *  — the assumption is said out loud once, at agent build. */
 export function unknownWindowNotice(model: string): string {
 	return `[kiso] context window unknown for ${model} at this endpoint — compaction assumes ${DEFAULT_CONTEXT_WINDOW / 1000}K; set contextWindow on the profile to state it`;
+}
+
+/** CW-1 batch 2: said once, when an endpoint's refusal states its cap — the
+ *  tiers aim below it from the next request, and later sessions start on it. */
+export function windowLearnedNotice(model: string, host: string, tokens: number): string {
+	return `✦ window learned — ${host === "" ? "the endpoint" : host} refused ${model} past ${windowLabel(tokens)} tokens; compaction now aims below it`;
 }
 
 /** ADR-0055 Amendment 2: the notice for a checkpoint the shrink invariant
@@ -215,7 +300,7 @@ export function compactionDiscardedNotice(d: { readonly pre: number; readonly po
 }
 
 export function displayCtxRatio(session: AgentSession): number {
-	// CAPACITY is not POLICY. `contextWindowTokens` falls back to 200,000 so
+	// CAPACITY is not POLICY. `contextWindowTokens` falls back to 128,000 so
 	// that the compaction threshold always HAS a value — a policy needs a
 	// number. A percentage on screen is a different kind of thing: it is a
 	// claim about the model, and an unstated window makes it unanswerable.
@@ -449,6 +534,48 @@ export function turnUsageLedger(): {
 		// the turn so far: the settled calls plus the one in flight.
 		total() {
 			return fold(settled, inFlight);
+		},
+	};
+}
+
+/**
+ * The per-CALL view of usage reports for the two figures that must not
+ * double: the cache-miss estimate and the session's running cost.
+ *
+ * A call may report its usage more than once — the op gateway sent two
+ * usage chunks for one request (the owner's session
+ * 2026-09-23T03-00-01-230c: `fresh 3k · miss 3k` on a first turn, both
+ * reports 3,041 in / 69 out). The ledger above already makes a call's
+ * LATEST report replace the earlier; the miss and the cost were read per
+ * EVENT, so the second report compared itself with the first and called
+ * the whole prompt a miss, and a priced route would have been charged
+ * twice. Here the carrier is the PREVIOUS call's total, and a call's cost
+ * is added as the difference from what that call already added.
+ */
+export function callUsageMeter(): {
+	/** what a report's miss is measured against: the previous call's total */
+	carrier: () => number | null;
+	/** one report of the current call; returns the cost to ADD (or null) */
+	report: (total: number | null, costUsd: number | null) => number | null;
+	/** a stop ends the call */
+	endCall: () => void;
+} {
+	let prevCallTotal: number | null = null;
+	let callTotal: number | null = null;
+	let callCost: number | null = null;
+	return {
+		carrier: () => prevCallTotal,
+		report(total, costUsd) {
+			if (total !== null) callTotal = total;
+			if (costUsd === null) return null;
+			const add = costUsd - (callCost ?? 0);
+			callCost = costUsd;
+			return add;
+		},
+		endCall() {
+			if (callTotal !== null) prevCallTotal = callTotal;
+			callTotal = null;
+			callCost = null;
 		},
 	};
 }
@@ -875,7 +1002,7 @@ export async function consumeRun(
 	// and read at that call's usage event. Per CALL, not per turn — a turn
 	// with three model calls reports the third, and each one times itself.
 	let callFirstEventAt: number | null = null;
-	let prevTotal: number | null = null;
+	const meter = callUsageMeter();
 	let missed: number | null = null;
 	// v3 §02: the recap line derives ENTIRELY from the local event stream
 	// (zero tokens). R3g: what it derives is the turn's COST — wall
@@ -911,6 +1038,7 @@ export async function consumeRun(
 		// the stream watchdog and the repeated-failure breaker remain active.
 		// W22-R1: the ledger sees every event; a stop is what ends a call.
 		ledger.observe(ev);
+		if (ev.type === "stop") meter.endCall();
 		// ADR-0055 Amendment 1 (A1b): a compaction inside the run says so, once.
 		if (ev.type === "summarized" || ev.type === "microcompacted") {
 			const r = displayCtxRatio(session);
@@ -1022,11 +1150,12 @@ export async function consumeRun(
 				body.notice("stream interrupted — the draft above is abandoned");
 				break;
 			case "usage": {
-				const delta = usageFromEvent(session.provider, ev, prevTotal, agentModel, session.baseUrl);
+				const delta = usageFromEvent(session.provider, ev, meter.carrier(), agentModel, session.baseUrl);
 				// W22-R1: this call's LATEST report replaces its earlier one;
-				// the turn's figure is the settled calls plus this one.
+				// the turn's figure is the settled calls plus this one. The
+				// miss and the cost follow the same rule (callUsageMeter).
 				ledger.report(delta.usage);
-				prevTotal = delta.total;
+				const costToAdd = meter.report(delta.total, delta.costUsd);
 				missed = delta.missed;
 				// TUI2-R1 (E): the request's canonical cost rides the same
 				// callback the usage does — one settled request, one addition.
@@ -1035,7 +1164,7 @@ export async function consumeRun(
 				// second call is timed from ITS own first event.
 				const tokPerSec = callFirstEventAt === null ? null : decodeRate(ev.outputTokens, Date.now() - callFirstEventAt);
 				callFirstEventAt = null;
-				statusCb?.(turnUsage() ?? UNKNOWN_USAGE, displayCtxRatio(session), delta.costUsd, tokPerSec);
+				statusCb?.(turnUsage() ?? UNKNOWN_USAGE, displayCtxRatio(session), costToAdd, tokPerSec);
 				break;
 			}
 			case "uncertain_pending":

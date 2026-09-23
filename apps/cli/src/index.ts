@@ -61,7 +61,9 @@ import { maxRetriesFromEnv } from "./retries.js";
 import { askUi, resolveProjectTrust } from "./trust-ui.js";
 import { isFirstRun, scaffoldFirstRun } from "./first-run.js";
 import { fauxSkip, readFauxScript } from "./faux-glue.js";
-import { chat, compactionDiscardedNotice, contextWindowTokens, displayCtxRatio, knownContextWindow, microcompactThresholdFor, statusModelLabel, unknownWindowNotice } from "./chat.js";
+import { chat, compactionDiscardedNotice, contextWindowTokens, displayCtxRatio, knownContextWindow, microcompactThresholdFor, statusModelLabel, unknownWindowNotice, windowLearnedNotice } from "./chat.js";
+import { recordLearnedWindow, useLearnedWindows } from "./learned-windows.js";
+import { providerHost } from "./provider-label.js";
 import { adapterOptionsFor } from "./auth/adapter-options.js";
 import { loadProjectConfig, loadUserConfig, mergeConfigs, resolveAutoCompact, resolveContextWindow, resolveModel } from "./config.js";
 import { checkForUpdate, knownUpdate, updateCardLines } from "./update-check.js";
@@ -797,6 +799,9 @@ async function makeAgent(sessionId: string | undefined, input?: LineInput, model
 	// shell tool would then write into this project's folder.
 	process.env.KISO_DELEGATION_CONFIG_JSON = JSON.stringify({ checks: merged.checks ?? {}, profiles: Object.keys(merged.models ?? {}), sessionsDir: sessionsDir() });
 	setConfigModels(merged.models ?? {});
+	// CW-1 batch 2: the windows endpoints stated by refusing — read before the
+	// first window is asked for (the unknown-window notice below).
+	useLearnedWindows();
 
 	const resolved = resolveModel(modelFlag, merged);
 	// AFTER the model resolves: the window a PROFILE states is about that
@@ -819,7 +824,8 @@ async function makeAgent(sessionId: string | undefined, input?: LineInput, model
 	}
 	setAgentModel(model, resolved?.profile.baseUrl); // v2b: the status bar shows it; OR-1: the endpoint rides along
 	// ADR-0055 Amendment 2: the row says `ctx ?` for an unstated window, but
-	// the tiers still need a number and assume 200K — say so, once, at build.
+	// the tiers still need a number and assume the fallback — say so, once,
+	// at build.
 	if (!unknownWindowNoticed && knownContextWindow() === null) {
 		unknownWindowNoticed = true;
 		console.error(unknownWindowNotice(model));
@@ -899,8 +905,15 @@ async function makeAgent(sessionId: string | undefined, input?: LineInput, model
 				onDiscard: (d) => body.notice(compactionDiscardedNotice(d)),
 				// ADR-0055 Amendment 2 (decision 3): only a window someone stated
 				// arms the overflow belt — read from the LIVE binding, so it moves
-				// with /model and /resume; the 200K fallback reads as null.
+				// with /model and /resume; the fallback reads as null.
 				statedWindow: () => knownContextWindow(),
+				// CW-1 batch 2: an endpoint's refusal stated its cap. The tiers
+				// took it already; kept, it is where the next session starts, and
+				// the status row's denominator moves with it. Said once per new
+				// figure — a refusal at a cap already kept says nothing.
+				onWindowLearned: (w) => {
+					if (recordLearnedWindow(w.model, w.baseUrl, w.tokens)) body.notice(windowLearnedNotice(w.model, providerHost(w.baseUrl) ?? "", w.tokens));
+				},
 			},
 		},
 		// R3e (owner ruling, 2026-08-28): NO turn limit on an interactive
