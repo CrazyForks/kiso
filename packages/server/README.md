@@ -55,3 +55,16 @@ await service.close(5_000);                              // abort what is live, 
 The transport (routes, SSE framing, `Last-Event-ID`, keepalive, status
 codes), the agent factory, and any per-session product state it feeds the
 factory. The service is the part that was the same in every host.
+
+## The HTTP + SSE transport — `@vincemakes/kiso-server/http`
+
+`createHttpHandler(service, { authorize, augment?, prepareInput?, projection?, keepaliveMs? })`
+returns a `handle(req, res)` a host mounts in front of its own routes; it
+answers the agent routes under `prefix` (default `/v1/sessions`) and
+returns false for everything else. Status codes and framing are decided
+here once: `id: <seq>` / `event: <type>` / `data: <WireEvent>`, an `: open`
+preamble, `Last-Event-ID` and `?after`, a keepalive; `in_flight` and
+`open_run` are 409, `draining` 503, `forbidden` 403. Wire events are the
+projection in `@vincemakes/kiso-protocol` — never the durable event.
+`authorize` is required: there is no default that allows.
+

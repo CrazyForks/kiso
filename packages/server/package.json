@@ -8,6 +8,10 @@
 		".": {
 			"types": "./dist/index.d.ts",
 			"default": "./dist/index.js"
+		},
+		"./http": {
+			"types": "./dist/http.d.ts",
+			"default": "./dist/http.js"
 		}
 	},
 	"files": [
@@ -22,6 +26,7 @@
 	},
 	"dependencies": {
 		"@vincemakes/kiso-core": "0.40.6",
+		"@vincemakes/kiso-protocol": "0.40.6",
 		"@vincemakes/kiso-runtime": "0.40.6"
 	},
 	"devDependencies": {

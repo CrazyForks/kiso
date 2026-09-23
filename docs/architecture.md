@@ -95,6 +95,14 @@ any transport. It is not a second agent: every run it drives is a
 session's own `run()` / `resume()`. kiso-code does not use it (one
 session per process, no observers).
 
+Above the service, `packages/protocol` (R4) is the wire contract — request
+envelopes, wire events, the snapshot, one error shape, a version — with
+zero dependencies, and `packages/server/http` is the HTTP + SSE transport
+over the service. A wire event is a PROJECTION of a durable event (a
+curated subset, an allowlist of fields, tool arguments sanitized), never
+the durable type: the persistence contract and the transport contract
+move on their own.
+
 ## 2. Composition — two homes, on purpose
 
 Composition is split between "what" and "how":

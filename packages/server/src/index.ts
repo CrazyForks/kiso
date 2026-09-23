@@ -12,4 +12,6 @@ export type { AbortOutcome, DrainReport, OpenRun, RunHandle, RunOptions, Session
 export { DrainingError, InFlightError, OpenRunError } from "./errors.js";
 export { EXECUTION_ENDED, executionDelta } from "./execution.js";
 export { tail } from "./tail.js";
+export { MAX_ARG_VALUE_CHARS, STRIPPED_ARG_KEYS, sanitizeToolArgs, toWireEvent } from "./wire.js";
+export type { ProjectionOptions } from "./wire.js";
 export type { Listener } from "./tail.js";

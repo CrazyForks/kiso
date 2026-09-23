@@ -19,6 +19,8 @@ const PACKAGES = [
 	"@vincemakes/kiso-evals",
 	"@vincemakes/kiso-runtime",
 	// R3 (2026-09-23): the hosted-session service.
+	// R4 (2026-09-23): the wire contract, zero dependencies.
+	"@vincemakes/kiso-protocol",
 	"@vincemakes/kiso-server",
 	"@vincemakes/kiso-tools-node",
 	"@vincemakes/kiso-provider-anthropic",

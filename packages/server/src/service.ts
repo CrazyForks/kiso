@@ -286,6 +286,12 @@ export class SessionService {
 		return this.#draining;
 	}
 
+	/** The run a previous process left without a terminal on this session,
+	 *  or null. The plain read the transport's snapshot needs. */
+	openRun(sessionId: string): string | null {
+		return openRunId(this.#store.load(sessionId)) ?? null;
+	}
+
 	/** Boot recovery: every session on the store whose last run has no
 	 *  terminal. The host decides what to do with them (resume, or leave
 	 *  for the next request to find). */
