@@ -169,13 +169,11 @@ export function windowLabel(tokens: number): string {
 	return tokens.toLocaleString("en-US");
 }
 
-/** CW-1: the source, said. The short form rides a /model row; the long
- *  form is /status's. Only the model step is marked in the short form —
- *  it is the one figure no row states for this endpoint. */
-export function windowSourceNote(w: StatedWindow | null, form: "short" | "long"): string {
-	if (w === null) return form === "short" ? "ctx ?" : `window unknown — compaction assumes ${windowLabel(DEFAULT_CONTEXT_WINDOW)}; set contextWindow on the profile to state it`;
+/** CW-1: the window and its source, said — /status's line (0.40.6: the
+ *  short form that rode each /model row is gone with its caller). */
+export function windowSourceNote(w: StatedWindow | null): string {
+	if (w === null) return `window unknown — compaction assumes ${windowLabel(DEFAULT_CONTEXT_WINDOW)}; set contextWindow on the profile to state it`;
 	const size = windowLabel(w.tokens);
-	if (form === "short") return w.source === "model" ? `ctx ${size} inferred` : `ctx ${size}`;
 	switch (w.source) {
 		case "set":
 			return `window ${size}, as you set it`;

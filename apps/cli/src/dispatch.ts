@@ -115,15 +115,6 @@ function signInNote(p: ModelProfile): string {
 	return p.apiKeyEnv ?? "no key";
 }
 
-/** CW-1 (owner, 2026-09-23): a profile's window on its /model row — the
- *  profile's own stated figure first, then the registry's chain for its
- *  model, endpoint and upstream; `inferred` marks the one no row states
- *  for that endpoint. */
-function windowNoteOf(p: ModelProfile): string {
-	const w = statedContextWindow({ model: p.model, ...(p.baseUrl !== undefined ? { baseUrl: p.baseUrl } : {}), ...(p.upstream !== undefined ? { upstream: p.upstream } : {}) }, { configured: resolveContextWindow(mergedConfig, p) });
-	return windowSourceNote(w, "short");
-}
-
 /** Everything dispatch touches that chat() owns. */
 export interface DispatchCtx {
 	readonly session: AgentSession;
@@ -542,7 +533,7 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 			// CW-1: the percentage names its denominator and who stated it — a
 			// window inferred from the model reads differently from one the
 			// registry states for this endpoint.
-			bodyLog(`ctx ${ctxPct} · ${windowSourceNote(statedContextWindow(), "long")}`);
+			bodyLog(`ctx ${ctxPct} · ${windowSourceNote(statedContextWindow())}`);
 			// The owner, 2026-09-21: /status is where "what am I actually
 			// running on" is answered, so the identity is spelled out HERE —
 			// the model, the host the request goes to, the profile it came
@@ -669,9 +660,11 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 									// profile key is what `/model <name>` takes, not what a chooser
 									// reading a list needs. What remains is what the chooser CANNOT
 									// infer: availability, and which one is live.
-									// CW-1: the window rides LAST — availability and the live mark
-									// are what a narrow row must keep.
-									const marks = [...(profileAvailable(profile) ? [] : ["unavailable"]), ...(name === currentProfileName ? ["current"] : []), windowNoteOf(profile)];
+									// 0.40.6 (the owner, 2026-09-23: "who told you to write ctx"):
+									// the window rode here in 0.40.3–0.40.5 and cut `unavailable`
+									// to `unavailabl…` on the owner's rows. It lives on /status and
+									// /settings, where there is room to say it and its source.
+									const marks = [...(profileAvailable(profile) ? [] : ["unavailable"]), ...(name === currentProfileName ? ["current"] : [])];
 									const host = profileProviderLabel(profile.kind, profile.baseUrl, profile.upstream);
 									return { label: `${profile.kind}/${profile.model}${host === "" ? "" : ` ${host}`}`, note: marks.join(" · "), ...effortAxis(profile) };
 								}),
@@ -723,7 +716,7 @@ export function dispatch(line: string, ctx: DispatchCtx): void {
 						const p = configModels[name]!;
 						const hostOf = profileProviderLabel(p.kind, p.baseUrl, p.upstream);
 						bodyLog(
-							`  ${name} → ${p.kind}/${p.model}${hostOf === "" ? "" : ` ${hostOf}`} · ${signInNote(p)} ${profileAvailable(p) ? "(available)" : "(unavailable)"} · ${effortNote(p)} · ${windowNoteOf(p)}`,
+							`  ${name} → ${p.kind}/${p.model}${hostOf === "" ? "" : ` ${hostOf}`} · ${signInNote(p)} ${profileAvailable(p) ? "(available)" : "(unavailable)"} · ${effortNote(p)}`,
 						);
 					}
 				}
