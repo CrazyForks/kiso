@@ -8,7 +8,7 @@
  */
 
 export { createSessionService, SessionService } from "./service.js";
-export type { AbortOutcome, DrainReport, OpenRun, RunHandle, RunOptions, SessionServiceOptions } from "./service.js";
+export type { AbortOutcome, DrainReport, OpenRun, RunHandle, RunOptions, SessionServiceOptions, SettledRun } from "./service.js";
 export { DrainingError, InFlightError, OpenRunError, StoreMismatchError } from "./errors.js";
 export { EXECUTION_ENDED, executionDelta } from "./execution.js";
 export { tail } from "./tail.js";

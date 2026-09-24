@@ -66,6 +66,20 @@ await service.close(5_000);                              // abort what is live, 
   product that must guarantee no prose reaches a client supplies its own
   `sanitize` in the projection options.
 
+## Shutting down, and one thing not to call
+
+The order that keeps every run resumable: `service.drain(graceMs)` (no
+new runs; wait for executing tools; the report says what was parked or
+cut), then stop the listener, then `store.closeAll()`, then exit. Do not
+call `service.close()` for that — it ABORTS what is live, including a
+run parked at an approval, which voids the draft its answer would have
+continued. And do not call `agent.close()` on a factory's agent when the
+store is shared: in the runtime it closes the whole store.
+
+`hooks.onSettled` is the product's "what next" after a run: a follow-up
+turn, a resume when `uncertainRemaining` reaches zero, a notification.
+The service never starts a run on its own.
+
 ## What a host still writes
 
 The transport (routes, SSE framing, `Last-Event-ID`, keepalive, status

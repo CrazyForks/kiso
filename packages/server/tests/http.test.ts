@@ -213,6 +213,12 @@ describe("R4: the HTTP + SSE transport", () => {
 		expect(await (await h.post("/s/abort", {})).json()).toEqual({ kind: "idle" });
 	});
 
+	it("a session id that starts with _ or - is routed (the store's own rule), a leading slash or a space is not", async () => {
+		const h = await host({ script: [{ events: [{ type: "text_delta", text: "x" }, { type: "stop", reason: "end_turn" }] }] });
+		for (const id of ["_abc", "-abc", "a.b-c_d"]) expect((await h.post(`/${id}/run`, { input: "go" })).status, id).toBe(202);
+		expect((await fetch(`${h.base}/${encodeURIComponent("a b")}/state`)).status).toBe(404);
+	});
+
 	it("bad input → 400; unknown action → 404; draining → 503; GET on a POST route → 405", async () => {
 		const h = await host();
 		expect((await h.post("/s/run", { input: "" })).status).toBe(400);
