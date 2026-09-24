@@ -135,9 +135,12 @@ describe("TUI2-R1 ① — the C probe: the tool contract has no incremental outp
 		// CLI knows which cell is running…
 		const started = events.filter((e) => e.type === "tool_execution_started");
 		expect(started).toHaveLength(1);
-		expect(typeof (started[0] as unknown as { executionId: string }).executionId).toBe("string");
-		// …and it is nowhere in what the tool was handed. Keying the sidecar
-		// by it would need a core line; the derived key exists instead.
-		expect(JSON.stringify(Object.keys(captured as unknown as object))).not.toContain("execution");
+		const startedId = (started[0] as unknown as { executionId: string }).executionId;
+		expect(typeof startedId).toBe("string");
+		// 0.42.0: it IS in what the tool was handed, equal to the event's — and
+		// so is the model's callId. The derived sidecar key stays as built.
+		const ctx = captured as unknown as { callId?: string; executionId?: string };
+		expect(ctx.executionId).toBe(startedId);
+		expect(ctx.callId).toBe("c1");
 	});
 });
