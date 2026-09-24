@@ -12,7 +12,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { defineTool, END_TURN, ToolRegistry } from "@vincemakes/kiso-core";
+import { defineTool, END_TURN, ToolRegistry, type Event } from "@vincemakes/kiso-core";
 import { createFauxProvider } from "@vincemakes/kiso-evals";
 import { composeToolTable } from "../src/compose.js";
 import { createAgent, SessionStore } from "../src/index.js";
@@ -133,5 +133,35 @@ describe("0.42.0: a tool result may end the turn (END_TURN)", () => {
 		expect(calls).toBe(2); // the second run asked once and got the second script entry
 		expect(second.at(-1)).toBe("terminal:completed");
 		expect(second).toContain("text_delta");
+	});
+});
+
+describe("0.42.0: ToolContext carries the invocation's ids", () => {
+	it("ctx.callId is the tool_result's callId and ctx.executionId the tool_execution_started's, per call", async () => {
+		const seen: { callId: string | undefined; executionId: string | undefined }[] = [];
+		const base = createFauxProvider([
+			{ events: [{ type: "tool_call_end" as const, callId: "c-A", name: "peek", input: {} }, { type: "tool_call_end" as const, callId: "c-B", name: "peek", input: {} }, { type: "stop" as const, reason: "tool_use" as const }] },
+			{ events: [{ type: "text_delta" as const, text: "done" }, { type: "stop" as const, reason: "end_turn" as const }] },
+		]);
+		const peek = defineTool({
+			name: "peek",
+			description: "records the ids it was handed",
+			parameters: { type: "object" },
+			execute: async (_input, ctx) => {
+				seen.push({ callId: ctx.callId, executionId: ctx.executionId });
+				return { content: ctx.callId ?? "", isError: false };
+			},
+		});
+		const agent = createAgent({ model: "faux", store: new SessionStore(mkdtempSync(join(tmpdir(), "kiso-ctxids-"))), tools: [peek], adapter: base });
+		const session = await agent.session({ id: "s" });
+		const events: Event[] = [];
+		for await (const ev of session.run("go")) events.push(ev);
+		const results = events.filter((e): e is Event & { type: "tool_result" } => e.type === "tool_result");
+		const starts = events.filter((e): e is Event & { type: "tool_execution_started" } => e.type === "tool_execution_started");
+		expect(seen.map((s) => s.callId).sort()).toEqual(["c-A", "c-B"]);
+		for (const s of seen) {
+			expect(results.some((r) => r.callId === s.callId && r.content === s.callId)).toBe(true);
+			expect(starts.some((st) => st.callId === s.callId && st.executionId === s.executionId)).toBe(true);
+		}
 	});
 });

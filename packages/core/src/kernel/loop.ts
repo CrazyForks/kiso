@@ -1393,7 +1393,7 @@ async function runLedgered(
 		// a cancel.
 		result = signal?.aborted
 			? { content: "aborted before execution", isError: true, errorKind: "precondition" }
-			: await tool.execute(call.input!, ctx);
+			: await tool.execute(call.input!, { ...ctx, callId: call.callId, executionId });
 	} catch (err) {
 		result = {
 			content: err instanceof Error ? err.message : String(err),
