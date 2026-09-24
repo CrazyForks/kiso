@@ -96,5 +96,8 @@ here once: `id: <seq>` / `event: <type>` / `data: <WireEvent>`, an `: open`
 preamble, `Last-Event-ID` and `?after`, a keepalive; `in_flight` and
 `open_run` are 409, `draining` 503, `forbidden` 403. Wire events are the
 projection in `@vincemakes/kiso-protocol` — never the durable event.
-`authorize` is required: there is no default that allows.
-
+`authorize` is required: there is no default that allows. `prepareInput`
+may answer a request itself — write the product's own status and body to
+the response it receives and return `{ handled: true }`; nothing is opened
+and no run starts (a gate, a quota, an attachment check, in the product's
+own shape).

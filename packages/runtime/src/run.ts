@@ -109,13 +109,18 @@ export class Run implements AsyncIterable<Event> {
 			// composed string below is their result; the ledger counts the
 			// parts, observation-only. exactOptionalPropertyTypes: an absent
 			// surface is an absent key — never an explicit undefined (R9).
-			const rentParts: RentParts = {
-				...(this.#config.systemPrompt !== undefined ? { base: this.#config.systemPrompt } : {}),
-				appends: (this.#config.extensions ?? []).flatMap((e) => {
+			// 0.42.0 (the products' request #11): an extension's append is
+			// evaluated BEFORE EACH MODEL REQUEST, never during a tool — the
+			// kernel re-reads config.systemPrompt at every stream call and the
+			// guard re-reads the rent parts per request, so both are getters
+			// here. The base (the session's prompt + the tool table) is fixed.
+			const appendsNow = () =>
+				(this.#config.extensions ?? []).flatMap((e) => {
 					const text = appendOf(e);
 					return text === undefined ? [] : [{ name: e.name, text }];
-				}),
-			};
+				});
+			const rentParts: RentParts = { ...(this.#config.systemPrompt !== undefined ? { base: this.#config.systemPrompt } : {}) };
+			Object.defineProperty(rentParts, "appends", { get: appendsNow, enumerable: true });
 			// E1 (1.2.0): the request tracer — the observation ledger. It
 			// sits at the adapter boundary; the model-visible byte stream is
 			// untouched (I6, trace-bytes.test.ts). Soft-fail: a degraded
@@ -141,7 +146,10 @@ export class Run implements AsyncIterable<Event> {
 			// E2: the session's own systemPrompt first, then every extension
 			// append in LOAD order — deterministic (same extensions → same
 			// prompt); no appends → byte-identical to the extension-less run.
-			const systemPrompt = composeSystemPrompt(basePrompt, this.#config.extensions ?? []);
+			const composeNow = (): string | undefined => composeSystemPrompt(basePrompt, this.#config.extensions ?? []);
+			/** The prompt as a per-request getter on a config object. */
+			const withPrompt = <T extends object>(o: T): T & { readonly systemPrompt?: string } =>
+				Object.defineProperty(o, "systemPrompt", { get: composeNow, enumerable: true }) as T & { readonly systemPrompt?: string };
 			const approvalChain = composeApprovalChain(this.#config.extensions ?? []);
 			// ADR-0055 Amendment 1 (A1b): the compaction point the kernel asks
 			// before every request — the run's own prefix, so an in-band
@@ -154,15 +162,14 @@ export class Run implements AsyncIterable<Event> {
 			} catch {
 				wireReasoning = undefined;
 			}
-			const compact = this.#session.compactionPoint({
-				...(systemPrompt !== undefined ? { systemPrompt } : {}),
+			const compact = this.#session.compactionPoint(withPrompt({
 				tools: () => this.#config.registry.snapshot().specs,
 				...(wireReasoning !== undefined ? { reasoning: wireReasoning } : {}),
 				signal,
 				...(this.#config.maxRetries !== undefined ? { maxRetries: this.#config.maxRetries } : {}),
-			});
+			}));
 			const loopConfig = () =>
-				({
+				withPrompt({
 					// 0.1.40 (R-C item 3): the truncation guard gates the model
 					// stream — a truncated turn's tool batch never executes.
 					// LT-1: the idle guard sits closest to the adapter — a stall is
@@ -174,7 +181,6 @@ export class Run implements AsyncIterable<Event> {
 					adapter: traceGuard(tracer!, overflowBelt(truncationGuard(idleGuard(this.#adapter, this.#config.streamIdleMs ?? DEFAULT_STREAM_IDLE_MS)), () => this.#session.overflowMeasure())), // tracer assigned above, before loopConfig
 					model: this.#config.model,
 					sessionId: this.#session.id, // P3: tools see their session (ToolContext.sessionId)
-					...(systemPrompt !== undefined ? { systemPrompt } : {}),
 					registry: this.#config.registry,
 					...(this.#config.hooks !== undefined ? { hooks: this.#config.hooks } : {}),
 					...(this.#config.maxTurns !== undefined ? { maxTurns: this.#config.maxTurns } : {}),

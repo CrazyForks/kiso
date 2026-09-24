@@ -101,3 +101,27 @@ describe("0.42.0 end to end: the per-run append reaches the adapter, the table s
 		expect(seen).toEqual(["You are a host.\n\nPlan 0.", "You are a host.\n\nPlan 1."]);
 	});
 });
+
+describe("0.42.0: the append is evaluated before EACH model request, not once per run", () => {
+	it("a tool changes state mid-run; the next request's system prompt reflects it", async () => {
+		const seen: (string | undefined)[] = [];
+		let gate = "closed";
+		const base = createFauxProvider([
+			{ events: [{ type: "tool_call_end" as const, callId: "c1", name: "open_gate", input: {} }, { type: "stop" as const, reason: "tool_use" as const }] },
+			{ events: [{ type: "text_delta" as const, text: "done" }, { type: "stop" as const, reason: "end_turn" as const }] },
+		]);
+		const openGate = defineTool({ name: "open_gate", description: "opens", parameters: { type: "object" }, execute: async () => { gate = "open"; return { content: "opened", isError: false }; } });
+		const agent = createAgent({
+			model: "faux",
+			systemPrompt: "Base.",
+			toolTable: "off",
+			store: new SessionStore(mkdtempSync(join(tmpdir(), "kiso-perreq-"))),
+			tools: [openGate],
+			extensions: [{ name: "stage", systemPrompt: { append: () => `Gate is ${gate}.` } }],
+			adapter: { stream: (o: Parameters<typeof base.stream>[0]) => { seen.push(o.systemPrompt); return base.stream(o); } },
+		});
+		const session = await agent.session({ id: "s" });
+		for await (const _ of session.run("go")) void _;
+		expect(seen).toEqual(["Base.\n\nGate is closed.", "Base.\n\nGate is open."]);
+	});
+});

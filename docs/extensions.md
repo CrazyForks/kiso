@@ -450,14 +450,15 @@ artifact kinds are recognized there — `extensions/*.mjs`, `mcp.json`, and
   returns nothing and the gate never runs (discovery#10). A stale
   `trust.jsonl` grant for the home dir is inert and can be left alone.
 
-## The per-run append (0.42.0)
+## The per-request append (0.42.0)
 
-`systemPrompt.append` may be a function. It is evaluated once at the start
-of each run (and for an in-band `/compact`), so text that changes between
-turns — a plan, a skill index, a note that depends on the model in force —
-lives here, while the session's own `systemPrompt` stays byte-stable for
-the session's lifetime (it is what the profile digest hashes). A function
-that throws fails the run: it is the product's code. Hosts that must send
+`systemPrompt.append` may be a function. It is evaluated before EACH model
+request (and for an in-band `/compact`), never during a tool, so text that
+changes as the run goes — a plan, a stage gate a tool just opened, a note
+that depends on the model in force — is seen by the very next request,
+while the session's own `systemPrompt` stays byte-stable for the session's
+lifetime (it is what the profile digest hashes). A function that throws
+fails the run: it is the product's code. Hosts that must send
 a prompt identical to another system's byte for byte set
 `AgentDefinition.toolTable: "off"`, which withholds the generated
 "Tool use:" block entirely; the tool schemas still ride the request.
