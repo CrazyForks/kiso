@@ -15,17 +15,20 @@
  *       seconds hands the terminal nothing until it exits.
  *
  *   ①b  `ToolContext` offers NO progress surface. The kernel constructs
- *       it at exactly two call sites (kernel/loop.ts, the decide and the
- *       execute) as `{ signal, sessionId? }`: the declared `meta` field
- *       is NEVER populated. A tool cannot emit, and cannot be handed a
- *       sink to emit into.
+ *       it as `{ signal, sessionId? }` plus — since 0.42.0 (DECLARED
+ *       SUPERSESSION, the products' request #9) — this invocation's
+ *       `callId` and `executionId`. The declared `meta` field is NEVER
+ *       populated. A tool still cannot emit, and cannot be handed a sink
+ *       to emit into: the ids name the call, they are not a channel.
  *
- *   ①c  — the finding that shapes the design — the executionId is NOT
- *       reachable from inside a tool. It is allocated kernel-side at the
- *       drain ("the executionId comes from the drain, seq-stable",
- *       kernel/loop.ts) and never passed down. The sanctioned sidecar
- *       "keyed by executionId" is therefore NOT implementable without a
- *       core line — and a core line is a stop clause.
+ *   ①c  — the finding that shaped the 0.13-era design — the executionId
+ *       was NOT reachable from inside a tool: allocated kernel-side at
+ *       the drain and never passed down, so the sanctioned sidecar
+ *       "keyed by executionId" was not implementable without a core
+ *       line. SUPERSEDED in 0.42.0: the kernel now hands the tool its
+ *       executionId (it is allocated before execute runs). The derived
+ *       key below stays as built — changing the sidecar's key is its own
+ *       round — and this probe now pins the NEW fact.
  *
  * THE DESIGN THE PROBE LANDS (zero core/runtime lines, zero new contract
  * surface): the sidecar is keyed by what BOTH sides already hold — the
@@ -62,7 +65,7 @@ describe("TUI2-R1 ① — the C probe: the tool contract has no incremental outp
 		expect(result.content).toContain("second");
 	});
 
-	it("①b ToolContext offers no progress surface — the kernel passes signal (+ sessionId) and nothing else", async () => {
+	it("①b ToolContext offers no progress surface — the kernel passes signal, sessionId and (0.42.0) the call's ids, nothing else", async () => {
 		let captured: ToolContext | null = null;
 		const registry = new ToolRegistry();
 		registry.register(
@@ -94,14 +97,14 @@ describe("TUI2-R1 ① — the C probe: the tool contract has no incremental outp
 		// the populated set, exactly: no emit, no onOutput, no write, no
 		// progress, no stream — and `meta` (the declared free-form field)
 		// is never populated by the kernel.
-		expect(Object.keys(ctx).sort()).toEqual(["sessionId", "signal"]);
+		expect(Object.keys(ctx).sort()).toEqual(["callId", "executionId", "sessionId", "signal"]);
 		expect(ctx.meta).toBeUndefined();
 		for (const channel of ["emit", "onOutput", "progress", "write", "stream", "push"]) {
 			expect(ctx[channel], `ToolContext must not offer a ${channel} channel`).toBeUndefined();
 		}
 	});
 
-	it("①c the executionId is kernel-side only — the tool never sees the id its events are keyed by", async () => {
+	it("①c (superseded 0.42.0) the tool now sees the executionId its events are keyed by, and the callId", async () => {
 		let captured: ToolContext | null = null;
 		const registry = new ToolRegistry();
 		registry.register(
