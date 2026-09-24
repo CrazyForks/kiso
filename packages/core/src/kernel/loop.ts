@@ -50,7 +50,7 @@ import { validateArgs } from "../tools/validate.js";
 import type { HookHost, ToolCallPayload } from "./hooks.js";
 import { NoOpHooks } from "./hooks.js";
 import { denialResult, type PermissionDecision } from "./permission.js";
-import { messagesToEvents, MICROCOMPACTABLE, DO_NOT_COMPACT, projectMessages } from "./project.js";
+import { messagesToEvents, MICROCOMPACTABLE, DO_NOT_COMPACT, END_TURN, projectMessages } from "./project.js";
 import type { ToolTable } from "../tools/registry.js";
 
 /** Zero-dependency sleep: the kernel must not import host globals (ADR-0001). */
@@ -998,6 +998,16 @@ export async function* loop(config: LoopConfig): AsyncGenerator<Event> {
 
 		// ── Advance history: the log grew; re-derive for the next turn ─────
 		messages = derive();
+		// 0.42.0: a settled result tagged END_TURN (after the most recent stop)
+		// completes the run instead of asking again — read from the LOG so a
+		// resumed run decides the same way.
+		for (let i = log.all.length - 1; i >= 0 && log.all[i]!.type !== "stop"; i -= 1) {
+			const e = log.all[i]!;
+			if (e.type === "tool_result" && (e.tags ?? []).includes(END_TURN)) {
+				yield await terminal({ kind: "completed" });
+				return;
+			}
+		}
 	}
 }
 
@@ -1383,7 +1393,7 @@ async function runLedgered(
 		// a cancel.
 		result = signal?.aborted
 			? { content: "aborted before execution", isError: true, errorKind: "precondition" }
-			: await tool.execute(call.input!, ctx);
+			: await tool.execute(call.input!, { ...ctx, callId: call.callId, executionId });
 	} catch (err) {
 		result = {
 			content: err instanceof Error ? err.message : String(err),
