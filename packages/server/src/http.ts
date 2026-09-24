@@ -50,7 +50,11 @@ export interface HttpHandler {
 	readonly handle: (req: IncomingMessage, res: ServerResponse) => Promise<boolean>;
 }
 
-const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+/** The store's own rule (`^[A-Za-z0-9._-]+$`), with a length cap. 0.41.2:
+ *  the first version also required a leading letter or digit, which the
+ *  store never did — a nanoid can start with `_` or `-` (about 1 in 32 do)
+ *  and every such session answered 404. */
+const SESSION_ID = /^[A-Za-z0-9._-]{1,128}$/;
 const ACTIONS = new Set(["", "state", "events", "replay", "run", "resume", "abort", "approve", "uncertain"]);
 
 export function createHttpHandler(service: SessionService, options: HttpHandlerOptions): HttpHandler {

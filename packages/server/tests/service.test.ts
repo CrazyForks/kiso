@@ -283,3 +283,27 @@ describe("one truth: the factory's store is the service's store", () => {
 		expect(service.events("s").map((e) => e.seq)).toEqual(store.load("s").map((r) => r.event.seq));
 	});
 });
+
+describe("hooks.onSettled", () => {
+	it("fires after each run settles with the terminal's kind, the uncertain count and the high-water seq; never on a mismatched session", async () => {
+		const settled: unknown[] = [];
+		const { tool, release } = gatedTool("slow");
+		const store = new SessionStore(mkdtempSync(join(tmpdir(), "kiso-server-")));
+		const service = createSessionService({
+			store,
+			open: async () => createAgent({ model: "faux", store, tools: [tool], adapter: createFauxProvider(callThen("slow")) }),
+			hooks: { onSettled: (s) => void settled.push(s) },
+		});
+		const handle = await service.run("s", "go");
+		await awaitEvent(service, "s", "tool_execution_started");
+		expect(settled).toEqual([]); // not before the terminal
+		release();
+		await handle.done;
+		expect(settled).toEqual([{ sessionId: "s", runId: handle.runId, outcome: "completed", uncertainRemaining: 0, highWater: service.highWater("s") }]);
+		const other = new SessionStore(mkdtempSync(join(tmpdir(), "kiso-server-B-")));
+		const mismatched: unknown[] = [];
+		const bad = createSessionService({ store, open: async () => createAgent({ model: "faux", store: other, tools: [], adapter: createFauxProvider(ONE_TURN) }), hooks: { onSettled: (s) => void mismatched.push(s) } });
+		await expect((await bad.run("t", "go")).done).rejects.toBeInstanceOf(StoreMismatchError);
+		expect(mismatched).toEqual([]);
+	});
+});

@@ -53,7 +53,26 @@ export interface SessionServiceOptions {
 		/** After `abort()` has aborted a run: the product's cleanup, e.g.
 		 *  finishing paid jobs the run left in flight. */
 		readonly onAbort?: (sessionId: string, runId: string) => Promise<void> | void;
+		/** After a run has settled — its terminal delivered to every
+		 *  listener, the session idle again. The product's "what next": a
+		 *  follow-up turn (`service.run`), a resume when the last uncertain
+		 *  verdict is in (`uncertainRemaining === 0`), a notification. The
+		 *  service itself never starts a run on its own. Runs after the
+		 *  store check, so a mismatched session never reaches it. */
+		readonly onSettled?: (settled: SettledRun) => Promise<void> | void;
 	};
+}
+
+/** What `hooks.onSettled` receives. */
+export interface SettledRun {
+	readonly sessionId: string;
+	readonly runId: string;
+	/** The terminal's outcome kind: completed | aborted | error | max_turns | max_tokens | hook_stopped. */
+	readonly outcome: string;
+	/** Executions still awaiting a human verdict after this run. */
+	readonly uncertainRemaining: number;
+	/** The highest seq this run delivered. */
+	readonly highWater: number;
 }
 
 export interface RunHandle {
@@ -186,6 +205,16 @@ export class SessionService {
 			if (held.highWater >= 0 && !this.#store.load(held.id).some((r) => r.event.seq === held.highWater)) {
 				held.mismatch = new StoreMismatchError(held.id, run.runId, held.highWater);
 				throw held.mismatch;
+			}
+			if (this.#hooks.onSettled !== undefined) {
+				const terminal = [...held.session.log.all].reverse().find((e) => e.type === "terminal");
+				await this.#hooks.onSettled({
+					sessionId: held.id,
+					runId: run.runId,
+					outcome: terminal !== undefined && terminal.type === "terminal" ? terminal.outcome.kind : "unknown",
+					uncertainRemaining: held.session.uncertainExecutions().length,
+					highWater: held.highWater,
+				});
 			}
 		})();
 		held.pumping = pumping;
