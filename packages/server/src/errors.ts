@@ -32,6 +32,21 @@ export class OpenRunError extends Error {
 	}
 }
 
+/** The factory's agent writes to a different store than the service was
+ *  given: a run settled and its terminal is not on the service's store.
+ *  Two stores are two truths, which kiso does not allow — the session is
+ *  refused from here on (the host's wiring is wrong, not the run). */
+export class StoreMismatchError extends Error {
+	readonly sessionId: string;
+	readonly runId: string;
+	constructor(sessionId: string, runId: string, expectedSeq: number) {
+		super(`session ${sessionId}: run ${runId} settled at seq ${expectedSeq} but the service's store does not hold it — the agent factory's store is not the service's store`);
+		this.name = "StoreMismatchError";
+		this.sessionId = sessionId;
+		this.runId = runId;
+	}
+}
+
 /** drain() was called: no new run or resume starts in this process. */
 export class DrainingError extends Error {
 	constructor() {

@@ -11,7 +11,7 @@
 import { describe, expect, it } from "vitest";
 import type { Event } from "@vincemakes/kiso-core";
 import { DURABLE_TO_WIRE, NOT_ON_WIRE, WIRE_FIELDS } from "@vincemakes/kiso-protocol";
-import { MAX_ARG_VALUE_CHARS, sanitizeToolArgs, toWireEvent } from "../src/wire.js";
+import { MAX_ARG_DEPTH, MAX_ARG_VALUE_CHARS, sanitizeToolArgs, toWireEvent } from "../src/wire.js";
 
 /** One populated sample per durable type — every field the type declares,
  *  so an allowlist row that names a field the type does not carry, or a
@@ -101,6 +101,20 @@ describe("R4: the projection", () => {
 	it("a product-supplied sanitizer replaces the default", () => {
 		const wire = toWireEvent(SAMPLES[9]!, { sanitize: () => ({ redacted: true }) }) as { input: unknown };
 		expect(wire.input).toEqual({ redacted: true });
+	});
+
+	it("the sanitizer walks nested objects and arrays: prose keys stripped and long strings cut at every depth, nesting capped", () => {
+		const out = sanitizeToolArgs({
+			options: { prompt: "secret", note: "n".repeat(300), inner: { body: "secret", keep: 1 } },
+			list: [{ text: "secret", keep: 2 }, "s".repeat(300), 3],
+		}) as Record<string, unknown>;
+		expect(out).toEqual({
+			options: { note: `${"n".repeat(MAX_ARG_VALUE_CHARS)}…`, inner: { keep: 1 } },
+			list: [{ keep: 2 }, `${"s".repeat(MAX_ARG_VALUE_CHARS)}…`, 3],
+		});
+		let deep: unknown = { leaf: 1 };
+		for (let i = 0; i < MAX_ARG_DEPTH + 2; i++) deep = { d: deep };
+		expect(JSON.stringify(sanitizeToolArgs(deep))).toContain('"{…}"');
 	});
 
 	it("the default sanitizer leaves non-objects alone", () => {

@@ -15,7 +15,7 @@ import { describe, expect, it } from "vitest";
 import { defineTool, type Event } from "@vincemakes/kiso-core";
 import { createFauxProvider, type FauxScript } from "@vincemakes/kiso-evals";
 import { createAgent, SessionStore } from "@vincemakes/kiso-runtime";
-import { createSessionService, DrainingError, InFlightError, OpenRunError } from "../src/index.js";
+import { createSessionService, DrainingError, InFlightError, OpenRunError, StoreMismatchError } from "../src/index.js";
 
 const ONE_TURN: FauxScript = [{ events: [{ type: "text_delta", text: "hello" }, { type: "stop", reason: "end_turn" }] }];
 
@@ -256,5 +256,30 @@ describe("reopen", () => {
 		const again = await service.run("s", "again", { resumeFirst: false });
 		await again.done;
 		expect(seen.length).toBeGreaterThan(before); // the carried listener saw the second run
+	});
+});
+
+describe("one truth: the factory's store is the service's store", () => {
+	it("a factory bound to a DIFFERENT store: the first run's settle rejects with StoreMismatchError and the session is refused from then on", async () => {
+		const serviceStore = new SessionStore(mkdtempSync(join(tmpdir(), "kiso-server-A-")));
+		const otherStore = new SessionStore(mkdtempSync(join(tmpdir(), "kiso-server-B-")));
+		const service = createSessionService({
+			store: serviceStore,
+			open: async () => createAgent({ model: "faux", store: otherStore, tools: [], adapter: createFauxProvider(ONE_TURN) }),
+		});
+		const handle = await service.run("s", "go");
+		await expect(handle.done).rejects.toBeInstanceOf(StoreMismatchError);
+		expect(service.mismatched("s")).toBe(true);
+		await expect(service.run("s", "again")).rejects.toBeInstanceOf(StoreMismatchError);
+		await expect(service.resume("s")).rejects.toBeInstanceOf(StoreMismatchError);
+		expect(serviceStore.load("s")).toEqual([]); // nothing of that run reached the service's store — the proof it is another store
+	});
+
+	it("the same store: the run settles, and the replay is read from the open session's own log", async () => {
+		const { service, store } = harness();
+		const handle = await service.run("s", "go");
+		await handle.done;
+		expect(service.mismatched("s")).toBe(false);
+		expect(service.events("s").map((e) => e.seq)).toEqual(store.load("s").map((r) => r.event.seq));
 	});
 });

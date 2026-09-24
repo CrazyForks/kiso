@@ -110,8 +110,10 @@ on `Last-Event-ID` and never repeats a seq.
 Composition is split between "what" and "how":
 
 - **What** — the CLI decides which model, store root, tools, extensions,
-  and permission policy this invocation uses (`apps/cli/src/index.ts`,
-  `builtin.ts`).
+  and permission policy this invocation uses
+  (`apps/cli/src/create-coding-agent.ts` — the product factory,
+  `createCodingAgent`; the coding prompt and its tool rows in
+  `coding-prompt.ts`; the built-in extension layer in `builtin.ts`).
 - **How** — `createAgent()` binds them: provider resolution (direct
   adapter injection, or a lazy import of a provider package so an unused
   provider costs nothing), tool registry, and the already-loaded extension
@@ -356,10 +358,12 @@ Stated plainly, so the map cannot be read as larger than the territory:
 
 - **No session tree.** The log is linear — no fork, no branches, no leaf
   navigation.
-- **No remote stack.** No wire protocol, client, server, or remote
-  backend. Sessions are local-filesystem-backed with a single writer per
-  session at a time — cross-process lock takeover and resume are fully
-  supported (ADR-0050); remote transport is not.
+- **No remote stack IN THE RUNTIME.** Sessions are local-filesystem-backed
+  with a single writer per session at a time — cross-process lock
+  takeover and resume are fully supported (ADR-0050). The wire protocol,
+  the HTTP + SSE transport and the client exist since 0.41.0 as OPTIONAL
+  packages above the runtime (§1b); the runtime itself knows nothing of
+  them, and kiso-code does not use them.
 - **No mid-stream steering, no durable queue.** The RUNTIME has no
   stream injection and no queued-input state class: input lands
   between runs. The product shell composes both experiences from that

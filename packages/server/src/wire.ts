@@ -27,15 +27,24 @@ export const STRIPPED_ARG_KEYS: ReadonlySet<string> = new Set(["prompt", "descri
 /** Longer string values are cut here; the card shows a prefix. */
 export const MAX_ARG_VALUE_CHARS = 200;
 
-/** The default sanitizer: drops the prose keys, truncates long strings,
- *  leaves non-objects alone. Shallow — an argument's nested object is
- *  passed through as is. */
-export function sanitizeToolArgs(input: unknown): unknown {
-	if (input === null || typeof input !== "object" || Array.isArray(input)) return input;
+/** Nesting beyond this is replaced by a marker rather than walked. */
+export const MAX_ARG_DEPTH = 8;
+
+/** The default sanitizer: drops the prose keys and truncates long strings
+ *  AT EVERY DEPTH — objects and arrays are walked (0.41.1; the 0.41.0
+ *  version was shallow, so `{ options: { prompt } }` passed the prompt
+ *  through). What it is: a UI-noise and casual-leak filter for a tool
+ *  card. What it is not: a privacy boundary — a product that must
+ *  guarantee no prose reaches a client supplies its own `sanitize`. */
+export function sanitizeToolArgs(input: unknown, depth = 0): unknown {
+	if (typeof input === "string") return input.length > MAX_ARG_VALUE_CHARS ? `${input.slice(0, MAX_ARG_VALUE_CHARS)}…` : input;
+	if (input === null || typeof input !== "object") return input;
+	if (depth >= MAX_ARG_DEPTH) return Array.isArray(input) ? "[…]" : "{…}";
+	if (Array.isArray(input)) return input.map((v) => sanitizeToolArgs(v, depth + 1));
 	const out: Record<string, unknown> = {};
 	for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
 		if (STRIPPED_ARG_KEYS.has(key)) continue;
-		out[key] = typeof value === "string" && value.length > MAX_ARG_VALUE_CHARS ? `${value.slice(0, MAX_ARG_VALUE_CHARS)}…` : value;
+		out[key] = sanitizeToolArgs(value, depth + 1);
 	}
 	return out;
 }
