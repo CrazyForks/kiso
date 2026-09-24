@@ -219,6 +219,28 @@ describe("R4: the HTTP + SSE transport", () => {
 		expect((await fetch(`${h.base}/${encodeURIComponent("a b")}/state`)).status).toBe(404);
 	});
 
+	it("prepareInput may answer the request itself: the product's status and body, no run, nothing opened", async () => {
+		const h = await host({
+			handler: {
+				prepareInput: (body, _req, _id, res) => {
+					if (typeof body["input"] === "string" && body["input"].startsWith("!")) {
+						res.writeHead(422, { "content-type": "application/json" });
+						res.end(JSON.stringify({ code: "gate_closed", stage: "video" }));
+						return { handled: true };
+					}
+					return body["input"] as string;
+				},
+			},
+		});
+		const refused = await h.post("/s/run", { input: "!render" });
+		expect(refused.status).toBe(422);
+		expect(await refused.json()).toEqual({ code: "gate_closed", stage: "video" });
+		expect(h.opened()).toBe(0);
+		expect(h.service.isRunning("s")).toBe(false);
+		const ran = await h.post("/s/run", { input: "go" });
+		expect(ran.status).toBe(202); // the same seam still prepares ordinary input
+	});
+
 	it("bad input → 400; unknown action → 404; draining → 503; GET on a POST route → 405", async () => {
 		const h = await host();
 		expect((await h.post("/s/run", { input: "" })).status).toBe(400);

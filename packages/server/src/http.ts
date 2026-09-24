@@ -36,13 +36,23 @@ export interface HttpHandlerOptions {
 	readonly authorize: (req: IncomingMessage, sessionId: string) => Promise<boolean> | boolean;
 	/** Frames a product adds beside a wire event on the same connection. */
 	readonly augment?: (event: Event, sessionId: string) => readonly WireFrame[] | Promise<readonly WireFrame[]>;
-	/** The product's turn preparation; default: `body.input` as given. */
-	readonly prepareInput?: (body: Readonly<Record<string, unknown>>, req: IncomingMessage, sessionId: string) => WireInput | Promise<WireInput>;
+	/** The product's turn preparation; default: `body.input` as given.
+	 *  0.42.0: it may instead ANSWER the request itself — write the
+	 *  product's own status and body to `res` and return `{ handled: true }`;
+	 *  the handler then returns without opening a run, a session, or a 400
+	 *  (a gate, a quota, an attachment check, an empty message — the
+	 *  product's refusals in the product's shape). */
+	readonly prepareInput?: (body: Readonly<Record<string, unknown>>, req: IncomingMessage, sessionId: string, res: ServerResponse) => WireInput | Handled | Promise<WireInput | Handled>;
 	readonly projection?: ProjectionOptions;
 	/** `: keepalive` comments on an idle stream. Default 15 s; 0 disables. */
 	readonly keepaliveMs?: number;
 	/** Request-body cap in bytes. Default 1 MiB. */
 	readonly bodyLimit?: number;
+}
+
+/** What `prepareInput` returns when it answered the request itself. */
+export interface Handled {
+	readonly handled: true;
 }
 
 export interface HttpHandler {
@@ -100,8 +110,8 @@ export function createHttpHandler(service: SessionService, options: HttpHandlerO
 		return parsed as Record<string, unknown>;
 	};
 
-	const inputOf = async (body: Readonly<Record<string, unknown>>, req: IncomingMessage, sessionId: string): Promise<WireInput> => {
-		if (options.prepareInput !== undefined) return options.prepareInput(body, req, sessionId);
+	const inputOf = async (body: Readonly<Record<string, unknown>>, req: IncomingMessage, sessionId: string, res: ServerResponse): Promise<WireInput | Handled> => {
+		if (options.prepareInput !== undefined) return options.prepareInput(body, req, sessionId, res);
 		const input = body["input"];
 		if (typeof input === "string") {
 			if (input.trim() === "") throw new BadRequest("input must be a non-empty string");
@@ -229,7 +239,8 @@ export function createHttpHandler(service: SessionService, options: HttpHandlerO
 			if (action === "run" || action === "resume") {
 				let handle: { runId: string; done: Promise<void> };
 				if (action === "run") {
-					const input = await inputOf(body, req, sessionId);
+					const input = await inputOf(body, req, sessionId, res);
+					if (isHandled(input)) return true; // the product answered; nothing opened
 					const source = body["source"];
 					handle = await service.run(sessionId, input, {
 						...(source === "user" || source === "suggestion" || source === "tool_result" ? { source: source as WireSource } : {}),
@@ -278,6 +289,10 @@ export function createHttpHandler(service: SessionService, options: HttpHandlerO
 	};
 
 	return { handle };
+}
+
+function isHandled(v: unknown): v is Handled {
+	return typeof v === "object" && v !== null && !Array.isArray(v) && (v as { handled?: unknown }).handled === true;
 }
 
 class BadRequest extends Error {
