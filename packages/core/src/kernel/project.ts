@@ -47,6 +47,12 @@ export const MICROCOMPACTABLE = new Set(["read_file", "list_dir", "search_text",
 /** The tag that makes a tool result un-clearable (C area). */
 export const DO_NOT_COMPACT = "do-not-compact";
 
+/** 0.42.0 — a tool result carrying this tag ENDS THE TURN: once its batch
+ *  has settled the loop writes `terminal { kind: "completed" }` instead of
+ *  asking the model again; the next user input continues. It rides the
+ *  durable tool_result event, so a resumed run honours it (docs/extensions.md). */
+export const END_TURN = "end-turn";
+
 /** E6 (e) — the summary renders as a USER message with this framing (the
  *  boundary honesty): the model reads the compressed history as context,
  *  not as a reply it produced. The text rides verbatim after the frame —

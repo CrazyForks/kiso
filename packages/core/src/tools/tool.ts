@@ -34,6 +34,12 @@ export interface ToolContext {
 	readonly sessionId?: string;
 	/** Free-form per-call metadata the kernel passes through untouched. */
 	readonly meta?: Readonly<Record<string, unknown>>;
+	/** 0.42.0: this invocation's ids — the model's call id (the tool_result
+	 *  event's `callId`) and the durable execution id (the
+	 *  tool_execution_* events'), so a host can pair what it shows while a
+	 *  tool runs with the exact call, even among same-named parallel calls. */
+	readonly callId?: string;
+	readonly executionId?: string;
 }
 
 /**
