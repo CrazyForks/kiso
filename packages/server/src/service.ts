@@ -1,7 +1,7 @@
 import type { ContentBlock, Event, MessageSource } from "@vincemakes/kiso-core";
 import type { Agent, ApprovalRequest, Run, Session, SessionStore } from "@vincemakes/kiso-runtime";
 import { openRunId } from "@vincemakes/kiso-runtime/internal";
-import { DrainingError, InFlightError, OpenRunError } from "./errors.js";
+import { DrainingError, InFlightError, OpenRunError, StoreMismatchError } from "./errors.js";
 import { executionDelta } from "./execution.js";
 import { type Listener, tail } from "./tail.js";
 
@@ -25,9 +25,19 @@ import { type Listener, tail } from "./tail.js";
  */
 
 export interface SessionServiceOptions {
-	/** The store every session in this process lives on — the same one the
-	 *  factory's agents write to. The service reads it for replay and for
-	 *  the open-run check. */
+	/** The store every session in this process lives on — the SAME one the
+	 *  factory's agents write to. The service reads it for boot recovery
+	 *  (`openRuns()`) and for cold reads of sessions it has not opened;
+	 *  everything about an open session is read from that session's own
+	 *  log, so the run that writes and the replay that reads share one
+	 *  object by construction. The remaining way to get two stores — a
+	 *  factory that binds its agents to another store — is DETECTED: the
+	 *  first run to settle on such a session ends with StoreMismatchError
+	 *  and the session is refused from then on.
+	 *
+	 *  Ownership: the host owns the store. `close()` aborts runs and
+	 *  forgets sessions; it never closes the store — the host calls
+	 *  `store.closeAll()` when its process ends. */
 	readonly store: SessionStore;
 	/** The product's agent factory, called once per session id (and again by
 	 *  `reopen`). Everything product-specific — prompt, tools, extensions,
@@ -93,6 +103,8 @@ interface Held {
 	pumping: Promise<void> | null;
 	executing: number;
 	highWater: number;
+	/** Set once a settled run's terminal was not found on the service's store. */
+	mismatch: StoreMismatchError | null;
 }
 
 export class SessionService {
@@ -119,7 +131,7 @@ export class SessionService {
 		const opening = (async (): Promise<Held> => {
 			const agent = await this.#open(sessionId);
 			const session = await agent.session({ id: sessionId });
-			const held: Held = { id: sessionId, agent, session, listeners: new Set(), live: null, pumping: null, executing: 0, highWater: -1 };
+			const held: Held = { id: sessionId, agent, session, listeners: new Set(), live: null, pumping: null, executing: 0, highWater: -1, mismatch: null };
 			this.#held.set(sessionId, held);
 			return held;
 		})();
@@ -167,6 +179,14 @@ export class SessionService {
 					held.executing = 0;
 				}
 			}
+			// the one-truth check: what this run wrote must be on the store the
+			// service was given. Persist-first means the terminal is on disk
+			// before it was yielded above; a store that does not hold it is a
+			// different store.
+			if (held.highWater >= 0 && !this.#store.load(held.id).some((r) => r.event.seq === held.highWater)) {
+				held.mismatch = new StoreMismatchError(held.id, run.runId, held.highWater);
+				throw held.mismatch;
+			}
 		})();
 		held.pumping = pumping;
 		void pumping.catch(() => {}); // a host that does not await `done` gets no unhandled rejection
@@ -179,6 +199,7 @@ export class SessionService {
 	async run(sessionId: string, input: string | readonly ContentBlock[], options: RunOptions = {}): Promise<RunHandle> {
 		if (this.#draining) throw new DrainingError();
 		const held = await this.#hold(sessionId);
+		if (held.mismatch !== null) throw held.mismatch;
 		if (held.live !== null) throw new InFlightError(sessionId, held.live.runId);
 		const open = openRunId(this.#store.load(sessionId));
 		if (open !== undefined) {
@@ -194,6 +215,7 @@ export class SessionService {
 	async resume(sessionId: string): Promise<RunHandle> {
 		if (this.#draining) throw new DrainingError();
 		const held = await this.#hold(sessionId);
+		if (held.mismatch !== null) throw held.mismatch;
 		if (held.live !== null) throw new InFlightError(sessionId, held.live.runId);
 		return this.#pump(held, held.session.resume());
 	}
@@ -253,18 +275,20 @@ export class SessionService {
 	// ---- observation ----------------------------------------------------------
 
 	/** Every event after `after` — the ones on disk now, then the live ones
-	 *  as they land — exactly once each, in order. Returns the unsubscribe. */
+	 *  as they land — exactly once each, in order. Returns the unsubscribe.
+	 *  The replay reads the OPEN session's own log, never a second copy. */
 	async subscribe(sessionId: string, after: number, listener: Listener): Promise<() => void> {
 		const held = await this.#hold(sessionId);
-		return tail(() => this.events(sessionId, after), held.listeners, after, listener);
+		return tail(() => held.session.log.all.filter((e) => e.seq > after), held.listeners, after, listener);
 	}
 
-	/** The durable log after `after` — a plain read, no session opened. */
+	/** The durable log after `after`. An open session answers from its own
+	 *  log; a session this process has not opened is read from the store
+	 *  (a cold read, nothing opened). */
 	events(sessionId: string, after = -1): Event[] {
-		return this.#store
-			.load(sessionId)
-			.map((r) => r.event)
-			.filter((e) => e.seq > after);
+		const held = this.#held.get(sessionId);
+		const events = held !== undefined ? held.session.log.all : this.#store.load(sessionId).map((r) => r.event);
+		return events.filter((e) => e.seq > after);
 	}
 
 	isRunning(sessionId: string): boolean {
@@ -290,6 +314,11 @@ export class SessionService {
 	 *  or null. The plain read the transport's snapshot needs. */
 	openRun(sessionId: string): string | null {
 		return openRunId(this.#store.load(sessionId)) ?? null;
+	}
+
+	/** True once a settled run proved the factory's store is not this one. */
+	mismatched(sessionId: string): boolean {
+		return this.#held.get(sessionId)?.mismatch !== null && this.#held.get(sessionId)?.mismatch !== undefined;
 	}
 
 	/** Boot recovery: every session on the store whose last run has no
@@ -339,7 +368,9 @@ export class SessionService {
 	/** Abort every live run, wait up to `graceMs` for each to settle (a
 	 *  tool that ignores the abort keeps its run open until it returns),
 	 *  then forget every session. Whatever did not settle is resumable by
-	 *  the next process — persist-first means nothing delivered is lost. */
+	 *  the next process — persist-first means nothing delivered is lost.
+	 *  The STORE is not closed here: the host owns it and calls
+	 *  `store.closeAll()` when its process ends. */
 	async close(graceMs = 0): Promise<void> {
 		this.#draining = true;
 		const settling: Promise<void>[] = [];

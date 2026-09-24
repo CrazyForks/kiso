@@ -50,6 +50,22 @@ await service.close(5_000);                              // abort what is live, 
 - **Product frames on the stream** (billing, estimates, couriers) are the
   transport's business; the service delivers the durable events only.
 
+## What the host owns
+
+- **The store.** `createSessionService({ store })` takes the store the
+  factory's agents write to; the service never closes it — `close()`
+  aborts runs and forgets sessions, and the host calls `store.closeAll()`
+  when its process ends. Everything about an open session is read from
+  that session's own log (the object the run writes), so replay and run
+  share one truth by construction; a factory that binds its agents to a
+  DIFFERENT store is detected — the first run to settle on such a session
+  ends with `StoreMismatchError` and the session is refused from then on.
+- **The sanitizer's guarantee.** The default `sanitizeToolArgs` strips
+  prose keys and truncates long strings at every depth. It is a UI-noise
+  and casual-leak filter for a tool card, not a privacy boundary: a
+  product that must guarantee no prose reaches a client supplies its own
+  `sanitize` in the projection options.
+
 ## What a host still writes
 
 The transport (routes, SSE framing, `Last-Event-ID`, keepalive, status
