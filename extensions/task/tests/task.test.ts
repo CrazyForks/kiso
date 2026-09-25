@@ -133,7 +133,7 @@ describe("⑥ task: the durable-memory contract", () => {
 
   it("the systemPrompt append carries the plan discipline, restrained", () => {
     const raw = createTaskExtension().systemPrompt?.append;
-    const append = typeof raw === "function" ? raw() : (raw ?? "");
+    const append = (typeof raw === "function" ? raw() : raw) ?? ""; // 0.42.1: a function may answer undefined
     expect(append).toContain("task_set");
     expect(append).toContain("verification step");
     expect(append.split("\n").length).toBeLessThanOrEqual(15);
