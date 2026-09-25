@@ -3,7 +3,7 @@
  * assertion the kernel must satisfy.
  *
  * This is kiso's answer to "prove the loop is honest": every fixture is a
- * real incident abstracted (uooki production, 2026). A fixture the loop
+ * real incident abstracted (a production host, 2026). A fixture the loop
  * cannot pass is a regression the loop must not ship. Other frameworks
  * advertise features; kiso advertises "verifyable against known failure
  * modes" — because the reference implementation's loudest production

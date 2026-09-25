@@ -764,10 +764,10 @@ The owner's disk, read on 2026-09-22 (sizes and seqs only):
 
 | session | summaries | summary chars | last billed input |
 |---|---|---|---|
-| flowpix2 `2026-09-21T04-41-27-d7aa` | 70 | 3,342,559 | 1,047,981 (then `500`) |
-| flowpix2 `2026-09-22T07-47-36-d4fc` | 66 | ~3.2M | ~1.02M (then a streamed `400`) |
-| uooki `2026-09-21T02-26-26-d2ce` | 68 | 3,255,280 | 1,021,188 |
-| reelfo `2026-09-21T04-45-25-a9ea` | 40 | 1,482,974 | 477,750 |
+| project A `2026-09-21T04-41-27-d7aa` | 70 | 3,342,559 | 1,047,981 (then `500`) |
+| project A `2026-09-22T07-47-36-d4fc` | 66 | ~3.2M | ~1.02M (then a streamed `400`) |
+| project B `2026-09-21T02-26-26-d2ce` | 68 | 3,255,280 | 1,021,188 |
+| project C `2026-09-21T04-45-25-a9ea` | 40 | 1,482,974 | 477,750 |
 | kiso `2026-09-21T06-32-54-121f` (stated 1M window) | 3 | 53,361 | peak 423,510 |
 
 In d7aa, from the moment the summaries alone passed the firing tier, every

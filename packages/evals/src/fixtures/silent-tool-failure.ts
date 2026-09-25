@@ -2,7 +2,7 @@
  * Fixture: SILENT TOOL FAILURE — an error result is swallowed and the model
  * keeps narrating success.
  *
- * Incident (uooki production, 2026): a tool call failed with is_error=true,
+ * Incident (a production host, 2026): a tool call failed with is_error=true,
  * the model ignored it and continued with "results look great, done" —
  * the turn ended "completed" with zero usable work. Root cause class:
  * error results ride the same channel as successes, and nothing forced the
@@ -23,7 +23,7 @@ import type { Fixture } from "./types.js";
 export const silentToolFailure: Fixture = {
 	name: "silent-tool-failure",
 	incident:
-		"uooki turn: search tool returned is_error, model ignored it and reported success (2026-06)",
+		"a production turn: search tool returned is_error, model ignored it and reported success (2026-06)",
 	script: [
 		{
 			events: [

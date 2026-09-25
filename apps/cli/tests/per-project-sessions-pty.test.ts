@@ -1,5 +1,5 @@
 /**
- * 0.40.0 (the owner's dogfood: a uooki session resumed from flowpix2) —
+ * 0.40.0 (the owner's dogfood: a session of one project resumed from another) —
  * one session folder per project, through the real CLI.
  *
  * Real processes in real directories under one KISO_HOME, with the layout

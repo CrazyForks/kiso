@@ -2,7 +2,7 @@
  * L2 — context-economy primitives, the MECHANICAL half.
  *
  * The kernel's compaction policy is identity preservation, not summary
- * (mauri ADR-0007): keep the message SHELL (id, role, position), replace
+ * (the predecessor's ADR-0007): keep the message SHELL (id, role, position), replace
  * the content with a marker, zero LLM calls. A summary is a NEW message; it
  * never rewrites an old one. Messages are immutable (ADR-0002) — "clearing"
  * is append, not mutation.
@@ -68,7 +68,7 @@ function textTokens(text: string): number {
 /**
  * Rough token estimate (chars/4 + structural overhead). Calibration-free on
  * purpose: context economy only needs a stable MONOTONE proxy, not an exact
- * count — the threshold absorbs the error (mauri ADR-0007). The proxy's
+ * count — the threshold absorbs the error (the predecessor's ADR-0007). The proxy's
  * three-word contract, and the pins that hold it, are
  * packages/core/tests/sc1b-estimator.test.ts.
  */

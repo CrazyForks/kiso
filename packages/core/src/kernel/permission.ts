@@ -1,5 +1,5 @@
 /**
- * L2 — permission as a negotiation, not a gate (mauri ADR-0002).
+ * L2 — permission as a negotiation, not a gate (the predecessor's ADR-0002).
  *
  * A permission decision is a dialog step with state and an upgrade path:
  * allow one call, deny with a reason fed back to the model, or defer to a

@@ -635,7 +635,7 @@ function listingFolders(): SessionFolder[] {
 }
 
 /**
- * 0.40.0 (the owner's dogfood: a uooki session resumed from flowpix2) —
+ * 0.40.0 (the owner's dogfood: a session of one project resumed from another) —
  * whether a session id may open in this project. Its own folder: yes. A
  * session another project RECORDED: refused, with where to go. One whose
  * project is unknown, or was only inferred, is never refused and never

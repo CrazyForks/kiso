@@ -21,7 +21,7 @@ export interface ProjectionOptions {
 
 /** Argument keys that carry prose the client has no business seeing in a
  *  tool card (the model's own prompt to a generator, a document body).
- *  uooki's list, verbatim. */
+ *  a host's list, verbatim. */
 export const STRIPPED_ARG_KEYS: ReadonlySet<string> = new Set(["prompt", "description", "text", "body", "content", "instructions", "system_prompt", "input_text"]);
 
 /** Longer string values are cut here; the card shows a prefix. */

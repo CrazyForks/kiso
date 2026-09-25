@@ -2,7 +2,7 @@
  * Fixture: PERMISSION NEGOTIATION — the same call shape can be denied once
  * and allowed later; the model must see both outcomes distinctly.
  *
- * Incident (mauri ADR-0002): a permission system that is a yes/no gate has
+ * Incident (the predecessor's ADR-0002): a permission system that is a yes/no gate has
  * no memory and no upgrade path. The reference implementation's ask model
  * allows deny-with-reason,
  * and the reason feeds back to the model so it can adjust. The kernel's
@@ -15,7 +15,7 @@ import type { Fixture } from "./types.js";
 export const permissionNegotiation: Fixture = {
 	name: "permission-negotiation",
 	incident:
-		"uooki GatePipeline was a message-prefix interceptor with no session memory — a denied call could not be re-attempted after user approval (mauri ADR-0002 audit)",
+		"a gate pipeline was a message-prefix interceptor with no session memory — a denied call could not be re-attempted after user approval (the predecessor's ADR-0002 audit)",
 	script: [
 		{
 			events: [
