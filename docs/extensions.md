@@ -452,13 +452,15 @@ artifact kinds are recognized there — `extensions/*.mjs`, `mcp.json`, and
 
 ## The per-request append (0.42.0)
 
-`systemPrompt.append` may be a function. It is evaluated before EACH model
-request (and for an in-band `/compact`), never during a tool, so text that
-changes as the run goes — a plan, a stage gate a tool just opened, a note
-that depends on the model in force — is seen by the very next request,
-while the session's own `systemPrompt` stays byte-stable for the session's
-lifetime (it is what the profile digest hashes). A function that throws
-fails the run: it is the product's code. Hosts that must send
+`systemPrompt.append` may be a function. It is evaluated exactly ONCE per
+provider attempt, as the request is built (a retry is a new attempt; an
+in-band summary reads the last attempt's text), never during a tool, so
+text that changes as the run goes — a plan, a stage gate a tool just
+opened, a note that depends on the model in force — is seen by the very
+next request, while the session's own `systemPrompt` stays byte-stable
+for the session's lifetime (it is what the profile digest hashes). The
+one evaluation is what the model is sent and what the request trace
+records. A function that throws fails the run: it is the product's code. Hosts that must send
 a prompt identical to another system's byte for byte set
 `AgentDefinition.toolTable: "off"`, which withholds the generated
 "Tool use:" block entirely; the tool schemas still ride the request.
@@ -469,7 +471,10 @@ A tool result may carry the reserved tag `END_TURN` (exported by
 `@vincemakes/kiso-core`): `{ content, isError: false, tags: [END_TURN] }`.
 Once the batch it belongs to has settled, the loop writes
 `terminal { kind: "completed" }` instead of asking the model again, and
-the next user input continues the conversation. A question to the
+the next user input continues the conversation. The check runs at the
+head of every turn, from the log, so a run resumed after a crash between
+the settled result and the next request completes the same way — with
+zero requests. A question to the
 person, a product's round cap, a hand-off: the facts a tool used to be
 unable to state without an abort. The tag rides the durable
 `tool_result` event, so a resumed run honours it too.

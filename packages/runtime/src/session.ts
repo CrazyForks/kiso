@@ -400,7 +400,8 @@ export class AgentSession {
 	 * standing prune here, for SDK callers — the kernel no longer has one.
 	 */
 	compactionPoint(run: {
-		readonly systemPrompt?: string;
+		/** 0.42.0: a thunk — evaluated ONCE per in-band summary (the run's per-attempt snapshot). */
+		readonly systemPrompt?: string | (() => string | undefined);
 		readonly tools: () => readonly ToolSpec[];
 		readonly reasoning?: { readonly thinking?: "adaptive" | "enabled" | "disabled"; readonly effort?: string };
 		readonly signal?: AbortSignalLike;
@@ -501,12 +502,13 @@ export class AgentSession {
 	): Promise<EventInput | null> {
 		const boundary = checkpointBoundarySeq(events, { keepTokens: tail });
 		if (boundary === undefined) return null;
+		const summaryPrompt = typeof run.systemPrompt === "function" ? run.systemPrompt() : run.systemPrompt;
 		let path: "in-band" | "serialized";
 		let result: Awaited<ReturnType<typeof summarizeConversation>>;
 		try {
 			({ result, path } = await this.#checkpointCall({
 				messages,
-				inBand: { ...(run.systemPrompt !== undefined ? { systemPrompt: run.systemPrompt } : {}), tools: run.tools() },
+				inBand: { ...(summaryPrompt !== undefined ? { systemPrompt: summaryPrompt } : {}), tools: run.tools() },
 				...(run.reasoning !== undefined ? { reasoning: run.reasoning } : {}),
 				serialized: () => serializeCovered({ events, prevPoint: lastSummaryPoint(events), boundary }),
 				serializedReasoning: true,

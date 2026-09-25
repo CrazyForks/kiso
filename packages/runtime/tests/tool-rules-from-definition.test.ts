@@ -8,7 +8,7 @@
  * The first test is RED on the code before R1.
  */
 
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -187,5 +187,37 @@ describe("0.42.0: ToolContext carries the invocation's ids", () => {
 			expect(results.some((r) => r.callId === s.callId && r.content === s.callId)).toBe(true);
 			expect(starts.some((st) => st.callId === s.callId && st.executionId === s.executionId)).toBe(true);
 		}
+	});
+});
+
+describe("0.42.0: the append is evaluated exactly ONCE per provider attempt — the snapshot the model and the trace share", () => {
+	it("two requests → two evaluations; each request's trace rent line measures the text that request was sent", async () => {
+		let n = 0;
+		const seen: (string | undefined)[] = [];
+		const base = createFauxProvider([
+			{ events: [{ type: "tool_call_end" as const, callId: "c1", name: "read_file", input: { path: "a" } }, { type: "stop" as const, reason: "tool_use" as const }] },
+			{ events: [{ type: "text_delta" as const, text: "done" }, { type: "stop" as const, reason: "end_turn" as const }] },
+		]);
+		const store = new SessionStore(mkdtempSync(join(tmpdir(), "kiso-once-")));
+		const agent = createAgent({
+			model: "faux",
+			systemPrompt: "Base.",
+			toolTable: "off",
+			store,
+			tools: [reader],
+			extensions: [{ name: "stage", systemPrompt: { append: () => `n=${"x".repeat(++n)}` } }],
+			adapter: { stream: (o: Parameters<typeof base.stream>[0]) => { seen.push(o.systemPrompt); return base.stream(o); } },
+		});
+		const session = await agent.session({ id: "once" });
+		for await (const _ of session.run("go")) void _;
+		agent.close();
+		// exactly one evaluation per attempt: the kernel reads its field twice
+		// and the tracer reads the rent parts twice — none of those evaluate.
+		expect(n).toBe(2);
+		expect(seen).toEqual(["Base.\n\nn=x", "Base.\n\nn=xx"]);
+		// the trace's rent line per request is the append THAT request was sent
+		const lines = readFileSync(join(store.root, "traces", "once.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as { kind: string; rent?: { surface: string; chars: number }[] });
+		const rents = lines.filter((l) => l.kind === "request").map((l) => l.rent!.find((r) => r.surface === "system:ext:stage")!.chars);
+		expect(rents).toEqual(["n=x".length, "n=xx".length]);
 	});
 });
