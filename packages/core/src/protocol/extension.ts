@@ -87,8 +87,11 @@ export interface KisoExtension {
 	 * session's own systemPrompt stays byte-stable for its lifetime (it is
 	 * what the profile digest hashes); what varies lives here. A function
 	 * that throws fails the run — it is the product's code.
+	 *
+	 * 0.42.1: a function may return undefined — no append this attempt,
+	 * and no separator; "" is a real (empty) append and still joins.
 	 */
-	readonly systemPrompt?: { readonly append: string | (() => string) };
+	readonly systemPrompt?: { readonly append: string | (() => string | undefined) };
 	/**
 	 * An optional readiness datum: true while the extension's tool table is
 	 * still settling (its live source — registerLive — may still grow).
