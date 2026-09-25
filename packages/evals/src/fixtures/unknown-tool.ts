@@ -1,7 +1,7 @@
 /**
  * Fixture: UNKNOWN TOOL — the model calls a tool that is not registered.
  *
- * Incident class (uooki + the reference implementation's community): a tool
+ * Incident class (a production host + the reference implementation's community): a tool
  * name drifts (renamed,
  * ghost entry, typo'd enum) and the harness either silently drops the call
  * (agent loops forever trying to find the tool) or executes something
@@ -15,7 +15,7 @@ import type { Fixture } from "./types.js";
 export const unknownTool: Fixture = {
 	name: "unknown-tool",
 	incident:
-		"uooki ghost-tool class: manifest listed a toolkit class name instead of the callable function name; activate_tools silently dropped it and the agent looped (2026-07)",
+		"a ghost-tool class: manifest listed a toolkit class name instead of the callable function name; activate_tools silently dropped it and the agent looped (2026-07)",
 	script: [
 		{
 			events: [

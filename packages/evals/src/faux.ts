@@ -1,5 +1,5 @@
 /**
- * L7 — the faux provider: iteration's foundation (mauri ADR-0010).
+ * L7 — the faux provider: iteration's foundation (the predecessor's ADR-0010).
  *
  * A provider that needs no API key and no network. A `FauxScript` is a
  * turn-by-turn playbook: what the "model" emits. The kernel cannot tell a

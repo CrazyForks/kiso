@@ -38,7 +38,7 @@ coding-agent CLI as reference product, per `docs/plans/2026-08-03-reliable-sessi
    because everything must.
 5. **Boundaries of this slice** (unchanged by later growth): no publish, no
    memory/RAG/scheduler/workflow, no "continuous learning" claims, no empty
-   packages, oohki/uooki/mauri/pi/CC are read-only references.
+   packages, the reference repositories are read-only.
 
 ## Consequences
 

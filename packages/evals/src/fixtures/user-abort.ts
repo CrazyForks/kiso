@@ -2,7 +2,7 @@
  * Fixture: USER ABORT — the user hits stop mid-run; the loop must land on an
  * honest `aborted` terminal, not a fake `completed`.
  *
- * Incident (uooki production, 2026): long artifact turns had a dead
+ * Incident (a production host, 2026): long artifact turns had a dead
  * interrupt window — a stop arriving before the executor registered its
  * steering channel returned 409 and the turn kept running to "completed".
  * The structural fix: the loop checks the signal at every phase boundary
@@ -36,7 +36,7 @@ export function makeAbortSignal(flipAfter: number): { signal: AbortSignalLike; f
 export const userAbort: Fixture = {
 	name: "user-abort",
 	incident:
-		"uooki long artifact turn: stop during the pre-executor window returned 409, turn ran to 'completed' (2026-07-26)",
+		"a long artifact turn: stop during the pre-executor window returned 409, turn ran to 'completed' (2026-07-26)",
 	script: [
 		{
 			events: [

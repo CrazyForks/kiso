@@ -347,7 +347,7 @@ the decision record:
 
 ## 7. Boundaries (this round)
 
-No npm publish, no tag, no push. No oohki/uooki/mauri/pi/CC changes (read-only
+No npm publish, no tag, no push. No changes in the reference repositories (read-only
 reference). No Web UI/TUI. No memory/RAG/scheduler/workflow. No "continuous
 learning" claims. No empty packages waiting for consumers. The 2,000-line
 gate constrains only `packages/core`.
