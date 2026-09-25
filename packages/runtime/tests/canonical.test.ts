@@ -76,6 +76,18 @@ describe("E2 T1 — the route-keyed mapping (R2a) and the dual-endpoint closure"
 		expect(canonicalizeUsage("openai-compat", raw).input).toBe(111);
 	});
 
+	it("0.42.2 (#17): a reported cache WRITE on the total route is subtracted from the fresh count, never counted twice", () => {
+		const raw = { inputTokens: 100, outputTokens: 0, cacheRead: 30, cacheWrite: 20 };
+		const c = canonicalizeUsage("openai-compat", raw);
+		expect(c.input).toBe(50); // prompt − cached − written (the reference implementation's arithmetic)
+		expect(c.cacheWrite).toBe(20);
+		expect(c.input + c.cacheRead + (c.cacheWrite ?? 0)).toBe(100); // total = the reported prompt count
+		// the fresh route is untouched: input_tokens already excludes both
+		expect(canonicalizeUsage("anthropic", raw).input).toBe(100);
+		// an unreported write changes nothing (null, not 0, on the event; 0 in the subtraction)
+		expect(canonicalizeUsage("openai-compat", { ...raw, cacheWrite: null }).input).toBe(70);
+	});
+
 	it("behavior-preserving against the guard's incumbent branch: unknown route falls back to total, never negative", () => {
 		// the guard's settle: anthropic ? inputTokens : max(0, inputTokens − cacheRead)
 		expect(canonicalizeUsage("bogus-route", { inputTokens: 100, outputTokens: 0, cacheRead: 40, cacheWrite: null }).input).toBe(60);

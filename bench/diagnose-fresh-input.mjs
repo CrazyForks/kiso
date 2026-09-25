@@ -66,7 +66,7 @@ function kisoSeries(leg) {
 			reqs.push({
 				turn,
 				known,
-				fresh: known ? e.inputTokens - e.cacheRead : null,
+				fresh: known ? e.inputTokens - e.cacheRead - (e.cacheWrite ?? 0) : null,
 				cacheRead: known ? e.cacheRead : null,
 				output: known ? e.outputTokens : null,
 				reasoning: typeof e.reasoningTokens === "number" ? e.reasoningTokens : null,

@@ -316,7 +316,7 @@ export class RequestTracer {
 				this.#provider === "anthropic"
 					? p.inputTokens ?? 0
 					: p.inputTokens !== null
-						? Math.max(0, p.inputTokens - (p.cacheRead ?? 0))
+						? Math.max(0, p.inputTokens - (p.cacheRead ?? 0) - (p.cacheWrite ?? 0)) // 0.42.2 (#17): the same arithmetic as canonical.ts
 						: 0;
 			record.cacheRead = p.cacheRead ?? 0;
 			record.cacheWrite = p.cacheWrite ?? null;

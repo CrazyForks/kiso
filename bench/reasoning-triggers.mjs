@@ -38,7 +38,7 @@ function kisoUsage(leg) {
 		if (e.type !== "usage") continue;
 		out.push({
 			reasoning: typeof e.reasoningTokens === "number" ? e.reasoningTokens : null,
-			fresh: e.known === false ? null : (e.inputTokens - e.cacheRead),
+			fresh: e.known === false ? null : (e.inputTokens - e.cacheRead - (e.cacheWrite ?? 0)),
 			cacheRead: e.known === false ? null : e.cacheRead,
 		});
 	}
