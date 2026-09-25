@@ -198,6 +198,14 @@ export async function* loop(config: LoopConfig): AsyncGenerator<Event> {
 		return full;
 	};
 	const aborted = (): boolean => signal?.aborted === true;
+	/** append → observe → yield, for a producer with NOTHING between the
+	 *  three (never the execution queue's ack, the stream's launch, or a
+	 *  producer without an observer). */
+	async function* emit(e: EventInput): AsyncGenerator<Event> {
+		const full = log.append(e);
+		if (hooks.onEvent) await hooks.onEvent(full, {}).catch(() => {});
+		yield full;
+	}
 
 	// Assemble: the incoming user message may be rewritten or vetoed.
 	// C group: the outcome is PERSISTED as a user_input_replaced event — the
@@ -599,11 +607,7 @@ export async function* loop(config: LoopConfig): AsyncGenerator<Event> {
 		// ── ADR-0055 (A1b): the compaction point, before every request ──
 		if (config.compact !== undefined) {
 			const added = await config.compact(log.all, messages, overflow === null ? "request" : "overflow");
-			for (const e of added) {
-				const full = log.append(e);
-				if (hooks.onEvent) await hooks.onEvent(full, {}).catch(() => {});
-				yield full;
-			}
+			for (const e of added) yield* emit(e);
 			if (overflow !== null && added.length === 0) {
 				yield await terminal({ kind: "error", error: overflow });
 				return;
@@ -669,11 +673,7 @@ export async function* loop(config: LoopConfig): AsyncGenerator<Event> {
 			violatedReject();
 			yield* drainSettled();
 			if (launchError !== null) throw launchError;
-			if (log.lastSeq > turnStart && !unsafeStartedInDraft()) {
-				const marker = log.append({ type: "model_output_abandoned", voidFromSeq: turnStart, reason });
-				if (hooks.onEvent) await hooks.onEvent(marker, {}).catch(() => {});
-				yield marker;
-			}
+			if (log.lastSeq > turnStart && !unsafeStartedInDraft()) yield* emit({ type: "model_output_abandoned", voidFromSeq: turnStart, reason });
 		};
 
 		while (true) {
@@ -957,10 +957,8 @@ export async function* loop(config: LoopConfig): AsyncGenerator<Event> {
 			return;
 		}
 		if (voided === null && heldStop !== null) {
-			const full = log.append(heldStop);
-			if (hooks.onEvent) await hooks.onEvent(full, {}).catch(() => {});
-			committed = true;
-			yield full;
+			committed = true; // a local flag; set before the emit, read only after it (the observer cannot throw)
+			yield* emit(heldStop);
 		}
 		settleTurn();
 
@@ -1072,6 +1070,21 @@ type ExecVerdict =
 	| { action: "deny"; result: EventInput }
 	| { action: "ask"; decisionId: string; speaker?: string }
 	| { action: "allow" };
+
+/** The permission_decided event for an invocation — the fields in the
+ *  order the log has always written them. The CALLER decides: approved or
+ *  not, the reason, the speaker; this builds, never classifies. */
+function decidedEvent(call: ToolCallEnd, decisionId: string, approved: boolean, reason?: string, decidedBy?: string): EventInput {
+	return {
+		type: "permission_decided",
+		decisionId,
+		callId: call.callId,
+		invocationSeq: call.seq,
+		decision: approved ? "approved" : "denied",
+		...(reason !== undefined ? { reason } : {}),
+		...(decidedBy !== undefined ? { decidedBy } : {}),
+	};
+}
 
 /** The tool_result event for a call — the shared shape (executionId rides
  *  it as the durable correlation, round 5; invocationSeq = the framework
@@ -1214,17 +1227,7 @@ async function decideCall(
 			// allow/deny are PERSISTED FACTS (decidedBy = a SPEAKING
 			// extension — never the chain head on behalf of a non-speaker)
 			// — never a human pause.
-			push({
-				type: "permission_decided",
-				decisionId: nextDecisionId(),
-				callId: call.callId,
-				invocationSeq: call.seq,
-				decision: chainVerdict.action === "allow" ? "approved" : "denied",
-				...(chainVerdict.action === "deny" && chainVerdict.reason !== undefined
-					? { reason: chainVerdict.reason }
-					: {}),
-				decidedBy: chainVerdict.decidedBy,
-			});
+			push(decidedEvent(call, nextDecisionId(), chainVerdict.action === "allow", chainVerdict.action === "deny" ? chainVerdict.reason : undefined, chainVerdict.decidedBy));
 		}
 	}
 	if (chainVerdict?.action === "deny") {
@@ -1320,14 +1323,7 @@ async function humanPause(
 			// its honest aborted terminal.
 			const verdict = resolveApprovalVerdict?.(decisionId);
 			if (verdict !== undefined) {
-				push({
-					type: "permission_decided",
-					decisionId,
-					callId: call.callId,
-					invocationSeq: call.seq,
-					decision: verdict ? "approved" : "denied",
-					...(verdict ? {} : { reason: "denied by user" }),
-				});
+				push(decidedEvent(call, decisionId, verdict, verdict ? undefined : "denied by user"));
 			}
 		}
 		throw err;
@@ -1336,16 +1332,8 @@ async function humanPause(
 	// write-ahead BEFORE waking the resolver (Area 2): if it already
 	// landed in the log, this is the same decision, not a duplicate.
 	if (log.all.find((e) => e.type === "permission_decided" && e.decisionId === decisionId) === undefined) {
-		push({
-			type: "permission_decided",
-			decisionId,
-			callId: call.callId, // binds the decision to the invocation (B group)
-			invocationSeq: call.seq,
-			decision: finalDecision.action === "allow" ? "approved" : "denied",
-			...(finalDecision.action === "deny" && finalDecision.reason !== undefined
-				? { reason: finalDecision.reason }
-				: {}),
-		});
+		// callId binds the decision to the invocation (B group)
+		push(decidedEvent(call, decisionId, finalDecision.action === "allow", finalDecision.action === "deny" ? finalDecision.reason : undefined));
 	}
 	return finalDecision;
 }
