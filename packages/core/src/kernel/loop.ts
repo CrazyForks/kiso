@@ -577,6 +577,19 @@ export async function* loop(config: LoopConfig): AsyncGenerator<Event> {
 			yield await terminal({ kind: "aborted", by: "user" });
 			return;
 		}
+		// 0.42.0: a settled result tagged END_TURN in the OPEN turn — after
+		// the most recent stop, user_input or terminal — completes the run
+		// instead of asking again. Read from the log at the HEAD of every
+		// turn, before compaction and the request, so a cold resume
+		// (CONTINUE_MODEL re-enters here) decides exactly as the fresh path
+		// did before the crash: zero requests.
+		for (let i = log.all.length - 1; i >= 0 && log.all[i]!.type !== "stop" && log.all[i]!.type !== "user_input" && log.all[i]!.type !== "terminal"; i -= 1) {
+			const e = log.all[i]!;
+			if (e.type === "tool_result" && (e.tags ?? []).includes(END_TURN)) {
+				yield await terminal({ kind: "completed" });
+				return;
+			}
+		}
 		if (turns >= maxTurns) {
 			yield await terminal({ kind: "max_turns", turns });
 			return;
@@ -998,16 +1011,6 @@ export async function* loop(config: LoopConfig): AsyncGenerator<Event> {
 
 		// ── Advance history: the log grew; re-derive for the next turn ─────
 		messages = derive();
-		// 0.42.0: a settled result tagged END_TURN (after the most recent stop)
-		// completes the run instead of asking again — read from the LOG so a
-		// resumed run decides the same way.
-		for (let i = log.all.length - 1; i >= 0 && log.all[i]!.type !== "stop"; i -= 1) {
-			const e = log.all[i]!;
-			if (e.type === "tool_result" && (e.tags ?? []).includes(END_TURN)) {
-				yield await terminal({ kind: "completed" });
-				return;
-			}
-		}
 	}
 }
 

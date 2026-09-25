@@ -4,7 +4,7 @@
  * hook composition (the existing come first), and the loop's microcompact config lookup.
  */
 
-import type { ApprovalChain, Event, HookContext, HookHost, KisoExtension, PolicyVerdict, ToolRegistry } from "@vincemakes/kiso-core";
+import type { Adapter, ApprovalChain, Event, HookContext, HookHost, KisoExtension, PolicyVerdict, StreamOptions, ToolRegistry } from "@vincemakes/kiso-core";
 import type { SessionConfig } from "./session.js";
 
 /**
@@ -74,12 +74,35 @@ export function appendOf(extension: KisoExtension): string | undefined {
 }
 
 export function composeSystemPrompt(base: string | undefined, extensions: readonly KisoExtension[]): string | undefined {
-	const appends = extensions.flatMap((e) => {
-		const text = appendOf(e);
-		return text === undefined ? [] : [text];
-	});
+	return joinPrompt(
+		base,
+		extensions.flatMap((e) => {
+			const text = appendOf(e);
+			return text === undefined ? [] : [text];
+		}),
+	);
+}
+
+/** The base and the append texts, \n\n-joined; no appends → the base as is. */
+export function joinPrompt(base: string | undefined, appends: readonly string[]): string | undefined {
 	if (appends.length === 0) return base;
 	return base === undefined ? appends.join("\n\n") : `${base}\n\n${appends.join("\n\n")}`;
+}
+
+/** 0.42.0: the OUTERMOST adapter layer — `compose` runs exactly once per
+ *  provider attempt (a retry is a new attempt) and its result is the
+ *  request's system prompt as every inner layer, the tracer first, sees
+ *  it: what the trace records is what the model was sent, by construction.
+ *  Never a getter on the config — the kernel and the tracer each read
+ *  their field twice, and an observer must not run the product's code. */
+export function promptPerAttempt(adapter: Adapter, compose: () => string | undefined): Adapter {
+	return {
+		stream: (options: StreamOptions) => {
+			const systemPrompt = compose();
+			const { systemPrompt: _fixed, ...rest } = options;
+			return adapter.stream(systemPrompt === undefined ? rest : { ...rest, systemPrompt });
+		},
+	};
 }
 
 /**
