@@ -172,7 +172,7 @@ export function createOpenAICompatAdapter(client: OpenAI, adapterOpts: OpenAICom
 						if (chunk.usage) {
 							usageSent = true;
 							const u = chunk.usage as {
-								prompt_tokens_details?: { cached_tokens?: number };
+								prompt_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number };
 								completion_tokens_details?: { reasoning_tokens?: number };
 							};
 							const details = u.prompt_tokens_details;
@@ -183,7 +183,7 @@ export function createOpenAICompatAdapter(client: OpenAI, adapterOpts: OpenAICom
 								inputTokens: chunk.usage.prompt_tokens ?? null,
 								outputTokens: chunk.usage.completion_tokens ?? null,
 								cacheRead: details?.cached_tokens ?? null,
-								cacheWrite: null,
+								cacheWrite: details?.cache_write_tokens ?? null, // 0.42.2 (#17): a gateway may report the write
 								known: true,
 								...(typeof reasoning === "number" ? { reasoningTokens: reasoning } : {}),
 								...(served !== null ? { servedModel: served } : {}),
@@ -282,10 +282,13 @@ export function createOpenAICompatAdapter(client: OpenAI, adapterOpts: OpenAICom
 						usageSent = true;
 						// round 6: REAL cached-token data is read from the provider's
 						// prompt_tokens_details — an absent value is null, NEVER
-						// faked as a zero-cache turn. OpenAI does not report a
-						// cache write; null is the honest answer.
+						// faked as a zero-cache turn. 0.42.2 (the products' request
+						// #17): the first-party API reports no cache write, but a
+						// gateway on this route does (`cache_write_tokens`, beside
+						// `cached_tokens`) — read when present, null otherwise. The
+						// accounting boundary subtracts it from the fresh count.
 						const u = chunk.usage as {
-							prompt_tokens_details?: { cached_tokens?: number };
+							prompt_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number };
 							completion_tokens_details?: { reasoning_tokens?: number };
 						};
 						const details = u.prompt_tokens_details;
@@ -301,7 +304,7 @@ export function createOpenAICompatAdapter(client: OpenAI, adapterOpts: OpenAICom
 							inputTokens: chunk.usage.prompt_tokens ?? null,
 							outputTokens: chunk.usage.completion_tokens ?? null,
 							cacheRead: details?.cached_tokens ?? null,
-							cacheWrite: null,
+							cacheWrite: details?.cache_write_tokens ?? null,
 							known: true,
 							...(typeof reasoning === "number" ? { reasoningTokens: reasoning } : {}),
 							...(served !== null ? { servedModel: served } : {}),

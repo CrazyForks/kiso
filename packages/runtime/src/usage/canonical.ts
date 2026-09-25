@@ -108,7 +108,7 @@ export interface PricingEntry {
  *  total), preserved by construction. */
 export const INPUT_CONVENTIONS: Readonly<Record<string, "fresh" | "total">> = {
 	anthropic: "fresh", // input_tokens excludes the cached prefix
-	"openai-compat": "total", // prompt_tokens includes the cached prefix
+	"openai-compat": "total", // prompt_tokens includes the cached prefix AND, on a gateway that reports it, the written one
 };
 
 /** Pricing table v1. Freeze date 2026-08-13 (the E2 ruling). Rates:
@@ -158,7 +158,11 @@ export function priceFor(route: string, u: { input: number; output: number; cach
 
 /** Raw → canonical (the accounting boundary). Behavior-preserving against
  *  the guard's incumbent per-provider branch (guard.ts settle): anthropic
- *  input is fresh as-is; every other route subtracts cacheRead.
+ *  input is fresh as-is; every other route subtracts cacheRead — and,
+ *  0.42.2 (#17), cacheWrite when the provider reported one: a "total"
+ *  prompt count includes the tokens written to the cache, and they are
+ *  priced as the write, never twice. total = input + cacheRead +
+ *  cacheWrite holds by construction on both routes.
  *
  *  The trailing `table` parameter is the injection slot (R5b-④a): the
  *  R5a-1-commercial table rides it on day one, defaulting to the pinned
@@ -171,7 +175,7 @@ export function canonicalizeUsage(route: string, raw: RawUsage, table: PricingTa
 			? 0
 			: convention === "fresh"
 				? raw.inputTokens
-				: Math.max(0, raw.inputTokens - (raw.cacheRead ?? 0));
+				: Math.max(0, raw.inputTokens - (raw.cacheRead ?? 0) - (raw.cacheWrite ?? 0));
 	const cacheRead = raw.cacheRead ?? 0;
 	const cacheWrite = raw.cacheWrite ?? null;
 	const output = raw.outputTokens ?? 0;
