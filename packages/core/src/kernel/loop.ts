@@ -1071,9 +1071,6 @@ type ExecVerdict =
 	| { action: "ask"; decisionId: string; speaker?: string }
 	| { action: "allow" };
 
-/** The tool_result event for a call — the shared shape (executionId rides
- *  it as the durable correlation, round 5; invocationSeq = the framework
- *  identity, R-E 0.1.43). */
 /** The permission_decided event for an invocation — the fields in the
  *  order the log has always written them. The CALLER decides: approved or
  *  not, the reason, the speaker; this builds, never classifies. */
@@ -1089,6 +1086,9 @@ function decidedEvent(call: ToolCallEnd, decisionId: string, approved: boolean, 
 	};
 }
 
+/** The tool_result event for a call — the shared shape (executionId rides
+ *  it as the durable correlation, round 5; invocationSeq = the framework
+ *  identity, R-E 0.1.43). */
 function resultEvent(call: ToolCallEnd, result: ToolResult, executionId?: string): EventInput {
 	return {
 		type: "tool_result",
