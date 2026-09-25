@@ -824,6 +824,12 @@ export class Run implements AsyncIterable<Event> {
 		const log = this.#session.log;
 		const tool = this.#config.registry.get(name);
 		const executionId = `ex-${log.lastSeq + 1}`;
+		// 0.43.0 (#13, 0420-F1): ToolContext is a function of the durable
+		// invocation and execution, never of fresh vs recovery — the same
+		// sessionId, callId, executionId and lexical arguments the fresh path
+		// hands the handler, the last derived from THIS invocation's deltas.
+		const rawInput = rawInputOf(log.all, callId, invocationSeq);
+		const ctx = { signal, sessionId: this.#session.id, callId, executionId, ...(rawInput !== undefined ? { rawInput } : {}) };
 
 		// An abort that landed while the decision was being applied must
 		// not start the side effect (finding 3).
@@ -845,7 +851,7 @@ export class Run implements AsyncIterable<Event> {
 				if (signal.aborted) {
 					result = { content: "aborted before execution", isError: true, errorKind: "fatal" };
 				} else {
-					result = await tool.execute(input, { signal });
+					result = await tool.execute(input, ctx);
 				}
 			} catch (err) {
 				result = {
@@ -929,4 +935,24 @@ function resolveReasoningOrThrow(model: string, setting: import("./provider/meta
 	const r = resolveReasoning(model, setting, endpoint);
 	if (!r.ok) throw new Error(`the session's recorded reasoning setting cannot run here: ${r.reason}`);
 	return Object.keys(r.wire).length > 0 ? { reasoning: r.wire } : {};
+}
+
+/** 0.43.0 (#13): the invocation's lexical arguments from the durable
+ *  log — the tool_call_input_delta events between ITS tool_call_start
+ *  and ITS tool_call_end (anchored by invocationSeq, never "the latest
+ *  same callId"), the window the kernel buffered on the fresh path.
+ *  Undefined when no delta was streamed, or when the invocation's seq is
+ *  unknown. */
+function rawInputOf(events: readonly Event[], callId: string, invocationSeq: number | undefined): string | undefined {
+	if (invocationSeq === undefined) return undefined;
+	const end = events.findIndex((e) => e.seq === invocationSeq);
+	if (end < 0) return undefined;
+	let text: string | undefined;
+	for (let i = end - 1; i >= 0; i -= 1) {
+		const e = events[i]!;
+		if (e.type === "tool_call_start" && e.callId === callId) break;
+		if (e.type === "stop" || e.type === "user_input" || e.type === "terminal" || e.type === "assistant_start") break;
+		if (e.type === "tool_call_input_delta" && e.callId === callId) text = e.inputJsonDelta + (text ?? "");
+	}
+	return text;
 }

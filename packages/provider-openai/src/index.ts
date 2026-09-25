@@ -554,11 +554,12 @@ function toOpenAIMessages(
 			const toolCalls = msg.blocks
 				.filter((b) => b.type === "tool_use")
 				.map((b) => {
-					const t = b as { callId: string; name: string; input: unknown };
+					const t = b as { callId: string; name: string; input: unknown; rawInput?: string };
 					return {
 						id: t.callId,
 						type: "function" as const,
-						function: { name: t.name, arguments: JSON.stringify(t.input) },
+						// 0.43.0 (#13): the model's own text when the log has it
+						function: { name: t.name, arguments: t.rawInput ?? JSON.stringify(t.input) },
 					};
 				});
 			out.push({
