@@ -8,8 +8,8 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { defineTool, ToolRegistry } from "@vincemakes/kiso-core";
-import { composeSystemPrompt, composeToolTable, runBasePrompt } from "../src/compose.js";
+import { defineTool, ToolRegistry, type KisoExtension } from "@vincemakes/kiso-core";
+import { composeSystemPrompt, composeToolTable, joinPrompt, runBasePrompt } from "../src/compose.js";
 
 const BASE = "You are a coding agent.";
 /** R1: the rows are the caller's now — the coding agent's, copied here as
@@ -109,5 +109,24 @@ describe("0.42.0: the table switch and the per-run append", () => {
 		expect(composeSystemPrompt(BASE, [EXT, dynamic])).toBe(`${BASE}\n\nSpeak English.\n\nPlan for turn 0.`);
 		turn = 1;
 		expect(composeSystemPrompt(BASE, [EXT, dynamic])).toBe(`${BASE}\n\nSpeak English.\n\nPlan for turn 1.`);
+	});
+});
+
+describe("0.42.1: nothing is a separator — an undefined append (#14) and an empty base (#15)", () => {
+	it("a function append answering undefined adds nothing: the base passes through byte-identical", () => {
+		// the CONTRACT admits it (tsc on this file is the type-level gate: red on `() => string`)
+		const quiet: KisoExtension = { name: "quiet", systemPrompt: { append: () => undefined } };
+		expect(composeSystemPrompt(BASE, [quiet])).toBe(BASE);
+		expect(composeSystemPrompt(BASE, [{ name: "quiet", systemPrompt: { append: () => undefined } }, EXT])).toBe(`${BASE}\n\nSpeak English.`);
+		// "" is a real append and still joins — unchanged
+		expect(composeSystemPrompt(BASE, [{ name: "empty", systemPrompt: { append: () => "" } }])).toBe(`${BASE}\n\n`);
+	});
+	it('a base of "" composes as absent: the table or the appends come first, no bare \\n\\n', () => {
+		const registry = registryWith([reader]);
+		expect(runBasePrompt("", registry, [...RULES])).toBe(composeToolTable(registry, [...RULES]));
+		expect(runBasePrompt("", new ToolRegistry())).toBeUndefined();
+		expect(runBasePrompt("", registry, [...RULES], "off")).toBeUndefined();
+		expect(joinPrompt("", ["Speak English."])).toBe("Speak English.");
+		expect(joinPrompt("", [])).toBeUndefined();
 	});
 });

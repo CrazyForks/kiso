@@ -36,9 +36,12 @@ export type ToolRules = ReadonlyArray<{ readonly tool: string; readonly line: st
 export type ToolTableMode = "on" | "off";
 
 export function runBasePrompt(systemPrompt: string | undefined, registry: ToolRegistry, rules: ToolRules = [], table: ToolTableMode = "on"): string | undefined {
-	if (table === "off") return systemPrompt;
+	// 0.42.1 (the products' request #15): "" composes as ABSENT — never a
+	// bare separator ahead of the table or the appends.
+	const base = systemPrompt === "" ? undefined : systemPrompt;
+	if (table === "off") return base;
 	const toolTable = composeToolTable(registry, rules);
-	return toolTable === "" ? systemPrompt : systemPrompt === undefined ? toolTable : `${systemPrompt}\n\n${toolTable}`;
+	return toolTable === "" ? base : base === undefined ? toolTable : `${base}\n\n${toolTable}`;
 }
 
 /** The table, or "" when the registry is empty (no vocabulary, no tools). */
@@ -67,7 +70,8 @@ export function composeToolTable(registry: ToolRegistry, rules: ToolRules = []):
  * No appends → the base passes through byte-identical.
  */
 /** An extension's append as text: a string as is, a function evaluated
- *  NOW (0.42.0 — the per-run seam; call this once per composition). */
+ *  NOW (0.42.0 — call this once per attempt). 0.42.1 (#14): a function
+ *  may answer undefined — no append this attempt, no separator. */
 export function appendOf(extension: KisoExtension): string | undefined {
 	const append = extension.systemPrompt?.append;
 	return typeof append === "function" ? append() : append;
@@ -85,8 +89,9 @@ export function composeSystemPrompt(base: string | undefined, extensions: readon
 
 /** The base and the append texts, \n\n-joined; no appends → the base as is. */
 export function joinPrompt(base: string | undefined, appends: readonly string[]): string | undefined {
-	if (appends.length === 0) return base;
-	return base === undefined ? appends.join("\n\n") : `${base}\n\n${appends.join("\n\n")}`;
+	const head = base === "" ? undefined : base; // 0.42.1 (#15): "" is absent
+	if (appends.length === 0) return head;
+	return head === undefined ? appends.join("\n\n") : `${head}\n\n${appends.join("\n\n")}`;
 }
 
 /** 0.42.0: the OUTERMOST adapter layer — `compose` runs exactly once per

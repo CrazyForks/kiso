@@ -460,7 +460,11 @@ opened, a note that depends on the model in force — is seen by the very
 next request, while the session's own `systemPrompt` stays byte-stable
 for the session's lifetime (it is what the profile digest hashes). The
 one evaluation is what the model is sent and what the request trace
-records. A function that throws fails the run: it is the product's code. Hosts that must send
+records. A function that throws fails the run: it is the product's code.
+A function may return `undefined` (0.42.1): no append this attempt and no
+separator — `""` is a real, empty append and still joins. Likewise a
+session `systemPrompt` of `""` composes as absent: no bare `\n\n` ahead
+of the tool table or the appends. Hosts that must send
 a prompt identical to another system's byte for byte set
 `AgentDefinition.toolTable: "off"`, which withholds the generated
 "Tool use:" block entirely; the tool schemas still ride the request.
