@@ -492,7 +492,8 @@ otherwise. It is not a second argument channel: validation, permission and
 execution read the parsed input. The projection carries the same text on
 the assistant's tool-use block and the openai-family adapters replay it
 verbatim (the anthropic wire takes a structured input and cannot); the
-durable source is the `tool_call_input_delta` events. ToolContext is a
-function of the durable invocation and execution, never of whether the
-handler ran fresh or after a crash recovery: the resumed execution gets
-the same `sessionId`, `callId`, `executionId` and `rawInput`.
+durable source is the `tool_call_input_delta` events. ToolContext is
+derived from the durable invocation and execution, never from ephemeral
+process state: a handler that runs after a crash recovery gets the same
+invocation context as a fresh one (`sessionId`, `callId`, `rawInput`),
+and `executionId` is the id of the durable execution each path writes.

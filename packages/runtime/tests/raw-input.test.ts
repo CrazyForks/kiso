@@ -111,7 +111,56 @@ describe("0.43.0: the projection carries rawInput on the block, and encodes it b
 	});
 });
 
-describe("0.43.0 (0420-F1): ToolContext is a function of the durable invocation and execution, never of fresh vs recovery", () => {
+describe("0.43.0: a callId re-used by a later invocation inherits nothing (the buffer is consumed at the call's end)", () => {
+	it("projection: the first call streamed deltas, the second (same callId, no start, no delta) has no rawInput", () => {
+		const events = [
+			{ seq: 1, type: "user_input", content: "go" },
+			{ seq: 2, type: "tool_call_start", callId: "call_0", name: "probe" },
+			{ seq: 3, type: "tool_call_input_delta", callId: "call_0", inputJsonDelta: '{"x":5.0}' },
+			{ seq: 4, type: "tool_call_end", callId: "call_0", name: "probe", input: { x: 5 } },
+			{ seq: 5, type: "stop", reason: "tool_use" },
+			{ seq: 6, type: "tool_result", callId: "call_0", content: "ok", isError: false },
+			// the provider's no-id fallback: an end with no start and no delta, the same callId
+			{ seq: 7, type: "tool_call_end", callId: "call_0", name: "probe", input: { x: 6 } },
+			{ seq: 8, type: "stop", reason: "tool_use" },
+			{ seq: 9, type: "tool_result", callId: "call_0", content: "ok", isError: false },
+		] as Event[];
+		const blocks = projectMessages(events).filter((m) => m.role === "assistant").map((m) => (m as { blocks: readonly { type: string; rawInput?: string }[] }).blocks.find((b) => b.type === "tool_use")!);
+		expect(blocks).toHaveLength(2);
+		expect(blocks[0]!.rawInput).toBe('{"x":5.0}');
+		expect("rawInput" in blocks[1]!, "the second invocation must not inherit the first's text").toBe(false);
+	});
+
+	it("kernel: the same across two attempts — a second call under a re-used callId with no delta hands the handler no rawInput", async () => {
+		seen.length = 0;
+		let n = 0;
+		const adapter: Adapter = {
+			stream: async function* (): AsyncIterable<AdapterEvent> {
+				n += 1;
+				if (n === 1) {
+					yield { seq: 0, type: "tool_call_start", callId: "call_0", name: "probe" };
+					yield { seq: 0, type: "tool_call_input_delta", callId: "call_0", inputJsonDelta: '{"x":5.0}' };
+					yield { seq: 0, type: "tool_call_end", callId: "call_0", name: "probe", input: { x: 5 } };
+					yield { seq: 0, type: "stop", reason: "tool_use" };
+				} else if (n === 2) {
+					yield { seq: 0, type: "tool_call_end", callId: "call_0", name: "probe", input: { x: 6 } };
+					yield { seq: 0, type: "stop", reason: "tool_use" };
+				} else {
+					yield { seq: 0, type: "text_delta", text: "done" };
+					yield { seq: 0, type: "stop", reason: "end_turn" };
+				}
+			},
+		};
+		const registry = new ToolRegistry();
+		registry.register(probe);
+		for await (const _ of loop({ adapter, model: "m", registry, messages: [{ role: "user", content: "go" }], maxRetries: 0 })) void _;
+		expect(seen).toHaveLength(2);
+		expect(seen[0]!.ctx.rawInput).toBe('{"x":5.0}');
+		expect("rawInput" in seen[1]!.ctx).toBe(false);
+	});
+});
+
+describe("0.43.0 (0420-F1): ToolContext is derived from the durable invocation and execution, never from ephemeral process state", () => {
 	it("a committed call on disk, no execution → the cold-resume handler gets the fresh path's context on the same prefix", async () => {
 		// the fresh path, recorded
 		seen.length = 0;
@@ -144,12 +193,14 @@ describe("0.43.0 (0420-F1): ToolContext is a function of the durable invocation 
 		const events: Event[] = [];
 		for await (const ev of sessionB.resume()) events.push(ev);
 		expect(seen, "the resume executed the committed call once").toHaveLength(1);
-		expect(ctxShape(seen[0]!.ctx)).toEqual(fresh); // sessionId, callId, rawInput — and the same key set
-		expect(seen[0]!.ctx.executionId).toBe(startedIdOf(events)); // keyed by the event THIS path wrote
-		// 0430-F1 (found here, out of this PR's scope): the fresh path recorded no
-		// permission_decided for the auto-allowed call while the recovery path
-		// records one, so the two logs differ by one event and the started seqs
-		// by one — the id is a function of each path's own durable prefix.
+		expect(ctxShape(seen[0]!.ctx)).toEqual(fresh); // the same invocation context: sessionId, callId, rawInput — and the same key set
+		expect(seen[0]!.ctx.executionId).toBe(startedIdOf(events)); // the id of the durable execution THIS path wrote
+		// executionId is not compared across the two paths yet: the fresh path
+		// recorded no permission_decided for the auto-allowed call while the
+		// recovery path records one (0430-F1, its own PR), so the started seqs
+		// differ by one today. Once 0430-F1 lands, the stronger invariant —
+		// identical durable history, identical executionId, deep-equal
+		// ToolContext — becomes the assertion.
 		expect(events.find((e) => e.type === "terminal")).toMatchObject({ outcome: { kind: "completed" } });
 	});
 });

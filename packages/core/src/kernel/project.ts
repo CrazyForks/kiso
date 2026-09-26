@@ -406,6 +406,7 @@ export function projectMessages(events: readonly (Event | EventInput)[]): readon
 					input: ev.input ?? {},
 					...(raw.has(ev.callId) ? { rawInput: raw.get(ev.callId)! } : {}),
 				});
+				raw.delete(ev.callId); // consumed by THIS invocation — a later same-callId call inherits nothing
 				break;
 			case "tool_result": {
 				// R-E 0.1.44 (sentence 1): PAIR ATOMICITY — a result whose

@@ -44,8 +44,11 @@ export interface ToolContext {
 	 *  streamed them — the lexical companion of the parsed input the
 	 *  handler receives; absent when no delta was streamed. It is NOT a
 	 *  second argument channel: validation, permission and execution read
-	 *  the parsed input. ToolContext is a function of the durable
-	 *  invocation and execution, never of fresh vs recovery. */
+	 *  the parsed input. ToolContext is derived from the durable invocation
+	 *  and execution, never from ephemeral process state: a fresh and a
+	 *  recovered execution receive the same invocation context (sessionId,
+	 *  callId, rawInput), and executionId is the id of the durable
+	 *  execution each path writes. */
 	readonly rawInput?: string;
 }
 
