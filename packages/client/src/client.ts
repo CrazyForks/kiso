@@ -48,8 +48,13 @@ export class ClientError extends Error {
 	}
 }
 
-/** What `events()` yields: a wire event under its seq, or a product frame beside one. */
-export type ClientEvent = { readonly kind: "event"; readonly event: WireEvent } | { readonly kind: "frame"; readonly event: string; readonly data: unknown };
+/** What `events()` yields: a wire event under its seq, a host frame, or
+ *  (0.43.0) the transport's comment — `: open`, `: keepalive` — so a
+ *  consumer can tell a quiet stream from a dead one. */
+export type ClientEvent =
+	| { readonly kind: "event"; readonly event: WireEvent }
+	| { readonly kind: "frame"; readonly event: string; readonly data: unknown }
+	| { readonly kind: "comment"; readonly comment: string };
 
 export interface EventsOptions {
 	/** The last seq already seen; −1 (the default) for everything. */
@@ -219,7 +224,7 @@ export function createClient(options: ClientOptions): KisoClient {
 }
 
 function toClientEvent(frame: SseFrame): ClientEvent | null {
-	if (frame.data === undefined) return null; // a comment: open / keepalive
+	if (frame.data === undefined) return frame.comment !== undefined ? { kind: "comment", comment: frame.comment } : null; // 0.43.0: the transport's liveness, surfaced
 	let data: unknown;
 	try {
 		data = JSON.parse(frame.data);

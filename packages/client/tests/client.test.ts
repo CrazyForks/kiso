@@ -164,3 +164,16 @@ describe("R5: the client", () => {
 		expect(parseSseBlock("")).toBeNull();
 	});
 });
+
+describe("0.43.0: the client surfaces the transport's comments", () => {
+	it("runStream() yields `: open` as a comment event before the turn's first event — a quiet stream is distinguishable from a dead one", async () => {
+		const h = await host();
+		const kinds: string[] = [];
+		for await (const ev of h.session.runStream("hi")) {
+			kinds.push(ev.kind === "comment" ? `:${ev.comment}` : ev.kind);
+			if (ev.kind === "event" && ev.event.type === "terminal") break;
+		}
+		expect(kinds[0]).toBe(":open");
+		expect(kinds).toContain("event");
+	});
+});
