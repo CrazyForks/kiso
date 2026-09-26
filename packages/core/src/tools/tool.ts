@@ -40,6 +40,16 @@ export interface ToolContext {
 	 *  tool runs with the exact call, even among same-named parallel calls. */
 	readonly callId?: string;
 	readonly executionId?: string;
+	/** 0.43.0 (#13): the invocation's arguments exactly as the model
+	 *  streamed them — the lexical companion of the parsed input the
+	 *  handler receives; absent when no delta was streamed. It is NOT a
+	 *  second argument channel: validation, permission and execution read
+	 *  the parsed input. ToolContext is derived from the durable invocation
+	 *  and execution, never from ephemeral process state: a fresh and a
+	 *  recovered execution receive the same invocation context (sessionId,
+	 *  callId, rawInput), and executionId is the id of the durable
+	 *  execution each path writes. */
+	readonly rawInput?: string;
 }
 
 /**

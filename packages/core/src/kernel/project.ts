@@ -225,6 +225,9 @@ export function projectMessages(events: readonly (Event | EventInput)[]): readon
 	let resultBuf: { callId: string; message: ToolResultMessage }[] = [];
 	const callOrder = new Map<string, number>();
 	let callOrderNext = 0;
+	// 0.43.0 (#13): the lexical arguments per open call — set on the first
+	// delta (presence, even empty), taken at the call's end.
+	const raw = new Map<string, string>();
 	// R-E 0.1.44 (sentence 1): the declarations that PROJECTED (their
 	// tool_use blocks were actually pushed) — the pair-atomicity signal a
 	// tool_result consults. A declaration the void skipped is not here, so
@@ -378,8 +381,10 @@ export function projectMessages(events: readonly (Event | EventInput)[]): readon
 				break;
 			case "tool_call_start":
 				if (ev.source !== undefined) assistantSource = ev.source;
+				raw.delete(ev.callId);
 				break;
 			case "tool_call_input_delta":
+				raw.set(ev.callId, (raw.get(ev.callId) ?? "") + ev.inputJsonDelta);
 				break; // the parsed input arrives at tool_call_end
 			case "tool_call_end":
 				// 0.1.26: a tool_call_end with BUFFERED RESULTS opens the
@@ -399,7 +404,9 @@ export function projectMessages(events: readonly (Event | EventInput)[]): readon
 					callId: ev.callId,
 					name: ev.name,
 					input: ev.input ?? {},
+					...(raw.has(ev.callId) ? { rawInput: raw.get(ev.callId)! } : {}),
 				});
+				raw.delete(ev.callId); // consumed by THIS invocation — a later same-callId call inherits nothing
 				break;
 			case "tool_result": {
 				// R-E 0.1.44 (sentence 1): PAIR ATOMICITY — a result whose
@@ -604,6 +611,8 @@ export function messagesToEvents(messages: readonly Message[]): EventInput[] {
 							name: block.name,
 							...(msg.source !== undefined ? { source: msg.source } : {}),
 						});
+						// 0.43.0 (#13): a block with rawInput encodes ONE delta (even ""), so Message → Events → Message is lossless
+						if (block.rawInput !== undefined) out.push({ type: "tool_call_input_delta", callId: block.callId, inputJsonDelta: block.rawInput });
 						out.push({
 							type: "tool_call_end",
 							callId: block.callId,

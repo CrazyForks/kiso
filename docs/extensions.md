@@ -482,3 +482,18 @@ zero requests. A question to the
 person, a product's round cap, a hand-off: the facts a tool used to be
 unable to state without an abort. The tag rides the durable
 `tool_result` event, so a resumed run honours it too.
+
+## The lexical arguments (0.43.0)
+
+A tool handler receives `ctx.rawInput`: the arguments exactly as the
+model streamed them (`{"x":5.0}` keeps its `5.0`), the lexical companion
+of the parsed `input` — present when the provider streamed deltas, absent
+otherwise. It is not a second argument channel: validation, permission and
+execution read the parsed input. The projection carries the same text on
+the assistant's tool-use block and the openai-family adapters replay it
+verbatim (the anthropic wire takes a structured input and cannot); the
+durable source is the `tool_call_input_delta` events. ToolContext is
+derived from the durable invocation and execution, never from ephemeral
+process state: a handler that runs after a crash recovery gets the same
+invocation context as a fresh one (`sessionId`, `callId`, `rawInput`),
+and `executionId` is the id of the durable execution each path writes.

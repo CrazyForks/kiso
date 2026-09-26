@@ -84,6 +84,13 @@ export interface AssistantToolUseBlock {
 	readonly callId: string;
 	readonly name: string;
 	readonly input: Readonly<Record<string, unknown>>;
+	/** 0.43.0 (#13): the arguments exactly as the model streamed them — the
+	 *  LEXICAL companion of `input` (`5.0` stays `5.0`), present when the
+	 *  provider streamed deltas, absent otherwise. Replayed verbatim by the
+	 *  adapters whose wire carries an arguments string. Never a second
+	 *  argument channel: `input` stays the semantic basis of validation,
+	 *  permission and execution. */
+	readonly rawInput?: string;
 }
 
 export type AssistantBlock = AssistantTextBlock | AssistantToolUseBlock;

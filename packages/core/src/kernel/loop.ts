@@ -428,7 +428,7 @@ export async function* loop(config: LoopConfig): AsyncGenerator<Event> {
 		}
 		return { wait, release };
 	};
-	const launch = (call: ToolCallEnd): void => {
+	const launch = (call: ToolCallEnd, rawInput?: string): void => {
 		execActive += 1;
 		const tool = table.get(call.name);
 		const slot = reserve(tool);
@@ -549,7 +549,7 @@ export async function* loop(config: LoopConfig): AsyncGenerator<Event> {
 							call,
 							table,
 							hooks,
-							{ signal: signal ?? NEVER_ABORT, ...(config.sessionId !== undefined ? { sessionId: config.sessionId } : {}) },
+							{ signal: signal ?? NEVER_ABORT, ...(config.sessionId !== undefined ? { sessionId: config.sessionId } : {}), ...(rawInput !== undefined ? { rawInput } : {}) },
 							signal,
 							pushExec,
 						);
@@ -683,6 +683,12 @@ export async function* loop(config: LoopConfig): AsyncGenerator<Event> {
 				yield await terminal({ kind: "aborted", by: "user" });
 				return;
 			}
+			// 0.43.0 (#13): the lexical arguments, buffered PER ATTEMPT — a new
+			// table for every stream, so a retry after an abandoned draft never
+			// pastes that draft's text onto a re-used callId; consumed at the
+			// call's end. callId is the attempt's correlation key only; the
+			// durable identity stays the tool_call_end's seq.
+			const raw = new Map<string, string>();
 			try {
 				const stream = config.adapter.stream({
 					model: config.model,
@@ -743,13 +749,15 @@ export async function* loop(config: LoopConfig): AsyncGenerator<Event> {
 					// R-E 0.1.43: the append precedes the launch — the call's
 					// framework seq is assigned here; invocationSeq must never
 					// be the adapter's stream-local hint (ADR-0002).
+					if (ev.type === "tool_call_input_delta") raw.set(ev.callId, (raw.get(ev.callId) ?? "") + ev.inputJsonDelta);
 					const full = log.append(ev);
 					if (full.type === "tool_call_end") {
 						pending.push(full);
 						// streaming execution: the call launches immediately — the decide
 						// and the ledgered run proceed in parallel with the
 						// model stream.
-						launch(full);
+						launch(full, raw.get(full.callId));
+						raw.delete(full.callId);
 					}
 					if (hooks.onEvent) await hooks.onEvent(full, {}).catch(() => {});
 					yield full;
