@@ -1,5 +1,5 @@
 /**
- * L2 — the hook vocabulary: 3 phases + lifecycle (mauri ADR-0006).
+ * L2 — the hook vocabulary: 3 phases + lifecycle (the predecessor's ADR-0006).
  *
  * ReAct's loop has exactly three model↔world interfaces — assemble (feed the
  * model), model (the model speaks), execute (the model makes the world work)
@@ -9,7 +9,7 @@
  *
  * Payload types are SHARED between fire-site and read-site: a hook author
  * cannot drift a key name, because the keys do not exist — the payload is a
- * typed object (the mauri payload-contract discipline, ADR-0017, as a
+ * typed object (the predecessor's payload-contract discipline, ADR-0017, as a
  * compile-time fact instead of a written rule).
  */
 

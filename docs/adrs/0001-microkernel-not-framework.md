@@ -8,7 +8,7 @@
 ## Context
 
 Every agent framework hands you code and API docs; none hand you the reasoning.
-The validated precedent is mauri (Python microkernel, three products in
+The validated precedent is the predecessor kernel (a Python microkernel, three products in
 production): L1-L3 (protocol/kernel/tool) converge across implementations,
 L4-L6 (knowledge/surface/ops) belong to products. Claude Code's governance is
 patched on; pi's is cut away entirely. kiso owns the contracts that genuinely

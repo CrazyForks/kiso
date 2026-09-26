@@ -2,7 +2,7 @@
  * Fixture: COMPACTION REGROWTH — repeated compaction re-archives already
  * cleared messages, O(N²), silently overwriting original content.
  *
- * Incident (uooki production, 2026, video pipeline): measured 579 store_calls
+ * Incident (a production host, 2026, video pipeline): measured 579 store_calls
  * / 480 archive entries against a naive expectation of 44 — ~10× at 50 turns,
  * extrapolating to 64× at 200 turns and 227× at 1000. Root cause: compaction
  * re-archived messages whose content was already the clear marker, writing
@@ -25,7 +25,7 @@ import type { Fixture } from "./types.js";
 export const compactionRegrowth: Fixture = {
 	name: "compaction-regrowth",
 	incident:
-		"uooki video pipeline: 579 store_calls vs 44 expected at 50 turns — re-archiving cleared markers overwrote originals (2026)",
+		"a video pipeline: 579 store_calls vs 44 expected at 50 turns — re-archiving cleared markers overwrote originals (2026)",
 	script: [
 		{
 			events: [

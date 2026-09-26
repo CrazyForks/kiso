@@ -1,7 +1,7 @@
 /**
  * Fixture: TERMINAL LIES — the model reports done work that never landed.
  *
- * Incident (uooki production, 2026): a long-document turn called
+ * Incident (a production host, 2026): a long-document turn called
  * `document_create` twice, the chat asserted "created the document artifact", and the
  * Canvas stayed empty — the tool was an inline Markdown table that never
  * reaches the canvas, and all three delivery guards were blind to it
@@ -22,7 +22,7 @@ import type { Fixture } from "./types.js";
 export const terminalLies: Fixture = {
 	name: "terminal-lies",
 	incident:
-		"uooki long-document turn: model claimed 'created the document artifact', canvas stayed empty, turn reported completed (document_create trap, 2026-07-31)",
+		"a long-document turn: model claimed 'created the document artifact', canvas stayed empty, turn reported completed (document_create trap, 2026-07-31)",
 	delivery: {
 		required: true,
 		producers: new Set(["create_artifact", "docx_create"]),

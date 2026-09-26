@@ -1,5 +1,5 @@
 /**
- * 0.40.0 (the owner's dogfood: a uooki session resumed from flowpix2) —
+ * 0.40.0 (the owner's dogfood: a session of one project resumed from another) —
  * one session folder per project, and the one-time move into them.
  *
  * The layout and the move, over real directories: folders named by the
@@ -57,7 +57,7 @@ function legacySession(home: string, id: string, opts: { readonly paths?: readon
 
 describe("the folder of a project", () => {
 	it("is the realpath with every non-alphanumeric turned into '-'", () => {
-		expect(encodeWorkspace("/Users/me/Desktop/devv/flowpix2")).toBe("-Users-me-Desktop-devv-flowpix2");
+		expect(encodeWorkspace("/Users/me/Desktop/devv/project-b")).toBe("-Users-me-Desktop-devv-project-b");
 	});
 
 	it("records whose it is, and another realpath that encodes alike gets a suffixed folder, never this one", () => {

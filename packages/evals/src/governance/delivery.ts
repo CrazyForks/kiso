@@ -1,5 +1,5 @@
 /**
- * Delivery truth — "done" means the ledger says so, not the model (uooki
+ * Delivery truth — "done" means the ledger says so, not the model (a production host
  * done_guard, 30 incidents distilled).
  *
  * EC-1 (0.13.0): this module MOVED here from packages/core/src/governance/.

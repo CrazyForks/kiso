@@ -10,7 +10,7 @@
  * carries images. Forcing every caller into the array shape to serve the
  * 5% that need vision is a tax paid on every line of product code.
  *
- * See ADR-0003 (sum type). The tool contract's record is mauri ADR-0008 —
+ * See ADR-0003 (sum type). The tool contract's record is the predecessor's ADR-0008 —
  * the PREDECESSOR series, cited the same way in kernel/hooks.ts and
  * kernel/mode.ts: kiso's own numbers 0006-0019 were NEVER assigned
  * (docs/adrs/README.md), so an unprefixed "ADR-0008" sends a reader to a

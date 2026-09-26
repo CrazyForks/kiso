@@ -8,7 +8,7 @@
 
 A loose `{type: string, ...unknown}` event defers every misuse to production —
 a consumer reads `.text` on an event that has none, and the bug surfaces as a
-blank UI three releases later. mauri's ADR-0003 (the Python original) chose a
+blank UI three releases later. the predecessor's ADR-0003 (the Python original) chose a
 dataclass union for the same reason. pi's packages/ai reached the identical
 shape independently — two implementations, one answer.
 

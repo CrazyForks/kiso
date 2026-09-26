@@ -250,7 +250,7 @@ describe("0.40.0 skills: the catalog the CLI invokes from", () => {
 	});
 });
 
-/** RF-2 (reelfo r4, 2026-09-18) — the frontmatter reader was a flat
+/** RF-2 (a host's report, 2026-09-18) — the frontmatter reader was a flat
  *  `key: value` line reader, so `description: >` indexed as the literal
  *  ">" and the folded text was dropped silently. Skills written for other
  *  harnesses use real YAML block and quoted scalars; the README promises
