@@ -36,6 +36,15 @@ export interface HttpHandlerOptions {
 	readonly authorize: (req: IncomingMessage, sessionId: string) => Promise<boolean> | boolean;
 	/** Frames a product adds beside a wire event on the same connection. */
 	readonly augment?: (event: Event, sessionId: string) => readonly WireFrame[] | Promise<readonly WireFrame[]>;
+	/** 0.43.0 (#4): the host's own frame source. Called once per open
+	 *  stream with a `push`; whatever the host pushes — a tool's progress,
+	 *  a retry banner — is written on the SAME ordered chain as the wire
+	 *  events, so a frame pushed between two events lands between them,
+	 *  on `/run?stream=1` and on `GET /events` alike. The returned function
+	 *  is called when the stream ends; a push after that is dropped.
+	 *  Nothing here is durable: a reconnecting client sees events again,
+	 *  never these frames. */
+	readonly frames?: (sessionId: string, push: (frame: WireFrame) => void) => (() => void) | void;
 	/** The product's turn preparation; default: `body.input` as given.
 	 *  0.42.0: it may instead ANSWER the request itself — write the
 	 *  product's own status and body to `res` and return `{ handled: true }`;
@@ -165,12 +174,21 @@ export function createHttpHandler(service: SessionService, options: HttpHandlerO
 				if (!closed && text !== "") res.write(text);
 			});
 		});
+		// 0.43.0 (#4): the host's frames ride the same chain — ordered with
+		// the events, dropped once the stream has ended.
+		const push = (frame: WireFrame): void => {
+			chain = chain.then(() => {
+				if (!closed) res.write(`event: ${frame.event}\ndata: ${JSON.stringify(frame.data)}\n\n`);
+			});
+		};
+		const stopFrames = options.frames?.(sessionId, push) ?? undefined;
 		const keepalive = keepaliveMs > 0 ? setInterval(() => res.write(": keepalive\n\n"), keepaliveMs) : undefined;
 		keepalive?.unref();
 		const end = (): void => {
 			if (closed) return;
 			closed = true;
 			if (keepalive !== undefined) clearInterval(keepalive);
+			stopFrames?.();
 			unsubscribe();
 		};
 		req.on("close", end);

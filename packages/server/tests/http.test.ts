@@ -254,3 +254,82 @@ describe("R4: the HTTP + SSE transport", () => {
 		expect(((await draining.json()) as WireError).code).toBe("draining");
 	});
 });
+
+describe("0.43.0 (#4): the host's own frame source rides the same ordered chain", () => {
+	it("a frame pushed while a tool runs lands between the tool's started and result frames on /run?stream=1; the source is stopped when the stream ends", async () => {
+		const gated = gatedTool("t");
+		let push: ((frame: { event: string; data: unknown }) => void) | undefined;
+		let stopped = 0;
+		const h = await host({
+			tools: [gated.tool],
+			handler: {
+				frames: (_sessionId, p) => {
+					push = p;
+					return () => {
+						stopped += 1;
+					};
+				},
+			},
+		});
+		const res = await h.post("/s/run?stream=1", { input: "hi" });
+		expect(res.status).toBe(200);
+		const reader = res.body!.getReader();
+		const decoder = new TextDecoder();
+		let text = "";
+		const readUntil = async (stop: (frames: Frame[]) => boolean): Promise<Frame[]> => {
+			for (;;) {
+				const frames = parseSse(text);
+				if (stop(frames)) return frames;
+				const { value, done } = await reader.read();
+				if (done) return parseSse(text);
+				text += decoder.decode(value, { stream: true });
+			}
+		};
+		await readUntil((fs) => fs.some((f) => f.event === "tool_execution_started"));
+		expect(push, "the source was handed a push when the stream opened").toBeDefined();
+		push!({ event: "progress", data: { pct: 37 } }); // minutes into a tool, nothing durable happening
+		await readUntil((fs) => fs.some((f) => f.event === "progress"));
+		gated.release();
+		const frames = await readUntil((fs) => fs.some((f) => f.event === "terminal"));
+		const order = frames.map((f) => f.event ?? (f.comment !== undefined ? `:${f.comment}` : "?"));
+		const started = order.indexOf("tool_execution_started");
+		const progress = order.indexOf("progress");
+		const result = order.indexOf("tool_result");
+		expect(started).toBeGreaterThan(-1);
+		expect(progress, "the host's frame is on the stream").toBeGreaterThan(started);
+		expect(result, "and before the durable event that came after it").toBeGreaterThan(progress);
+		expect(frames.find((f) => f.event === "progress")!.data).toEqual({ pct: 37 });
+		expect(frames.find((f) => f.event === "progress")!.id, "a host frame has no seq — it is not durable").toBeUndefined();
+		await new Promise((r) => setTimeout(r, 30));
+		expect(stopped, "the source is stopped when the stream ends").toBe(1);
+	});
+
+	it("GET /events carries the host's frames too; a push after the stream ended is dropped, not an error", async () => {
+		const gated = gatedTool("t");
+		const pushes: ((frame: { event: string; data: unknown }) => void)[] = [];
+		const h = await host({ tools: [gated.tool], handler: { frames: (_s, p) => void pushes.push(p) } });
+		expect((await h.post("/s/run", { input: "hi" })).status).toBe(202);
+		const live = await fetch(`${h.base}/s/events`, { headers: { "last-event-id": "-1" } });
+		const reader = live.body!.getReader();
+		const decoder = new TextDecoder();
+		let text = "";
+		const readUntil = async (stop: (frames: Frame[]) => boolean): Promise<Frame[]> => {
+			for (;;) {
+				const frames = parseSse(text);
+				if (stop(frames)) return frames;
+				const { value, done } = await reader.read();
+				if (done) return parseSse(text);
+				text += decoder.decode(value, { stream: true });
+			}
+		};
+		await readUntil((fs) => fs.some((f) => f.event === "tool_execution_started"));
+		expect(pushes.length).toBeGreaterThan(0);
+		for (const p of pushes) p({ event: "banner", data: { retry: 2 } });
+		const frames = await readUntil((fs) => fs.some((f) => f.event === "banner"));
+		expect(frames.find((f) => f.event === "banner")!.data).toEqual({ retry: 2 });
+		await reader.cancel().catch(() => {});
+		await new Promise((r) => setTimeout(r, 30));
+		for (const p of pushes) p({ event: "late", data: 1 }); // the stream is gone — dropped
+		gated.release();
+	});
+});

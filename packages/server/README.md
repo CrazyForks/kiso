@@ -88,7 +88,7 @@ factory. The service is the part that was the same in every host.
 
 ## The HTTP + SSE transport — `@vincemakes/kiso-server/http`
 
-`createHttpHandler(service, { authorize, augment?, prepareInput?, projection?, keepaliveMs? })`
+`createHttpHandler(service, { authorize, augment?, frames?, prepareInput?, projection?, keepaliveMs? })`
 returns a `handle(req, res)` a host mounts in front of its own routes; it
 answers the agent routes under `prefix` (default `/v1/sessions`) and
 returns false for everything else. Status codes and framing are decided
@@ -101,3 +101,13 @@ may answer a request itself — write the product's own status and body to
 the response it receives and return `{ handled: true }`; nothing is opened
 and no run starts (a gate, a quota, an attachment check, in the product's
 own shape).
+
+`frames` (0.43.0) is the host's own frame source: called once per open
+stream with a `push`, and whatever the host pushes — a long tool's
+progress, a retry banner — is written on the same ordered chain as the
+wire events, on `/run?stream=1` and on `GET /events` alike, so a frame
+pushed between two events lands between them. `augment` fires only
+beside a durable event; `frames` is for the minutes in which nothing
+durable happens. The function it returns is called when the stream
+ends. Nothing pushed is durable: a client that reconnects sees the
+events again, never these frames.
