@@ -34,7 +34,7 @@
  */
 
 import { isAdapterEvent, type Adapter, type AbortSignalLike } from "../protocol/adapter.js";
-import type { Continuation, ContinuationEntry, ContinuationScope, Event, StopReason, StructuredError, Terminal, ToolCallEnd } from "../protocol/events.js";
+import { ERROR_CODES, type Continuation, type ContinuationEntry, type ContinuationScope, type ErrorCode, type Event, type StopReason, type StructuredError, type Terminal, type ToolCallEnd } from "../protocol/events.js";
 import type { ApprovalChain, ChainVerdict } from "../protocol/extension.js";
 import { EventLog } from "./event-log.js";
 import type { EventInput } from "./event-log.js";
@@ -1498,11 +1498,18 @@ export function toStructuredError(err: unknown): StructuredError {
 	if (typeof err === "object" && err !== null) {
 		const e = err as Partial<StructuredError>;
 		if (typeof e.code === "string" && typeof e.retryable === "boolean") {
+			// 0.43.0 (#19): every value this returns satisfies the durable
+			// StructuredError schema the store reads back with — a host
+			// adapter's vendor code becomes "unknown" with the code kept in the
+			// message; a status outside the non-negative safe integers is
+			// dropped; retryable rides as given. The kernel never writes a
+			// terminal the store cannot read.
+			const known = ERROR_CODES.has(e.code as ErrorCode);
 			return {
-				code: e.code as StructuredError["code"],
-				...(e.status !== undefined ? { status: e.status } : {}),
+				code: known ? (e.code as ErrorCode) : "unknown",
+				...(typeof e.status === "number" && Number.isSafeInteger(e.status) && e.status >= 0 ? { status: e.status } : {}),
 				retryable: e.retryable,
-				message: typeof e.message === "string" ? e.message : String(err),
+				message: `${known ? "" : `[${e.code}] `}${typeof e.message === "string" ? e.message : String(err)}`,
 				// CX-1 F8: the provider's Retry-After rides through to the kernel
 				...(typeof e.retryAfterMs === "number" && Number.isFinite(e.retryAfterMs) && e.retryAfterMs >= 0 ? { retryAfterMs: e.retryAfterMs } : {}),
 			};

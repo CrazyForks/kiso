@@ -682,7 +682,7 @@ const STOP_REASONS = new Set<StopReason>([
 
 const TOOL_ERROR_KINDS = new Set<ToolErrorKind>(["invalid_input", "precondition", "transient", "fatal"]);
 
-const ERROR_CODES = new Set<ErrorCode>([
+export const ERROR_CODES = new Set<ErrorCode>([
 	"rate_limit",
 	"overloaded",
 	"network",
