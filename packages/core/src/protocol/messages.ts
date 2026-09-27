@@ -86,10 +86,12 @@ export interface AssistantToolUseBlock {
 	readonly input: Readonly<Record<string, unknown>>;
 	/** 0.43.0 (#13): the arguments exactly as the model streamed them — the
 	 *  LEXICAL companion of `input` (`5.0` stays `5.0`), present when the
-	 *  provider streamed deltas, absent otherwise. Replayed verbatim by the
-	 *  adapters whose wire carries an arguments string. Never a second
-	 *  argument channel: `input` stays the semantic basis of validation,
-	 *  permission and execution. */
+	 *  provider streamed deltas, absent otherwise. Carried for the tool
+	 *  and the host; NOT replayed to the provider (0430-B1: replaying it
+	 *  changed every call's bytes and the paired bench read more requests
+	 *  on that arm — the adapters replay the canonical form). Never a
+	 *  second argument channel: `input` stays the semantic basis of
+	 *  validation, permission and execution. */
 	readonly rawInput?: string;
 }
 

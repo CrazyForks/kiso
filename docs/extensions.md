@@ -490,9 +490,11 @@ model streamed them (`{"x":5.0}` keeps its `5.0`), the lexical companion
 of the parsed `input` — present when the provider streamed deltas, absent
 otherwise. It is not a second argument channel: validation, permission and
 execution read the parsed input. The projection carries the same text on
-the assistant's tool-use block and the openai-family adapters replay it
-verbatim (the anthropic wire takes a structured input and cannot); the
-durable source is the `tool_call_input_delta` events. ToolContext is
+the assistant's tool-use block, for the host; the adapters replay the
+canonical stringified input to the provider, not the raw text (0430-B1:
+replaying it changed every call's bytes and the release bench read more
+requests on that arm); the durable source is the `tool_call_input_delta`
+events. ToolContext is
 derived from the durable invocation and execution, never from ephemeral
 process state: a handler that runs after a crash recovery gets the same
 invocation context as a fresh one (`sessionId`, `callId`, `rawInput`),

@@ -244,8 +244,8 @@ function toOutputItem(block: AssistantBlock): Record<string, unknown> {
 	// No `id` here either — an item id pairs a function_call with a stored
 	// reasoning item, and under `store: false` there is nothing to pair
 	// with. `call_id` is the identity the kernel and the provider share.
-	// 0.43.0 (#13): the model's own text when the log has it
-	return { type: "function_call", call_id: block.callId, name: block.name, arguments: block.rawInput ?? JSON.stringify(block.input) };
+	// 0430-B1: the canonical form, never the model's own text (see the chat adapter's note)
+	return { type: "function_call", call_id: block.callId, name: block.name, arguments: JSON.stringify(block.input) };
 }
 
 /** MG-1 (A5): the stored reasoning items replay ONLY to the scope that

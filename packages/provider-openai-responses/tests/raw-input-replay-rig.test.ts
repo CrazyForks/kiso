@@ -1,7 +1,7 @@
 /**
- * 0.43.0 (#13) — the Responses adapter replays the model's own argument
- * text in `function_call.arguments`; without rawInput, the stringified
- * parsed input. RED on 0.42.x. The server only captures the body — the
+ * 0.43.0 (#13) — the Responses adapter replays the CANONICAL argument text
+ * in `function_call.arguments` whether or not the block carries rawInput
+ * (0430-B1: the raw replay was withdrawn before 0.43.0 shipped). The server only captures the body — the
  * request then fails and the run ends `error`, which is not the point.
  */
 
@@ -40,8 +40,8 @@ async function replay(history: Message[]): Promise<string> {
 	return items.find((i) => i.type === "function_call")!.arguments!;
 }
 
-describe("#13 rig — the Responses adapter replays the lexical arguments", () => {
-	it("a block with rawInput is replayed as that text", async () => {
+describe("0430-B1 rig — the Responses adapter replays the canonical arguments", () => {
+	it("a block WITH rawInput is still replayed as the canonical text", async () => {
 		expect(
 			await replay([
 				{ role: "user", content: "go" },
@@ -49,7 +49,7 @@ describe("#13 rig — the Responses adapter replays the lexical arguments", () =
 				{ role: "tool", callId: "c1", content: "ok", isError: false },
 				{ role: "user", content: "and?" },
 			] as Message[]),
-		).toBe('{ "x": 5.0 }');
+		).toBe('{"x":5}'); // 0430-B1: canonical, not the raw text
 	});
 
 	it("a block without rawInput falls back to the stringified parsed input", async () => {
