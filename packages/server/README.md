@@ -96,7 +96,7 @@ here once: `id: <seq>` / `event: <type>` / `data: <WireEvent>`, an `: open`
 preamble, `Last-Event-ID` and `?after`, a keepalive; `in_flight` and
 `open_run` are 409, `draining` 503, `forbidden` 403. Wire events are the
 projection in `@vincemakes/kiso-protocol` — never the durable event.
-`authorize` is required: there is no default that allows. The synchronous cold-read methods (`openRun`, `openRuns`, `highWater`, `events`) read the session's log and THROW when it cannot be read; they never report an unreadable log as "nothing open" — call them inside a try/catch in a host callback. `prepareInput`
+`authorize` is required: there is no default that allows. `openRun`, `openRuns`, and `events()` on a session the service has not opened read the durable store and THROW when its log is unreadable; they never disguise corruption as an empty result — call them inside a try/catch in a host callback. `highWater()` is process-local and does not read the store. `prepareInput`
 may answer a request itself — write the product's own status and body to
 the response it receives and return `{ handled: true }`; nothing is opened
 and no run starts (a gate, a quota, an attachment check, in the product's

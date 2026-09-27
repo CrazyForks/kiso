@@ -34,7 +34,8 @@
  */
 
 import { isAdapterEvent, type Adapter, type AbortSignalLike } from "../protocol/adapter.js";
-import { ERROR_CODES, type Continuation, type ContinuationEntry, type ContinuationScope, type ErrorCode, type Event, type StopReason, type StructuredError, type Terminal, type ToolCallEnd } from "../protocol/events.js";
+import type { Continuation, ContinuationEntry, ContinuationScope, ErrorCode, Event, StopReason, StructuredError, Terminal, ToolCallEnd } from "../protocol/events.js";
+import { ERROR_CODES } from "../protocol/error-codes.js";
 import type { ApprovalChain, ChainVerdict } from "../protocol/extension.js";
 import { EventLog } from "./event-log.js";
 import type { EventInput } from "./event-log.js";
@@ -1503,7 +1504,8 @@ export function toStructuredError(err: unknown): StructuredError {
 			// adapter's vendor code becomes "unknown" with the code kept in the
 			// message; a status outside the non-negative safe integers is
 			// dropped; retryable rides as given. The kernel never writes a
-			// terminal the store cannot read.
+			// terminal the store cannot read. The set is the protocol's own,
+			// internal — a host cannot see or change it.
 			const known = ERROR_CODES.has(e.code as ErrorCode);
 			return {
 				code: known ? (e.code as ErrorCode) : "unknown",
