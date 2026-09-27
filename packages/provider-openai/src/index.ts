@@ -558,8 +558,13 @@ function toOpenAIMessages(
 					return {
 						id: t.callId,
 						type: "function" as const,
-						// 0.43.0 (#13): the model's own text when the log has it
-						function: { name: t.name, arguments: t.rawInput ?? JSON.stringify(t.input) },
+						// 0430-B1: the CANONICAL form, not the model's own text. The
+						// raw text stays on the block and the tool context; replaying
+						// it changed every call's bytes for the coding agent (the
+						// provider streams spaces after colons and commas) and the
+						// paired bench read more requests on that arm. Withdrawn
+						// before 0.43.0 shipped; the record is the release report.
+						function: { name: t.name, arguments: JSON.stringify(t.input) },
 					};
 				});
 			out.push({

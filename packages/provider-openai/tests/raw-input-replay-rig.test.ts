@@ -1,9 +1,11 @@
 /**
- * 0.43.0 (#13) — history replay sends the model's own argument text.
+ * 0.43.0 (#13) — history replay sends the CANONICAL argument text (0430-B1).
  *
- * A tool_use block that carries `rawInput` is replayed as that text in
- * `tool_calls[].function.arguments`; one without falls back to the
- * stringified parsed input. RED on 0.42.x (always JSON.stringify).
+ * A tool_use block's `rawInput` is for the tool and the host; the adapter
+ * replays `JSON.stringify(input)` whether or not the block carries it. The
+ * raw replay was tried for 0.43.0 and withdrawn before the release: it
+ * changed every call's bytes and the paired bench read more requests on
+ * that arm (finding 0430-B1). These tests pin the withdrawal.
  */
 
 import { createServer, type Server } from "node:http";
@@ -46,15 +48,15 @@ async function replay(history: Message[]): Promise<string> {
 	return msgs.find((m) => m.role === "assistant")!.tool_calls![0]!.function.arguments;
 }
 
-describe("#13 rig — the chat adapter replays the lexical arguments", () => {
-	it("a block with rawInput is replayed as that text — `5.0` and the spaces survive", async () => {
+describe("0430-B1 rig — the chat adapter replays the canonical arguments", () => {
+	it("a block WITH rawInput is still replayed as the canonical text — the raw form stays with the tool and the host", async () => {
 		const args = await replay([
 			{ role: "user", content: "go" },
 			{ role: "assistant", blocks: [{ type: "tool_use", callId: "c1", name: "probe", input: { x: 5 }, rawInput: '{ "x": 5.0 }' }] },
 			{ role: "tool", callId: "c1", content: "ok", isError: false },
 			{ role: "user", content: "and?" },
 		] as Message[]);
-		expect(args).toBe('{ "x": 5.0 }');
+		expect(args).toBe('{"x":5}'); // 0430-B1: canonical, not the raw text
 	});
 
 	it("a block without rawInput falls back to the stringified parsed input", async () => {
