@@ -30,6 +30,8 @@
  * to degrade into a normal `end_turn`. A new SDK enum that lacks a mapping
  * is a compile error in the adapters' exhaustive switches.
  */
+import { ERROR_CODES } from "./error-codes.js";
+
 export type StopReason =
 	| "end_turn"
 	| "tool_use"
@@ -682,17 +684,6 @@ const STOP_REASONS = new Set<StopReason>([
 
 const TOOL_ERROR_KINDS = new Set<ToolErrorKind>(["invalid_input", "precondition", "transient", "fatal"]);
 
-const ERROR_CODES = new Set<ErrorCode>([
-	"rate_limit",
-	"overloaded",
-	"network",
-	"timeout",
-	"quota",
-	"api_5xx",
-	"context_overflow",
-	"invalid_request",
-	"unknown",
-]);
 
 const MESSAGE_SOURCES = new Set<import("./messages.js").MessageSource>([
 	"user",
