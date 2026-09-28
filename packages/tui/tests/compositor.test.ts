@@ -35,7 +35,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Body } from "../src/compositor.js";
 import { Screen } from "./helpers/screen.js";
-import { cellComponent, formatDuration, type FrameCtx, visibleWidth } from "../src/components.js";
 import type { PanelView } from "../src/approval-panel.js";
 
 /** The BODY region's left-wall rows ("│ ") — W6: the box's chrome wall
@@ -1093,15 +1092,5 @@ describe("TUI v6 — the one compositor", () => {
 		// width cap — a violated cut row would have THROWN at tick().
 		const rows = plain.match(/  edit  a{20,}…/g) ?? [];
 		expect(rows.length).toBe(1);
-	});
-});
-
-describe("formatDuration — the one duration idiom", () => {
-	it("formatDuration — the `2h 14m` form: seconds under a minute, m s under an hour, h m past it", () => {
-		expect(formatDuration(0)).toBe("0s");
-		expect(formatDuration(32)).toBe("32s");
-		expect(formatDuration(90)).toBe("1m 30s");
-		expect(formatDuration(8040)).toBe("2h 14m");
-		expect(formatDuration(3600)).toBe("1h 0m");
 	});
 });

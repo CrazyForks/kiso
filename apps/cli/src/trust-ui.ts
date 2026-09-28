@@ -89,8 +89,8 @@ export function askPanel(
 			// line typed at it was discarded anyway.
 			//
 			// The y/n fallback below still serves the views that really
-			// do take a yes or no — the uncertainty gate, the trust
-			// prompt, the verify offer. Those have a dock-less form.
+			// do take a yes or no — the uncertainty gate and the trust
+			// prompt. Those have a dock-less form.
 			settled = true;
 			pendingAsk = null;
 			bodyLog(view.fallbackQuestion);

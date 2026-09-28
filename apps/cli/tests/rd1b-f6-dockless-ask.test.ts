@@ -19,8 +19,8 @@
  * The fix makes the sentence true: with no dock there is no way to
  * present options, so the ask declines immediately and the model gets
  * an honest `declined` result to act on. The y/n fallback still serves
- * the views that genuinely take a yes or no — the uncertainty gate, the
- * trust prompt, the verify offer — which are unaffected here.
+ * the views that genuinely take a yes or no — the uncertainty gate and
+ * the trust prompt — which are unaffected here.
  *
  * The test sends NO INPUT AT ALL. That is the whole point: it passes
  * only if the run completes on its own.

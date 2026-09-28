@@ -1021,7 +1021,9 @@ export async function consumeRun(
 				// TV-1B: a system-sourced input is PRODUCT MACHINERY — visible
 				// (every durable input renders) but never painted as the
 				// user's words. Provenance is honest on screen, not only in
-				// the log.
+				// the log. Since 0.44.0 (the verify offer retired) the CLI
+				// starts no such run itself; the branch keeps the rule for
+				// any run that carries one, as replay.ts does for old logs.
 				if (ev.source === "system") {
 					// R2 (law 1.3): the ◆ said nothing the words did not. What
 					// makes this row honest is that it NAMES itself machinery.

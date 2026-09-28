@@ -7,7 +7,7 @@
  *
  * E5 (the composition round, finding E5-F1/F2): the task extension left
  * the default composition — on 13 consecutive real-provider sessions it
- * paid its rent (system:ext:task + tool:task_set on every request) and
+ * paid its rent (its guidance and its tool on every request) and
  * was never called, not even on the guidance's own designed trigger —
  * and 0.44.0 retired it outright (no host used it either). A user or
  * project extension named "task" is a plain extension — no built-in to

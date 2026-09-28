@@ -49,8 +49,8 @@ export class Run implements AsyncIterable<Event> {
 		input: string | readonly ContentBlock[] | undefined,
 		externalSignal: AbortSignalLike | undefined,
 		resume: boolean,
-		// TV-1B: durable PROVENANCE for the input (e.g. the verification
-		// seed's source:"system") — who produced the line, never a
+		// TV-1B: durable PROVENANCE for the input (e.g. source:"system"
+		// for a line the product wrote) — who produced the line, never a
 		// provider-role escalation. Absent = plain user input.
 		source?: import("@vincemakes/kiso-core").MessageSource,
 		// 0.40.0: how a person composed the turn (a skill + the typed line) —

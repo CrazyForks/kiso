@@ -503,43 +503,13 @@ frame(
 		...boxChrome("", `${b("▘")}${d(" compacting · 12 rounds · ~48.2k tokens · 6s")}`, "esc to cancel"),
 		"",
 		"",
-		d("determinate · ONLY where a real N of M exists — the bar is the checklist glyphs in a row, zero new vocabulary"),
+		d("determinate · ONLY where a real N of M exists — the bar is the ▣ □ glyphs in a row"),
 		"",
 		...boxChrome("", `${b("▝")}${d(` indexing · 8/17 files ${bar(8, 17, 14)} 47%`)}`, "esc to cancel"),
 		"",
 		"",
 		d("settled · the recap idiom, replacing today's bare [/compact] notice"),
 		recap("compacted · 12 rounds → 1 summary · saved ~48.2k · ctx 91% → 34% · 7.4s"),
-	],
-);
-
-// 13 · the checklist — the one existing cell kind the round never touched
-const taskRow = (glyph, text, paint) => `  ${paint(glyph)} ${p(cut(text, W - 4))}`;
-frame(
-	"The checklist — state, rendered as if it were an event",
-	"body.checklist() pushes a NEW cell with done:true on every task_set, so each update commits another full copy to scrollback: 12 items over 10 updates is 130 rows of near-identical text. The component has no cap either, which breaks the very rule W7 sets. A task list is STATE — it belongs in one live block that redraws in place and commits once, exactly W8's window generalised. Active becomes ▸, which already means 'the current one' in the slash menu.",
-	[
-		d("today · unbounded, and a fresh copy every update"),
-		`${b(G.head)} ${p("task")}`,
-		taskRow("▣", "W7 — R1 caps in screen rows after the fold", d),
-		taskRow("▖", "W8 — live block height never changes until settle", p),
-		taskRow("□", "W9 — caps recomputed on resize, and only on resize", p),
-		taskRow("□", "W10 — render the result body, name every cut", p),
-		taskRow("□", "Release 1 → 0.1.36 (W7-W10) + gate re-baseline", p),
-		d("  … and all of that again, committed, on the next task_set"),
-		"",
-		"",
-		d("v7 · one live block · active first · done collapsed · committed once, at the end"),
-		`${b(G.head)} ${p("task")} ${d("· 6 items · 1 active · 2 done")}`,
-		taskRow("▸", "W8 — live block height never changes until settle", b),
-		taskRow("□", "W9 — caps recomputed on resize, and only on resize", p),
-		taskRow("□", "W10 — render the result body, name every cut", p),
-		taskRow("□", "Release 1 → 0.1.36 (W7-W10) + gate re-baseline", p),
-		bodyEnd("+2 done · ctrl+r"),
-		"",
-		"",
-		d("settled · when the list is finished it commits ONCE, in the recap idiom"),
-		recap("task done · 6 items · 2h 14m"),
 	],
 );
 

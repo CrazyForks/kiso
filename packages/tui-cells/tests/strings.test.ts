@@ -75,7 +75,7 @@ describe("KC3 §1: projectTrustView — the trust gate's panel", () => {
 		expect(view.title).toBe("/repo/.kiso");
 		expect(view.speaker).toBe("kiso");
 		// DECLARED SUPERSESSION (R2, design §4): the pending mark was `▸`,
-		// which is also the checklist's "the current one". A panel waiting
+		// which was also the retired checklist's "the current one". A panel waiting
 		// on a human says `❯` — the one mark that means "nothing moves
 		// until you answer". The 867a0fa literals are otherwise intact.
 		expect(view.statusText).toBe("❯ project trust");

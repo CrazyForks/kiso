@@ -46,10 +46,6 @@ import {
 import { executionLedger } from "./ledger.js";
 import { overflowBelt, type OverflowMeasure } from "./overflow-belt.js";
 import { windowLearner } from "./window-learner.js";
-
-/** TV-1A — the session-level evidence policy: the PURE projection defaults
- *  to ∅ (never inventing evidence); the session names the one built-in
- *  verification surface. Override per call for custom evidence tools. */
 import { denialResult, type ContinuationScope } from "@vincemakes/kiso-core";
 import { buildProfile, readProfile, writeProfile, writeSummary } from "./profile.js";
 import { summarizeEvents } from "./session-summary.js";

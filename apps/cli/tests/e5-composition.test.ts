@@ -13,14 +13,11 @@
  * plan-carrying resume gates left with it. This proof stays as a guard.)
  */
 
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { isolatedEnv, runCli, stripANSI } from "../../../tests/helpers/isolated-cli.mjs";
-
+import { isolatedEnv, runCli } from "../../../tests/helpers/isolated-cli.mjs";
 
 /** All request lines of a session's trace. */
 function traceRequests(home: string, sid: string): any[] {
@@ -38,28 +35,6 @@ function taskRent(req: any): any[] {
 	return (req.rent ?? []).filter(
 		(l: any) => l.surface.startsWith("system:ext:task") || l.surface.startsWith("tool:task_set"),
 	);
-}
-
-/** The durable session log lines (run envelope + event). */
-function logLines(home: string, sid: string): any[] {
-	const p = join(home, "sessions", `${sid}.jsonl`);
-	expect(existsSync(p), `session log missing: ${p}`).toBe(true);
-	return readFileSync(p, "utf8")
-		.split("\n")
-		.filter(Boolean)
-		.map((l) => JSON.parse(l));
-}
-
-/** The seq of the FIRST task_set tool_result in the durable log — the
- *  plan's position in the event stream (the resumed run's read-back
- *  coverage is asserted against it). tool_result events carry callId,
- *  not name — the task_set call is found first. */
-function planSeq(home: string, sid: string): number {
-	const events = logLines(home, sid).map((l) => l.event);
-	const call = events.find((e) => e.type === "tool_call_end" && e.name === "task_set");
-	const ev = call && events.find((e) => e.type === "tool_result" && e.callId === call.callId);
-	if (!ev) throw new Error("no task_set tool_result in the durable log");
-	return ev.seq as number;
 }
 
 /** A faux script file for the provider; returns its path. */

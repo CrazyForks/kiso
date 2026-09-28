@@ -1916,31 +1916,6 @@ class Banner implements Component {
 	}
 }
 
-/** The two duration idioms, from ONE implementation.
- *
- *  They agree in every branch but the hour: W20's settled task block says
- *  `2h 14m` (a long-horizon narrative does not care about seconds), and a
- *  LIVE elapsed label says `1h 2m 3s` (a running clock does). A near-copy
- *  differing in one branch is the drift that a shared helper exists to
- *  prevent, so the branch is a parameter.
- *
- *  Negative is clamped: a clock skew is not a negative duration. */
-function duration(totalSeconds: number, hoursKeepSeconds: boolean): string {
-	const s = Math.max(0, Math.round(totalSeconds));
-	if (s < 60) return `${s}s`;
-	const m = Math.floor(s / 60);
-	if (m < 60) return `${m}m ${s % 60}s`;
-	const h = Math.floor(m / 60);
-	return hoursKeepSeconds ? `${h}h ${m % 60}m ${s % 60}s` : `${h}h ${m % 60}m`;
-}
-
-/** W20 — the settled block's duration, the `2h 14m` form (the task
- *  narrative's long-horizon idiom): minutes+seconds under an hour,
- *  hours+minutes past it. Unchanged. */
-export function formatDuration(totalSeconds: number): string {
-	return duration(totalSeconds, false);
-}
-
 /** The LIVE elapsed label — every place a duration is shown while it is
  *  still running, and on the card that settles from it, so a card and the
  *  status row can never disagree.
@@ -1949,9 +1924,16 @@ export function formatDuration(totalSeconds: number): string {
  *  row came to read "working 637s": ten minutes as a four-figure number,
  *  with no branch anywhere that said otherwise. Past an hour it keeps
  *  seconds, because a clock the user is watching tick should not stop
- *  ticking. */
+ *  ticking.
+ *
+ *  Negative is clamped: a clock skew is not a negative duration. */
 export function elapsedLabel(totalSeconds: number): string {
-	return duration(totalSeconds, true);
+	const s = Math.max(0, Math.round(totalSeconds));
+	if (s < 60) return `${s}s`;
+	const m = Math.floor(s / 60);
+	if (m < 60) return `${m}m ${s % 60}s`;
+	const h = Math.floor(m / 60);
+	return `${h}h ${m % 60}m ${s % 60}s`;
 }
 
 /** The SETTLED call's duration — R13's grammar (`exit 0 · 90 lines ·

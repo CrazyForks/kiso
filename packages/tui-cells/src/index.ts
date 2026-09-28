@@ -18,7 +18,6 @@ export {
 	foldTerms,
 	elapsedLabel,
 	settledLabel,
-	formatDuration,
 	statusLine,
 	boxTop,
 	boxBottom,

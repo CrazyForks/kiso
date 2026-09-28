@@ -27,7 +27,8 @@
  * E3 (0.2.1): the script becomes the rent ledger's PREDICTION side (R7,
  * the star). The composition the CLI actually builds — the built-in
  * prompt, the coding tools, and the three default built-in extensions
- * (mcp / skills / subagent; the task extension is opt-in since E5) — is
+ * (mcp / skills / subagent; the task extension left at E5 and was
+ * retired in 0.44.0) — is
  * exposed as `defaultCompositionParts`;
  * `predictDefaultRentLedger` turns those parts into the exact ledger
  * array the runtime records, and `--rent-ledger` prints the table the

@@ -187,7 +187,7 @@ describe("W21: the panel chrome helpers", () => {
 	// on every row), and the retired phases took their copy with them.
 	it("the status is the phase, the affordance the v4 hint line", () => {
 		// DECLARED SUPERSESSION (R2, design §4): the pending mark was `▸`,
-		// which is also the checklist's "the current one". A panel waiting
+		// which was also the retired checklist's "the current one". A panel waiting
 		// on a human says `❯` — the one mark that means "nothing moves
 		// until you answer". The 867a0fa literals are otherwise intact.
 		expect(panelStatus(approvalView(), "options", 0)).toBe("❯ run paused");
