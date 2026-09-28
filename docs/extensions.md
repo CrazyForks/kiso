@@ -359,6 +359,10 @@ or multi select.
 - **A decline is an outcome, not silence.** The result names every
   question that went unanswered, options included — the model learns
   that you chose not to choose, which is different from not being asked.
+- **A host supplies its own panel.** `createAskExtension(ui)` takes the
+  bridge; `ui.ask(spec, signal, ctx)` receives `ctx = { sessionId, callId }`
+  from the tool context, so a host serving many sessions from one runtime
+  can route each question to the session that asked it.
 - **The answers are durable facts.** They ride the ordinary
   `tool_result` of an ordinary tool call, so **an answered question is
   never asked again — including across `kill -9`**. A question that was
