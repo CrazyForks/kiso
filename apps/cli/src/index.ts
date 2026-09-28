@@ -484,7 +484,8 @@ function makeLineInput(): LineInput {
  *  the user-level names, then the project-level ones marked `project:`.
  *  The built-in column is the banner's truthful face of the built-in layer:
  *  a fresh install reads `[3 extensions: built-in: mcp, skills, subagent]`
- *  with zero disk setup (E5: the task extension is opt-in). */
+ *  with zero disk setup (the task extension, opt-in from E5, was
+ *  retired in 0.44.0). */
 function bannerExtensionText(): string {
 	// KC3.5 slice ⓪ (the extraction): the composition moved to the
 	// terminal layer (extensionsBannerText — a pure function of the three

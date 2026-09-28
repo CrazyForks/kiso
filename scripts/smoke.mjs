@@ -45,12 +45,11 @@ const ALL = {
 	"@vincemakes/kiso-tui-cells": true,
 	"@vincemakes/kiso-tui": true,
 	// R-D 0.1.45 (decision point A): the four official extensions joined
-	// the publish surface — the CLI pins them exactly (E5: task left the
-	// default composition but stays pinned as the opt-in's npm source).
+	// the publish surface — the CLI pins them exactly (0.44.0: the task
+	// extension is retired and no longer published or pinned).
 	"@vincemakes/kiso-mcp-ext": true,
 	"@vincemakes/kiso-skills-ext": true,
 	"@vincemakes/kiso-subagent-ext": true,
-	"@vincemakes/kiso-task-ext": true,
 	"@vincemakes/kiso-ask-ext": true,
 	"@vincemakes/kiso-code": true,
 };
@@ -266,10 +265,9 @@ console.log("tier B OK — provider closure: the three factories import, error m
 			// the PACKED tree BEFORE kiso-code (decision point A's
 			// extensions-before-cli dependency order) — the CLI's exact
 			// pins would otherwise resolve unpublished registry names
-			// (the fresh-install 404) or stale published ones. E5: task is
-			// no longer built-in, but the cli still pins it (the opt-in's
-			// npm source), so it stays in the packed closure.
-			"@vincemakes/kiso-mcp-ext", "@vincemakes/kiso-skills-ext", "@vincemakes/kiso-subagent-ext", "@vincemakes/kiso-task-ext",
+			// (the fresh-install 404) or stale published ones. (0.44.0: the
+			// retired task extension left the closure.)
+			"@vincemakes/kiso-mcp-ext", "@vincemakes/kiso-skills-ext", "@vincemakes/kiso-subagent-ext",
 			// KC3.5: the ask extension joins the packed closure — the cli
 			// pins it exactly, so a fresh install must resolve it locally.
 			"@vincemakes/kiso-ask-ext",

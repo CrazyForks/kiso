@@ -11,9 +11,9 @@
  *
  * The gate drives the default composition exactly as the CLI builds it:
  * the built-in system prompt, the coding tools, and the three default
- * built-in extensions (mcp / skills / subagent; the task extension is
- * opt-in since E5) against a bare home (no skills, no MCP servers) —
- * the bench session shape.
+ * built-in extensions (mcp / skills / subagent; the task extension left
+ * at E5 and was retired in 0.44.0) against a bare home (no skills, no
+ * MCP servers) — the bench session shape.
  */
 
 import { mkdtempSync, readFileSync } from "node:fs";

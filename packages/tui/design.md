@@ -215,7 +215,7 @@ terminal that reports nothing.
 | twinkle (§5.2) | the model is thinking (the status row) |
 | `❯` | it needs you: an approval or a question is pending |
 | `◦` | queued, not started |
-| `✦` | the turn's seal (`✦ took …`) and the checklist header |
+| `✦` | the turn's seal (`✦ took …`) |
 | `▾ ▸ │` | the transcript viewer's marks (§9) |
 | (none) | a settled call, and a folded stretch — the outcome is in the words |
 

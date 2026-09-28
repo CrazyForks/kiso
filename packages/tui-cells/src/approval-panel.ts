@@ -805,8 +805,8 @@ export function panelLeadWidth(view: PanelView, phase: PanelPhase, cursor: numbe
  *  the CLI's painting status (the compositor derives it from the panel
  *  state; the "❯ run paused" etc. ride the options phase). */
 // R2 (design §4, the ❯ ruling): a panel that is WAITING ON A HUMAN says
-// so with the one mark that means it. `▸` is the checklist's "the
-// current one" — a mark meaning two things is worse than two marks
+// so with the one mark that means it. `▸` already means "the current
+// one" — a mark meaning two things is worse than two marks
 // (law 4.2), and the thing this row has to convey is not "here" but
 // "nothing moves until you answer".
 export function panelStatus(view: PanelView, phase: PanelPhase, cursor: number): string {

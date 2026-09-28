@@ -32,7 +32,6 @@ import { validateArgs } from "../packages/core/src/tools/validate.js";
 import { createCodingTools } from "../packages/tools-node/src/index.js";
 import { statusTool } from "../extensions/mcp/src/status.js";
 // @ts-expect-error — plain .mjs extension modules carry no type declarations
-import createTaskExtension from "../extensions/task/src/kiso-task.mjs";
 // @ts-expect-error — same
 import createSubagentExtension from "../extensions/subagent/src/kiso-subagent.mjs";
 // @ts-expect-error — same
@@ -53,8 +52,6 @@ async function firstPartySchemas(): Promise<NamedSchema[]> {
 		...createCodingTools({ workspaceRoot: ws }).map((t) => ({ name: t.name, parameters: t.parameters })),
 		statusTool([]) as unknown as { name: string; parameters: Readonly<Record<string, unknown>> },
 	];
-	const task = createTaskExtension();
-	for (const t of task.tools ?? []) tools.push(t);
 	const prevDepth = process.env.KISO_SUBAGENT_DEPTH;
 	delete process.env.KISO_SUBAGENT_DEPTH; // depth 0 — the delegate tool exists
 	const sub = await createSubagentExtension();
@@ -84,7 +81,6 @@ const VALID_INPUTS: Readonly<Record<string, Record<string, unknown>>> = {
 	edit_file: { path: "a.txt", search: "a", replace: "b", expectedRevision: "rev:x" },
 	shell: { command: "true" },
 	mcp__status: {},
-	task_set: { items: [{ text: "t", status: "pending" }] },
 	delegate: { tasks: [{ role: "explorer", task: "look around" }] },
 	read_skill: { name: "demo" },
 	ask_user: { questions: [{ question: "pick one", options: [{ label: "a" }, { label: "b" }] }] },
@@ -93,7 +89,6 @@ const VALID_INPUTS: Readonly<Record<string, Record<string, unknown>>> = {
 /** Nested probes: the invented field sits INSIDE an array-item object. */
 const NESTED_PROBES: Readonly<Record<string, Record<string, unknown>>> = {
 	edit_file: { path: "a.txt", expectedRevision: "rev:x", edits: [{ search: "a", replace: "b", __invented: 1 }] },
-	task_set: { items: [{ text: "t", status: "pending", __invented: 1 }] },
 	delegate: { tasks: [{ role: "explorer", task: "x", __invented: 1 }] },
 };
 
@@ -115,7 +110,7 @@ function* objectNodes(node: unknown, path: string): Generator<{ path: string; no
 describe("PH-1a.1 — the closed world (finding PH-F25)", () => {
 	it("an invented ROOT field fails validation on every first-party tool, model-visibly", async () => {
 		const schemas = await firstPartySchemas();
-		expect(schemas.length).toBeGreaterThanOrEqual(11); // 6 built-ins + status + task_set + delegate + read_skill + ask_user
+		expect(schemas.length).toBeGreaterThanOrEqual(10); // 6 built-ins + status + delegate + read_skill + ask_user
 		for (const { tool, schema } of schemas) {
 			const valid = VALID_INPUTS[tool];
 			expect(valid, `no VALID_INPUTS fixture for tool "${tool}" — add one (a new first-party tool joins this gate)`).toBeDefined();

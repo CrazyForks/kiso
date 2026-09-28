@@ -20,12 +20,9 @@ headless session has nobody to answer a question, so it never loads
 never mentions `ask_user`. Nothing pays prompt rent for a question that
 could not be answered.
 
-The fourth official extension, **task** (durable long-horizon working
-memory), is **opt-in since 0.3.0**: on 13 consecutive real-provider
-sessions it paid its rent on every request and was never called — not
-even on the planning guidance's own designed trigger (measured dead
-weight, findings E5-F1/E5-F2). Its capability is preserved: install it
-per the [Task](#task--durable-long-horizon-working-memory) section below.
+The **task** extension (durable long-horizon working memory) was
+opt-in from 0.3.0 and is **retired in 0.44.0** — see
+[Task](#task--retired-in-0440) below.
 
 On top of the built-ins, the classic layers still load, in cascade order:
 **built-in → user → project**. An extension is a plain `.mjs` file — no
@@ -377,42 +374,26 @@ or multi select.
   one decision, and the panel can already be declined. A user
   extension's deny and plan mode's read-only refusal still win.
 
-## Task — durable long-horizon working memory
+## Task — retired in 0.44.0
 
-**Opt-in since 0.3.0** (it shipped built-in from 0.1.45 to 0.2.2; on 13
-consecutive real-provider sessions it paid its rent on every request and
-was never called — not even on the planning guidance's own designed
-trigger, findings E5-F1/E5-F2 — so it left the default composition).
-`extensions/task` is the official extension's source
-(`src/kiso-task.mjs` — source IS the product, no build step); install or
-customize by copying it into `~/.kiso/extensions/` (a plain user
-extension — task is no longer a built-in, nothing to shadow):
+The task extension (one `task_set` tool, a whole-table plan echoed into
+the log) left the default composition in 0.3.0: on 13 consecutive
+real-provider sessions it paid its prompt rent on every request and was
+never called (findings E5-F1/E5-F2). It stayed opt-in until 0.44.0,
+which retires it together with everything that existed only to serve
+it — the runtime's `session.assessTasks()` projection and its types, the
+terminal's checklist cell, and the verify offer after a plan's last step.
 
-```
-cp extensions/task/src/kiso-task.mjs ~/.kiso/extensions/
-```
-
-A plan-carrying session keeps its durable plan on resume under the new
-default — the plan lives in the log, not the extension. The edge: with
-the extension absent there is no `task_set` to *update* the plan; the
-opt-in restores it.
-
-The `task_set` tool is a whole-table replace (the shape the reference
-implementations use for a todo list):
-the model sends the complete current list every time, with at most one
-item `active` (a second active is refused loudly — the same discipline).
-The result echoes the normalized list and carries the `do-not-compact`
-tag. The echo renders in the terminal as a checklist cell
-(□ pending / ▖ active / ▣ done, the brick family), and the system prompt
-gains a restrained planning discipline (3+ steps → plan first with a
-verification step; mark active before starting; mark done immediately).
-
-The selling point is the contrast with the usual todo tool, whose list
-is **runtime state** — it dies with the process. kiso's list is **durable
-events** — the echo is a tool-result message in the session log, so it
-survives kill -9 (a resume rebuilds the projection from the log) and
-/compact (the do-not-compact tag makes the summary layer's boundary pull
-back before its round — the latest list is never lost to a summary).
+- **Old sessions still resume.** A `task_set` call in an existing log is
+  an ordinary tool call and result, and it replays as an ordinary tool
+  row. The log format did not change.
+- **A copy you keep is a plain user extension.** A `task_set` tool in
+  `~/.kiso/extensions/` loads and runs like any other user extension; the
+  terminal simply shows its result as a normal tool row. The package's
+  last published version is 0.43.0 and it receives no further releases.
+- **The generic seams stay.** A tool result tagged `do-not-compact` is
+  still never covered by a summary, and `run(input, { source })` still
+  records where a turn's input came from — any extension can use both.
 
 ## Project-level `.kiso` — trusted by content digest, not by directory
 

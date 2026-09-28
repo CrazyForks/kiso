@@ -237,8 +237,7 @@ export type BodyCell =
 			 *  (history is never rewritten — ADR-0046). */
 			expanded: boolean;
 			/** W14: the index of the turn record that created this cell
-			 *  (−1 before the first turn). The checklist reads it: a task
-			 *  list belongs to its turn. */
+			 *  (−1 before the first turn). */
 			turn: number;
 			/** W19: a DENIED call's reason (the CLI extracted it from the
 			 *  result's "[Permission denied] " prefix, keyed on the "denied"
@@ -274,31 +273,7 @@ export type BodyCell =
 	| { kind: "fold"; label: string; children: BodyCell[]; summary: string | null; done: true }
 	| { kind: "banner"; version: string; extensionsText: string; resume: ResumeMeta[]; meta?: BannerMeta | undefined; done: true }
 	| { kind: "raw"; lines: string[]; done: true; wrap?: "words" }
-	| { kind: "terminal"; label: string; line: string; done: true }
-	| {
-			kind: "checklist";
-			/** the model-authored header tail (parseChecklist's count line —
-			 *  chat.ts). The compositor's fixed "task" prefix rides BEFORE it
-			 *  (W20 naming ruling: never model-controlled). */
-			header: string;
-			items: { text: string; status: "pending" | "active" | "done" }[];
-			/** W20: false while LIVE — the current turn's ONE in-place block
-			 *  (the commit loop only takes done cells, so it stays in the
-			 *  live region); true once SETTLED — endTurn committed it as the
-			 *  turn's one recap block. */
-			done: boolean;
-			/** W20: the LIVE block's ctrl+o toggle (W15) — the capped form
-			 *  flips to the full list in place. The settled render ignores
-			 *  it (already full). */
-			expanded: boolean;
-			/** W20: the wall clock of the block's FIRST call — the settled
-			 *  header's duration is clocked from here, compositor-side (the
-			 *  CLI stays unchanged). */
-			startedAt: number;
-			/** W20: the run's duration at the settle — the `2h 14m` form. */
-			durationSeconds: number;
-			turn: number;
-	  };
+	| { kind: "terminal"; label: string; line: string; done: true };
 
 const TOOL_SUMMARY_MAX = 60; // the tool line's parameter summary, chars
 
@@ -327,8 +302,6 @@ export function cellComponent(cell: BodyCell): Component {
 			return new RawBlock(cell);
 		case "terminal":
 			return new TerminalBlock(cell);
-		case "checklist":
-			return new Checklist(cell);
 	}
 }
 
@@ -1943,38 +1916,6 @@ class Banner implements Component {
 	}
 }
 
-/** W20 — the task block's fixed-window height: the whole live block
- *  (header + rows) in POST-FOLD screen rows at EVERY width: the header,
- *  the active row, up to 2 pending, the overflow-pending fold, the
- *  done-collapse. Every live row CUTS at W (never folds) — the block's
- *  height is its row count. */
-export const CAP_TASK_LIVE = 6;
-
-/** The two duration idioms, from ONE implementation.
- *
- *  They agree in every branch but the hour: W20's settled task block says
- *  `2h 14m` (a long-horizon narrative does not care about seconds), and a
- *  LIVE elapsed label says `1h 2m 3s` (a running clock does). A near-copy
- *  differing in one branch is the drift that a shared helper exists to
- *  prevent, so the branch is a parameter.
- *
- *  Negative is clamped: a clock skew is not a negative duration. */
-function duration(totalSeconds: number, hoursKeepSeconds: boolean): string {
-	const s = Math.max(0, Math.round(totalSeconds));
-	if (s < 60) return `${s}s`;
-	const m = Math.floor(s / 60);
-	if (m < 60) return `${m}m ${s % 60}s`;
-	const h = Math.floor(m / 60);
-	return hoursKeepSeconds ? `${h}h ${m % 60}m ${s % 60}s` : `${h}h ${m % 60}m`;
-}
-
-/** W20 — the settled block's duration, the `2h 14m` form (the task
- *  narrative's long-horizon idiom): minutes+seconds under an hour,
- *  hours+minutes past it. Unchanged. */
-export function formatDuration(totalSeconds: number): string {
-	return duration(totalSeconds, false);
-}
-
 /** The LIVE elapsed label — every place a duration is shown while it is
  *  still running, and on the card that settles from it, so a card and the
  *  status row can never disagree.
@@ -1983,9 +1924,16 @@ export function formatDuration(totalSeconds: number): string {
  *  row came to read "working 637s": ten minutes as a four-figure number,
  *  with no branch anywhere that said otherwise. Past an hour it keeps
  *  seconds, because a clock the user is watching tick should not stop
- *  ticking. */
+ *  ticking.
+ *
+ *  Negative is clamped: a clock skew is not a negative duration. */
 export function elapsedLabel(totalSeconds: number): string {
-	return duration(totalSeconds, true);
+	const s = Math.max(0, Math.round(totalSeconds));
+	if (s < 60) return `${s}s`;
+	const m = Math.floor(s / 60);
+	if (m < 60) return `${m}m ${s % 60}s`;
+	const h = Math.floor(m / 60);
+	return `${h}h ${m % 60}m ${s % 60}s`;
 }
 
 /** The SETTLED call's duration — R13's grammar (`exit 0 · 90 lines ·
@@ -2002,71 +1950,6 @@ export function elapsedLabel(totalSeconds: number): string {
 export function settledLabel(totalSeconds: number): string {
 	const tenths = Math.max(0, Math.round(totalSeconds * 10) / 10);
 	return tenths < 60 ? `${tenths.toFixed(1)}s` : elapsedLabel(tenths);
-}
-
-/**
- * W20 — the task checklist as STATE: ONE live block that redraws in
- * place (the current turn's in-place updates), settling at the turn's
- * end as ONE recap block. LIVE (done:false): the fixed "task" prefix +
- * the compositor-derived counts (the model tail rides AFTER — never
- * model-controlled), the active item first with ▸ (the menu's "the
- * current one"), pending next (≤2), the done items COLLAPSED behind the
- * W10 cut family `└ +N done · ctrl+o`, overflow pending behind
- * `└ +N more · ctrl+o` — every row cut at W so the cap holds at every
- * width. ctrl+o (W15) toggles the full list in place (expanded). SETTLED
- * (done:true): the recap idiom `task done · N items · <duration>` + the
- * FULL final item list in the checklist's existing shape (▖/□/▣ —
- * indented two, the glyph leads, no │ gutter).
- */
-class Checklist implements Component {
-	constructor(
-		private readonly cell: {
-			header: string;
-			items: { text: string; status: "pending" | "active" | "done" }[];
-			done: boolean;
-			expanded: boolean;
-			durationSeconds: number;
-		},
-	) {}
-	render(W: number, _ctx: FrameCtx): string[] {
-		const p = palette();
-		const { items, done, expanded, durationSeconds } = this.cell;
-		const active = items.filter((i) => i.status === "active");
-		const pending = items.filter((i) => i.status === "pending");
-		const doneCount = items.length - active.length - pending.length;
-		const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
-		const tail = this.cell.header === "" ? "" : ` · ${this.cell.header}`;
-		const fixed = done
-			? `task done · ${plural(items.length, "item")} · ${formatDuration(durationSeconds)}`
-			: `task · ${plural(items.length, "item")} · ${active.length} active · ${doneCount} done`;
-		const header = `${p.bold}✦${p.reset} ${escapeTerminal(fixed + tail)}`;
-		// the FULL-list forms: SETTLED — the durable record (the fold is
-		// fine — committed content wraps naturally) — and the LIVE ctrl+o
-		// toggle (the header CUTS — the block stays one window high; the
-		// expanded rows show the ▣ the collapse hid). The live flag picks
-		// the glyphs: the settled list keeps the durable ▖, the expanded
-		// live list the ▸.
-		const glyph = (status: string, live: boolean): string => {
-			const g = status === "pending" ? "□" : status === "active" ? (live ? "▸" : "▖") : "▣";
-			return g === "▸" ? `${p.bold}▸${p.reset}` : g;
-		};
-		if (done || expanded) {
-			const rows = done ? foldLine(header, W) : [cutLine(header, W)];
-			for (const item of items) rows.push(...foldLine(`  ${glyph(item.status, !done)} ${escapeTerminal(item.text)}`, W));
-			return rows;
-		}
-		// LIVE — the fixed window: the header + the item rows CUT at W
-		// (one screen row each — the block's height is its row count,
-		// CAP_TASK_LIVE, at every width). The cut is the momentary view;
-		// the settle (and the ctrl+o toggle) show everything.
-		const itemRows: string[] = [];
-		if (active.length > 0) itemRows.push(`  ${p.bold}▸${p.reset} ${escapeTerminal(active[0]!.text)}`);
-		for (const item of pending.slice(0, 2)) itemRows.push(`  □ ${escapeTerminal(item.text)}`);
-		const more = pending.length - 2;
-		if (more > 0) itemRows.push(`  ${p.dim}└ +${more} more · ctrl+o${p.reset}`);
-		if (doneCount > 0) itemRows.push(`  ${p.dim}└ +${doneCount} done · ctrl+o${p.reset}`);
-		return [cutLine(header, W), ...itemRows.map((r) => cutLine(r, W))];
-	}
 }
 
 // ---- the chrome components (the status container, the footer) ----

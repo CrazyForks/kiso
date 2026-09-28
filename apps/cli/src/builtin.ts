@@ -7,12 +7,11 @@
  *
  * E5 (the composition round, finding E5-F1/F2): the task extension left
  * the default composition — on 13 consecutive real-provider sessions it
- * paid its rent (system:ext:task + tool:task_set on every request) and
- * was never called, not even on the guidance's own designed trigger. It
- * stays an official extension, OPT-IN via the user layer: copy
- * extensions/task/src/kiso-task.mjs into ~/.kiso/extensions/ (a user or
- * project extension named "task" is now a plain extension — no built-in
- * to shadow or collide with).
+ * paid its rent (its guidance and its tool on every request) and
+ * was never called, not even on the guidance's own designed trigger —
+ * and 0.44.0 retired it outright (no host used it either). A user or
+ * project extension named "task" is a plain extension — no built-in to
+ * shadow or collide with.
  *
  *  - a user extension may SHADOW a built-in by name — the user's deliberate
  *    install wins (a built-in cannot be uninstalled), loudly, and the

@@ -46,12 +46,6 @@ import {
 import { executionLedger } from "./ledger.js";
 import { overflowBelt, type OverflowMeasure } from "./overflow-belt.js";
 import { windowLearner } from "./window-learner.js";
-import { assessTasks, type TaskAssessment } from "./task-assessment.js";
-
-/** TV-1A — the session-level evidence policy: the PURE projection defaults
- *  to ∅ (never inventing evidence); the session names the one built-in
- *  verification surface. Override per call for custom evidence tools. */
-const DEFAULT_EVIDENCE_TOOLS: ReadonlySet<string> = new Set(["shell"]);
 import { denialResult, type ContinuationScope } from "@vincemakes/kiso-core";
 import { buildProfile, readProfile, writeProfile, writeSummary } from "./profile.js";
 import { summarizeEvents } from "./session-summary.js";
@@ -1209,28 +1203,6 @@ export class AgentSession {
 	/** Executions that started but never reported a result (crash window). */
 	uncertainExecutions() {
 		return [...executionLedger(this.log.all).values()].filter((r) => r.status === "uncertain");
-	}
-
-	/**
-	 * TV-1A — assess the task claims and their evidence freshness over THIS
-	 * session's durable log. The non-mutating set comes from the live tools'
-	 * own `effects.precommitSafe` certificates (one direction of truth,
-	 * never a second declaration) — the read-only+free+local contract, the
-	 * only certificate that proves the world untouched. `concurrency:
-	 * "shared"` is a SCHEDULING promise and never feeds this set (TV-1C —
-	 * slow_touch is shared and writes). The evidence policy defaults to
-	 * {"shell"} — the convention the task extension's own "make the LAST
-	 * item a verification step" guidance produces.
-	 */
-	assessTasks(opts?: { readonly evidenceTools?: ReadonlySet<string> }): TaskAssessment {
-		const nonMutatingTools = new Set<string>();
-		for (const tool of this.#config.registry.list()) {
-			if (tool.effects?.precommitSafe === true) nonMutatingTools.add(tool.name);
-		}
-		return assessTasks(this.log.all, {
-			nonMutatingTools,
-			evidenceTools: opts?.evidenceTools ?? DEFAULT_EVIDENCE_TOOLS,
-		});
 	}
 
 	/**

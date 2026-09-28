@@ -543,8 +543,8 @@ export function setNeverInherited(value: (call: import("@vincemakes/kiso-core").
 export let loadedExtensions: readonly KisoExtension[] = [];
 /** R-D 0.1.45: the BUILT-IN layer — the three default official extensions,
  *  shipped with the cli (module imports, never a disk scan; builtin.ts).
- *  E5: the task extension is opt-in, not built-in. The banner's marked
- *  column; a user extension may shadow a built-in. */
+ *  The task extension, opt-in from E5, was retired in 0.44.0. The
+ *  banner's marked column; a user extension may shadow a built-in. */
 export let builtInExtensions: readonly KisoExtension[] = [];
 /** E1: the USER-level extensions alone — the banner's unmarked part (E3:
  *  loadedExtensions later includes the project-level ones too). */

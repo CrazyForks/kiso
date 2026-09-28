@@ -193,13 +193,6 @@ interface TurnRecord {
 	thoughtSeconds: number;
 }
 
-/** W20 — the whole-table-replace comparison: the live task block only
- *  redraws when the items actually changed (the task extension's
- *  idempotent shape — an unchanged replace is a no-op, no frame). */
-function sameTask(a: { text: string; status: "pending" | "active" | "done" }[], b: { text: string; status: "pending" | "active" | "done" }[]): boolean {
-	return a.length === b.length && a.every((x, i) => x.text === b[i]!.text && x.status === b[i]!.status);
-}
-
 /** The one compositor — implements the Body façade AND the Dock chrome
  *  API (see the class comments on each method group). */
 /** The chrome a frame wears and the room it leaves the live region —
@@ -765,20 +758,6 @@ export class Body {
 		if (turn === undefined || turn.ended) return;
 		turn.ended = true;
 		turn.thoughtSeconds = thoughtSeconds;
-		// W20: the turn's live task block settles HERE — the ONE recap
-		// block for the turn ("`task done · N items · <duration>", the
-		// duration clocked compositor-side from the block's first call —
-		// the CLI stays unchanged). A turn that never touched the list has
-		// no live block — nothing settles. Newest-first: the live block is
-		// the newest cell of its turn.
-		for (let i = this.#cells.length - 1; i >= 0; i -= 1) {
-			const c = this.#cells[i]!;
-			if (c.kind === "checklist" && !c.done) {
-				c.done = true;
-				c.durationSeconds = Math.max(0, Math.round((Date.now() - c.startedAt) / 1000));
-				break;
-			}
-		}
 		// R3g (fable D3, 2026-08-28): an INTERRUPTED tool never receives a
 		// result, so its cell stays `done: false` — and the commit loop
 		// stops at the first cell that is not done. One esc mid-tool
@@ -856,54 +835,6 @@ export class Body {
 		this.#closeOpenThinking();
 		this.#closeOpenText();
 		this.#cells.push({ kind: "notice", text, done: true });
-		this.#mark();
-	}
-
-	/** W20 — the task checklist as STATE, not events: the FIRST call of a
-	 *  turn creates the ONE live block (done:false — the commit loop only
-	 *  takes done cells, so it stays in the live region); later calls of
-	 *  the SAME turn MUTATE that block in place — same position, same
-	 *  height, zero committed rows (the W8 fixed-window rule generalised
-	 *  to state). An unchanged whole-table replace (the task extension's
-	 *  idempotent shape) is a no-op — no mark, no frame. The block commits
-	 *  ONCE at the turn's end (endTurn); the next turn's first call starts
-	 *  a fresh block — one settled block per turn that touched the list,
-	 *  never one per update. The pipe path stays per-call (byte-linear —
-	 *  every write is final; there is no in-place redraw in a pipe). */
-	checklist(header: string, items: { text: string; status: "pending" | "active" | "done" }[]): void {
-		if (!this.#isActive()) {
-			this.#closeOpenThinking();
-			this.#closeOpenText();
-			const p = palette();
-			this.#write(`${p.bold}✦${p.reset} ${escapeTerminal(header)}\n`);
-			const glyphOf = (status: string): string => (status === "pending" ? "□" : status === "active" ? "▖" : "▣");
-			for (const item of items) this.#write(`  ${glyphOf(item.status)} ${escapeTerminal(item.text)}\n`);
-			return;
-		}
-		this.#closeOpenThinking();
-		this.#closeOpenText();
-		const turn = this.#turns.length - 1;
-		const last = this.#cells[this.#cells.length - 1];
-		if (last !== undefined && last.kind === "checklist" && !last.done && last.turn === turn) {
-			// TV-1B: the header participates in the change detection — the
-			// settle verdict is a header-only update over the same items,
-			// and an items-only guard would swallow it silently.
-			if (last.header !== header || !sameTask(last.items, items)) {
-				Object.assign(last, { header, items });
-				this.#mark();
-			}
-			return;
-		}
-		this.#cells.push({
-			kind: "checklist",
-			header,
-			items,
-			done: false,
-			expanded: false,
-			startedAt: Date.now(),
-			durationSeconds: 0,
-			turn,
-		});
 		this.#mark();
 	}
 

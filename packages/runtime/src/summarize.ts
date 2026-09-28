@@ -587,8 +587,9 @@ export function estimateEventTokens(ev: Event): number {
  * rounds exist (nothing worth covering yet).
  *
  * ⑥ (task round): a tool result tagged do-not-compact is DURABLE work
- * memory (the task_set echo) — the summary must never cover its round,
- * or the model loses the current list. When the base boundary would
+ * memory (a tool declares it so; the retired task extension's list was
+ * the first) — the summary must never cover its round, or the model
+ * loses it. When the base boundary would
  * cover such a result, the boundary pulls back to just before the round
  * containing the LATEST one (still a turn boundary). A protected round
  * as the FIRST uncovered round leaves nothing before it to cover →

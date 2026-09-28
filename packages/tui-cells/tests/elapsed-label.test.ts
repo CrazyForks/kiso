@@ -6,15 +6,9 @@
  * same way, because `${elapsed}s` was written out at nine call sites and
  * none of them knew about the others.
  *
- * WHY THIS IS NOT A SECOND FORMATTER. `formatDuration` (W20) already
- * produced `37s` / `1m 1s` / `2h 14m` for the task block, which is this
- * shape in every branch except the hour one, where it drops seconds. A
- * near-copy differing in one branch is exactly the drift that "one
- * helper" exists to prevent, so the branch is a PARAMETER and both
- * idioms come from one implementation.
- *
- * W20's own form is unchanged and pinned below: the task narrative's
- * long-horizon idiom is a settled decision and is not in this round.
+ * 0.44.0: the other duration form, the task block's `2h 14m`, left with
+ * the task extension (the retired checklist was its only caller). This
+ * label no longer shares an implementation with anything.
  *
  * 0.39.1 — THE SWEEP THAT DID NOT HAPPEN. The helper landed in 0.39.0
  * and two of nine call sites were converted: the ones in the diff being
@@ -38,7 +32,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { elapsedLabel, formatDuration, settledLabel } from "../src/components.js";
+import { elapsedLabel, settledLabel } from "../src/components.js";
 
 describe("elapsedLabel", () => {
 	it("under a minute is bare seconds", () => {
@@ -80,18 +74,5 @@ describe("elapsedLabel", () => {
 
 	it("settledLabel never goes negative either", () => {
 		expect(settledLabel(-5)).toBe("0.0s");
-	});
-
-	it("W20's own form is UNCHANGED — it drops seconds past an hour, deliberately", () => {
-		expect(formatDuration(37)).toBe("37s");
-		expect(formatDuration(61)).toBe("1m 1s");
-		expect(formatDuration(8040)).toBe("2h 14m"); // the settled task idiom
-	});
-
-	it("the two agree everywhere they are supposed to — only the hour branch differs", () => {
-		for (const s of [0, 1, 37, 59, 60, 61, 637, 3599]) {
-			expect(elapsedLabel(s), `${s}s`).toBe(formatDuration(s));
-		}
-		expect(elapsedLabel(3723)).not.toBe(formatDuration(3723));
 	});
 });

@@ -110,6 +110,37 @@ describe("4c — replayInto", () => {
 		expect(calls).toContain("notice verification pass");
 	});
 
+	it("0.44.0: an old log's task_set call replays as an ordinary tool row, exactly like any other tool", () => {
+		// The task extension is retired, but logs written while it was
+		// loaded still carry its calls, with the tagged echo it wrote. The
+		// replay neither drops them nor treats them specially: the same log
+		// under any other tool name replays to the same calls.
+		const log = (name: string) => {
+			seq = 0;
+			return [
+				ev({ type: "user_input", content: "plan it" }),
+				ev({ type: "tool_call_end", callId: "t1", name, input: { items: [{ text: "step one", status: "active" }] } }),
+				ev({
+					type: "tool_result",
+					callId: "t1",
+					content: "[task] 1 item — 0 pending, 1 active, 0 done\n[active] step one",
+					isError: false,
+					tags: ["do-not-compact"],
+				}),
+				ev({ type: "text_delta", text: "on it" }),
+				ev({ type: "text_end" }),
+				ev({ type: "terminal", outcome: { kind: "completed" } }),
+			];
+		};
+		const old = recorder();
+		replayInto(old.body, log("task_set"));
+		const plain = recorder();
+		replayInto(plain.body, log("read_file"));
+		expect(old.calls).toContain("tool task_set t1");
+		expect(old.calls).toContain("result t1 ok untimed");
+		expect(old.calls.map((c) => c.replace("task_set", "read_file"))).toEqual(plain.calls);
+	});
+
 	it("an interrupted turn says so instead of a blank", () => {
 		seq = 0;
 		const { body, calls } = recorder();

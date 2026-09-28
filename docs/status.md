@@ -234,7 +234,6 @@ Every row is proven by a gate in this repository.
 | MCP bridge | official extension — built-in since 0.1.45, kernel untouched | `extensions/mcp/tests` |
 | subagents | official extension — role-policy children, worktree isolation, the delegation contract | `extensions/subagent/tests` |
 | skills | official extension — two-tier progressive loading | `extensions/skills/tests` |
-| task | official extension — opt-in since 0.3.0, durable long-horizon working memory | `extensions/task/tests`, `apps/cli/tests/task-e2e.test.ts` |
 | stored credentials | a credential owns its provider; no silent env fallback; `auth.json` at mode 0600 | `apps/cli/tests/credentials.test.ts`, `apps/cli/tests/oauth-chatgpt.test.ts` |
 | the Responses dialect | both targets against recorded byte rigs — request bytes, streaming, tool turns, reasoning replay, cancel, error mapping, retry authority | `packages/provider-openai-responses/tests/or1-*.test.ts` |
 | context economy | microcompact + `/compact` model summary + prompt-cache byte discipline | `packages/core/tests/prompt-cache.test.ts`, `packages/core/tests/summarize.test.ts` |
