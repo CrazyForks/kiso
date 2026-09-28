@@ -28,7 +28,6 @@
 		"@vincemakes/kiso-runtime": "0.43.0",
 		"@vincemakes/kiso-skills-ext": "0.43.0",
 		"@vincemakes/kiso-subagent-ext": "0.43.0",
-		"@vincemakes/kiso-task-ext": "0.43.0",
 		"@vincemakes/kiso-tools-node": "0.43.0",
 		"@vincemakes/kiso-tui": "0.43.0",
 		"@vincemakes/kiso-tui-cells": "0.43.0"

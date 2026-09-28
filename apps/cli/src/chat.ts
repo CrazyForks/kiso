@@ -17,7 +17,6 @@ import {
 	renderRecap,
 	runningStatus,
 	toolTarget,
-	verifyOfferView,
 	STATUS_GLYPHS,
 	kUnit,
 	type PanelArgs,
@@ -829,22 +828,6 @@ export function parseSaferOptions(text: string): SaferOption[] | null {
 	return out.length === 0 ? null : out;
 }
 
-/** TV-1B — the plain-word verdict tail for the settled checklist.
- *  "no passing check yet" covers both never-ran and ran-and-failed
- *  without lying; "outdated" claims only what the trajectory proves. */
-function taskVerdictWords(kind: "verified" | "stale" | "none" | "unreadable"): string {
-	switch (kind) {
-		case "verified":
-			return "checked \u2713";
-		case "stale":
-			return "check outdated \u2014 work may have changed after it";
-		case "none":
-			return "no passing check yet";
-		case "unreadable":
-			return "task list unreadable";
-	}
-}
-
 /** W21 — the panel view for a permission_requested: the rule line (the
  *  why-asked speaker + the §3.5 fix hint), the toolTarget title, the
  *  "❯ run paused" status, and the ALWAYS-verbose args. */
@@ -897,35 +880,6 @@ function approvalArgs(name: string, input: Record<string, unknown>): PanelArgs {
  * stream here. Events without a render (stop, expired, resolved, …) → null,
  * and the consumer skips them — the pipe bytes stay identical.
  */
-
-/**
- * round 6 (the task round): translate a do-not-compact-tagged tool result whose
- * content follows the task echo contract (a [task] header line + one
- * `[pending|active|done] text` line per item) into the checklist cell's
- * structured items. Null = not a checklist — the ordinary result cell
- * renders. Keyed on the TAG (what the extension declared), never on a
- * tool name; the parse is graceful so a foreign tagged result still
- * renders normally.
- */
-function parseChecklist(
-	tags: readonly string[] | undefined,
-	content: string,
-): { header: string; items: { text: string; status: "pending" | "active" | "done" }[] } | null {
-	if (!(tags ?? []).includes("do-not-compact")) return null;
-	const items: { text: string; status: "pending" | "active" | "done" }[] = [];
-	let header = "";
-	for (const line of content.split("\n")) {
-		const head = /^\[task\] (.*)$/.exec(line);
-		if (head !== null) {
-			header = head[1]!;
-			continue;
-		}
-		const m = /^\[(pending|active|done)\] (.*)$/.exec(line);
-		if (m !== null) items.push({ text: m[2]!, status: m[1] as "pending" | "active" | "done" });
-	}
-	if (items.length === 0) return null;
-	return { header, items };
-}
 
 function toRenderInput(ev: import("@vincemakes/kiso-core").Event): RenderInput | null {
 	switch (ev.type) {
@@ -1114,8 +1068,7 @@ export async function consumeRun(
 				const text = typeof ev.content === "string" ? ev.content : "";
 				// W19: a DENIED call carries its reason — extracted from the
 				// result's "[Permission denied] " prefix, keyed on the
-				// "denied" tag (the parseChecklist discipline: the tag
-				// declares, the prefix confirms). The ToolCell renders the
+				// "denied" tag (the tag declares, the prefix confirms). The ToolCell renders the
 				// pinned row (full name, target, reason, no timing).
 				let reason: string | null = null;
 				if ((ev.tags ?? []).includes("denied")) {
@@ -1123,13 +1076,6 @@ export async function consumeRun(
 					if (m !== null) reason = m[1]!;
 				}
 				body.toolResult(ev.callId, { content: text, isError: ev.isError, reason });
-				// round 6 (the task round): a result tagged do-not-compact whose content
-				// follows the checklist shape also renders as the durable
-				// checklist cell (the CLI translates Event → the tui's own
-				// shape; a non-matching parse falls back to the ordinary
-				// result cell — never hide information).
-				const checklist = parseChecklist(ev.tags, text);
-				if (checklist !== null) body.checklist(checklist.header, checklist.items);
 				break;
 			}
 			case "text_delta":
@@ -1282,19 +1228,6 @@ export async function consumeRun(
 				// events (zero tokens). The dock's status bar still paints.
 				statusCb?.(turnUsage() ?? UNKNOWN_USAGE, displayCtxRatio(session));
 				const ratio = displayCtxRatio(session);
-				// TV-1B: the settle verdict — the checklist stops lying. When
-				// every item is CLAIMED done, the settled block's tail says
-				// what the projection actually proves ("no passing check yet"
-				// covers never-ran AND ran-and-failed; "may have changed"
-				// claims trajectory knowledge, never filesystem knowledge).
-				// A run that emitted no task_set still gets the block: the
-				// claims live in the durable log, and the settle SYNTHESIZES
-				// the display from session.assessTasks() — a UI projection,
-				// never a new durable fact.
-				const tv = session.assessTasks();
-				if (tv.claims.length > 0 && tv.allClaimedDone) {
-					body.checklist(taskVerdictWords(tv.evidence.kind), tv.claims.map((c) => ({ text: c.text, status: c.status })));
-				}
 				// W14: the turn record closes HERE — before the recap logs, so
 				// the commit loop folds the quiet turn's held cells first (the
 				// fold line lands above the recap, natural cell order).
@@ -1431,14 +1364,12 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 		input.close();
 	};
 
-	const turn = (text: string, seedSource?: "system", via?: UserInputVia): Promise<void> =>
+	const turn = (text: string, via?: UserInputVia): Promise<void> =>
 		new Promise((resolve, reject) => {
 			queued = Math.max(0, queued - 1); // a queued turn starts
 			// REL-0152-D11: a turn that names an image file carries it. The
 			// scan returns the STRING unchanged when it finds nothing, so a
 			// turn without one is byte-identical to before the feature.
-			// Seeded turns are the product's own words and are never
-			// scanned — nothing it writes to itself is an attachment.
 			// REL-0152-D16: the capsules' files come from the editor, which
 			// is the only thing that knows which number stands for which
 			// screenshot.
@@ -1446,9 +1377,8 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 			// 0.40.0: a skill turn is not scanned either — its text is a
 			// SKILL.md body, and a body that mentions `diagram.png` must not
 			// attach a file from the workspace the person never pointed at.
-			const content = seedSource !== undefined || via !== undefined ? text : attachImages(text, input.attachments?.(), protectedFiles());
-			const run =
-				seedSource !== undefined ? session.run(content, { source: seedSource }) : via !== undefined ? session.run(content, { via }) : session.run(content);
+			const content = via !== undefined ? text : attachImages(text, input.attachments?.(), protectedFiles());
+			const run = via !== undefined ? session.run(content, { via }) : session.run(content);
 			currentRun = run;
 			turnNo += 1;
 			const myTurn = turnNo;
@@ -1484,43 +1414,6 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 					// mid-run — the run's end is the safe point for the deferred
 					// exit, so the release always runs.
 					if (eotSeen) exitAtEmptyPrompt();
-					// TV-1B — the thin task driver. A VERIFICATION turn settling
-					// consumes the task-set identity it produced (a verifier's
-					// own task_set belongs to the SAME accepted offer) and never
-					// opens another offer. A normal COMPLETED settle may offer —
-					// gated so the suggestion always yields to human intent.
-					if (seedSource === "system") {
-						const after = session.assessTasks();
-						if (after.lastTaskSetSeq !== null) offeredTaskSeqs.add(after.lastTaskSetSeq);
-					} else if (
-						last?.type === "terminal" &&
-						last.outcome.kind === "completed" &&
-						process.stdin.isTTY &&
-						!cancelled &&
-						!eotSeen &&
-						pendingAsk === null &&
-						pendingTurns.length === 0 &&
-						input.line() === ""
-					) {
-						const tv = session.assessTasks();
-						if (
-							tv.claims.length > 0 &&
-							tv.allClaimedDone &&
-							(tv.evidence.kind === "none" || tv.evidence.kind === "stale") &&
-							tv.lastTaskSetSeq !== null &&
-							!offeredTaskSeqs.has(tv.lastTaskSetSeq)
-						) {
-							const verdict = await askPanel(input, verifyOfferView());
-							// an explicit answer — Yes, Not now, OR Esc — consumes
-							// the offer for THIS claims-set; only gate-suppression
-							// (above) leaves it live for a later settle.
-							offeredTaskSeqs.add(tv.lastTaskSetSeq);
-							if (verdict.action === "allow") {
-								queued += 1; // turn() decrements — keep the ledger honest
-								chainRef.current = chainRef.current.then(() => turn(VERIFY_SEED, "system"));
-							}
-						}
-					}
 					// round 8: after EVERY turn the prompt is re-armed — the human
 					// never types blind after the first turn.
 					input.prompt();
@@ -1641,14 +1534,6 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 	// the editor — for a skill, the line the person TYPED; `content` is
 	// what the turn submits (the skill's body and args).
 	const pendingTurns: { line: string; content: string; via?: UserInputVia; cancelled: boolean }[] = [];
-	// TV-1B — the offer memory: session-local BY DESIGN (a dead process's
-	// "not now" should not silence a live one; resume re-offers once,
-	// honestly), keyed by the assessed claims' identity.
-	const offeredTaskSeqs = new Set<number>();
-	// The fixed verification seed — durable with source:"system": WHO asked
-	// is provenance in the log; on the provider wire it stays an ordinary
-	// user-role message (never a system-prompt escalation).
-	const VERIFY_SEED = "Verify the completed work: run the project's checks and report what passes and what fails.";
 	// v2b: the live status bar (docked only). Modes: /mode switches repaint
 	// it immediately through paintStatus (the last turn stats are kept).
 	// v3 §03: the status bar has TWO states. Idle: the mode is ALWAYS
@@ -1773,7 +1658,7 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 			// carries an unanswered call. Composed from existing APIs: zero
 			// core lines, zero runtime lines.
 			if (session.uncertainExecutions().length > 0) await resolveUncertains(session, input, () => cancelled);
-			if (session.uncertainExecutions().length === 0) return turn(line, undefined, via);
+			if (session.uncertainExecutions().length === 0) return turn(line, via);
 			// The human declined (round 10: a cancelled ask records NOTHING —
 			// the execution stays uncertain and durable), so the turn does not
 			// start. It is never swallowed in silence: the held text is

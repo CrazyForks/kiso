@@ -62,15 +62,7 @@ export type RenderInput =
 		}
 	| { readonly type: "compacted"; readonly cleared: readonly { readonly eventSeq?: number; readonly callId: string }[] }
 	| { readonly type: "summarized"; readonly coversToSeq: number }
-	| { readonly type: "uncertain_pending"; readonly name: string; readonly executionId: string; readonly error: string }
-	| {
-			// ⑥ task round: the durable checklist — the CLI translates a
-			// do-not-compact-tagged tool result into this shape; the tui
-			// renders the brick glyphs (□ pending / ▖ active / ▣ done).
-			readonly type: "checklist";
-			readonly header: string;
-			readonly items: readonly { readonly text: string; readonly status: "pending" | "active" | "done" }[];
-	  };
+	| { readonly type: "uncertain_pending"; readonly name: string; readonly executionId: string; readonly error: string };
 
 /**
  * Render one event. `text` may be a continuation (text_delta appends to the
@@ -161,17 +153,6 @@ export function renderEvent(ev: RenderInput, prevThinking = false, resolvePath: 
 				newline: true,
 				prompt: false,
 			};
-		case "checklist": {
-			// ⑥: the durable checklist — the ✦ header accent (the recap's
-			// brick) + one brick-glyph line per item. Static line content:
-			// byte-identical in pipes and NO_COLOR.
-			const lines = [`${p.bold}✦${p.reset} ${escapeTerminal(ev.header)}`];
-			for (const item of ev.items) {
-				const glyph = item.status === "pending" ? "□" : item.status === "active" ? "▖" : "▣";
-				lines.push(`  ${glyph} ${escapeTerminal(item.text)}`);
-			}
-			return { text: `${lines.join("\n")}\n`, newline: true, prompt: false };
-		}
 		default:
 			return { text: "", newline: false, prompt: false };
 	}

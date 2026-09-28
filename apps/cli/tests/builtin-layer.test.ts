@@ -6,10 +6,9 @@
  *
  * E5 (the composition round): the task extension left the default
  * composition — measured dead weight on 13 consecutive real-provider
- * sessions (E5-F1/F2: rent paid, never called). It stays an official
- * extension, opt-in via the user layer (copy extensions/task/src/
- * kiso-task.mjs into ~/.kiso/extensions/) or the project layer — a user
- * or project extension named "task" is now a PLAIN extension, no shadow.
+ * sessions (E5-F1/F2: rent paid, never called), and 0.44.0 retired it
+ * outright — a user or project extension named "task" is a PLAIN
+ * extension, no shadow.
  *
  *  - a user extension may SHADOW a built-in by name — the user's deliberate
  *    install wins, loudly, and the shadowed built-in leaves the loaded set;

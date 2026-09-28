@@ -16,7 +16,6 @@ export {
 	Container,
 	cellComponent,
 	foldTerms,
-	CAP_TASK_LIVE,
 	elapsedLabel,
 	settledLabel,
 	formatDuration,

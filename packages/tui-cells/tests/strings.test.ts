@@ -15,7 +15,7 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import { COLOR_OFF, COLOR_ON } from "../src/render.js";
-import { interactivePrompt, projectTrustRows, projectTrustView, projectUntrustedNote, unansweredAskView, uncertainView, verifyOfferView } from "../src/strings.js";
+import { interactivePrompt, projectTrustRows, projectTrustView, projectUntrustedNote, unansweredAskView, uncertainView } from "../src/strings.js";
 
 const ORIG_TTY = process.stdout.isTTY;
 const setTTY = (v: boolean): void => {
@@ -154,15 +154,14 @@ describe("KC3 §1: uncertainView — the uncertain execution's panel", () => {
  * The invariant that catches this class for every simple view: the
  * dock-less question must name the action `y` PERFORMS — which is
  * exactly `simpleOptions[0]`, the option the dock puts on the allow row.
- * Three of the four views already satisfied it (verifyOfferView,
- * unansweredAskView, and this one after the fix); uncertainView was the
+ * The other views already satisfied it (unansweredAskView, and this
+ * one after the fix); uncertainView was the
  * lone violator, which is what makes it an oversight rather than a
  * design.
  */
 describe("RD1B-F1: a dock-less y/n question names the action `y` performs", () => {
 	it("every simple view's fallback question contains its allow-row option", () => {
 		const views = [
-			{ label: "verifyOfferView", view: verifyOfferView() },
 			{ label: "uncertainView", view: uncertainView("shell", "exec-7") },
 			{ label: "unansweredAskView", view: unansweredAskView("exec-7") },
 		];

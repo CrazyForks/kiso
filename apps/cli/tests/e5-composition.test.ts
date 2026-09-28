@@ -8,25 +8,9 @@
  *      toolCall. (E5-F1/F2: the task extension paid its rent on 13
  *      consecutive real-provider sessions and was never called — the
  *      measured dead weight leaves the default.)
- *   2. THE OPT-IN PATH STILL LOADS task_set AND IT IS CALLABLE — a user
- *      extension named "task" (the copy from extensions/task/src) loads
- *      as a plain user extension (no shadow warning — task is no longer
- *      a built-in), the rent carries the task surfaces, the model's
- *      task_set call executes (the durable log holds the tool's own
- *      `[pending] <text>` echo).
- *   3. A PLAN-CARRYING SESSION RESUMES UNDER THE NEW DEFAULT — the plan
- *      created with the extension is still read back (the resumed run's
- *      first request carries the turn segment that contains the task_set
- *      result), the pre-resume log is byte-untouched (the append-only
- *      rule: the log never rewrites), the
- *      resumed run completes, and its rent carries no task surface — the
- *      documented edge: there is no task_set to UPDATE the plan until
- *      the opt-in is restored.
  *
- * All runs are real CLI processes on the BUILT dist with the faux
- * provider (deterministic, no API) and a fully isolated KISO_HOME. The
- * rent assertions mirror the bench extractor's arm proof
- * (bench/extract-e5-leg0.py).
+ * (0.44.0: the task extension is retired; the opt-in path and the
+ * plan-carrying resume gates left with it. This proof stays as a guard.)
  */
 
 import { execFileSync } from "node:child_process";
@@ -37,7 +21,6 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { isolatedEnv, runCli, stripANSI } from "../../../tests/helpers/isolated-cli.mjs";
 
-const TASK_EXT = join(fileURLToPath(new URL("../../..", import.meta.url)), "extensions", "task", "src", "kiso-task.mjs");
 
 /** All request lines of a session's trace. */
 function traceRequests(home: string, sid: string): any[] {
@@ -98,122 +81,6 @@ describe("E5 composition — the default carries no task surface (rent-ledger pr
 		for (const r of reqs) {
 			expect(taskRent(r), JSON.stringify(r.rent)).toEqual([]);
 			expect(r.toolCalls).not.toContain("task_set");
-		}
-	});
-});
-
-describe("E5 composition — the opt-in path loads task_set and it is callable", () => {
-	it("a user extension named 'task' loads plainly and executes a task_set call", () => {
-		const { env } = isolatedEnv();
-		writeFileSync(join(env.KISO_EXTENSIONS_DIR as string, "kiso-task.mjs"), readFileSync(TASK_EXT, "utf8"), "utf8");
-		const script = [
-			{
-				events: [
-					{ type: "tool_call_end", callId: "t1", name: "task_set", input: { items: [{ text: "step one", status: "pending" }] } },
-					{ type: "stop", reason: "tool_use" },
-				],
-			},
-			{ events: [{ type: "stop", reason: "end_turn" }] },
-		];
-		const res = runCli(["--mode", "bypass", "e5-g2"], { ...env, KISO_FAUX_SCRIPT: fauxScript(script) }, { input: "plan it\nexit\n" });
-		expect(res.status, res.stderr).toBe(0);
-		// task is NOT a built-in any more — a user extension of that name
-		// loads as a plain user extension, no loud shadow.
-		expect(res.stderr).not.toContain("shadows the built-in");
-		expect(stripANSI(res.stdout)).toContain("task");
-		const reqs = traceRequests(env.KISO_HOME as string, "e5-g2");
-		const surfaces = reqs.flatMap((r) => r.rent.map((l: any) => l.surface));
-		expect(surfaces).toContain("system:ext:task");
-		expect(surfaces).toContain("tool:task_set");
-		// CALLABLE: the model called it and it EXECUTED — the durable log
-		// holds the call, its execution, and the tool's own echo line
-		// (only taskEcho emits `[pending] step one`; the trace's toolCalls
-		// field only captures calls completing inside the request window,
-		// so the log is the proof).
-		const events = logLines(env.KISO_HOME as string, "e5-g2").map((l) => l.event);
-		expect(events.some((e) => e.type === "tool_call_end" && e.name === "task_set")).toBe(true);
-		expect(events.some((e) => e.type === "tool_execution_succeeded")).toBe(true);
-		expect(events.some((e) => e.type === "tool_result" && String(e.content).includes("[pending] step one"))).toBe(true);
-	});
-});
-
-describe("E5 composition — a plan-carrying session resumes under the new default", () => {
-	it("the durable plan is read back, the log is untouched, the resumed run carries no task tool", () => {
-		const { env } = isolatedEnv();
-		writeFileSync(join(env.KISO_EXTENSIONS_DIR as string, "kiso-task.mjs"), readFileSync(TASK_EXT, "utf8"), "utf8");
-		const create = [
-			{
-				events: [
-					{
-						type: "tool_call_end",
-						callId: "p1",
-						name: "task_set",
-						input: {
-							items: [
-								{ text: "first step", status: "pending" },
-								{ text: "second step", status: "pending" },
-							],
-						},
-					},
-					{ type: "stop", reason: "tool_use" },
-				],
-			},
-			{ events: [{ type: "stop", reason: "end_turn" }] },
-		];
-		const r1 = runCli(["--mode", "bypass", "e5-plan"], { ...env, KISO_FAUX_SCRIPT: fauxScript(create) }, { input: "make a plan\nexit\n" });
-		expect(r1.status, r1.stderr).toBe(0);
-		const home = env.KISO_HOME as string;
-		const before = readFileSync(join(home, "sessions", "e5-plan.jsonl"), "utf8");
-		expect(before).toContain("[pending] first step"); // the plan is durable
-		const seq = planSeq(home, "e5-plan");
-
-		// phase 2 — resume with the NEW DEFAULT composition: the same home,
-		// an EMPTY extensions dir (no task), the fake provider continuing at
-		// its durable position (the two consumed turns are skipped).
-		const emptyExt = mkdtempSync(join(tmpdir(), "kiso-empty-ext-"));
-		const resumeScript = [
-			{ events: [{ type: "stop", reason: "end_turn" }] },
-			{ events: [{ type: "stop", reason: "end_turn" }] },
-			{ events: [{ type: "stop", reason: "end_turn" }] },
-			{ events: [{ type: "stop", reason: "end_turn" }] },
-			{
-				events: [
-					{ type: "text_delta", text: "I still see the plan." },
-					{ type: "stop", reason: "end_turn" },
-				],
-			},
-		];
-		const env2 = {
-			...process.env,
-			KISO_HOME: home,
-			KISO_SESSIONS_DIR: join(home, "sessions"), // 0.40.0: the one folder this test reads
-			KISO_EXTENSIONS_DIR: emptyExt,
-			KISO_MCP_CONFIG: env.KISO_MCP_CONFIG as string,
-			KISO_SKILLS_DIR: env.KISO_SKILLS_DIR as string,
-			KISO_FAUX_SCRIPT: fauxScript(resumeScript),
-		};
-		const r2 = runCli(["resume", "e5-plan", "continue"], env2, { input: "" });
-		expect(r2.status, r2.stderr).toBe(0);
-
-		// ① the pre-resume log is byte-untouched (append-only).
-		const after = readFileSync(join(home, "sessions", "e5-plan.jsonl"), "utf8");
-		expect(after.startsWith(before)).toBe(true);
-
-		// ② the durable plan is READ BACK: the resumed run's first request
-		//    carries the prior-turn segment containing the task_set result.
-		const reqs = traceRequests(home, "e5-plan");
-		const resumed = [...reqs].reverse().find((r) => r.requestIndex === 0)!;
-		expect(resumed).toBeTruthy();
-		const covered = (resumed.contextManifest as any[]).some(
-			(m) => m.role === "turn" && m.seqRange && m.seqRange[0] <= seq && seq <= m.seqRange[1],
-		);
-		expect(covered, JSON.stringify(resumed.contextManifest)).toBe(true);
-
-		// ③ the resumed run's composition is the new default — no task
-		//    surface in its rent (the documented edge: no task_set to
-		//    update the plan; the opt-in restores it).
-		for (const r of reqs.filter((r) => r.runId === resumed.runId)) {
-			expect(taskRent(r), JSON.stringify(r.rent)).toEqual([]);
 		}
 	});
 });

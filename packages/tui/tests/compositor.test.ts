@@ -35,7 +35,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Body } from "../src/compositor.js";
 import { Screen } from "./helpers/screen.js";
-import { CAP_TASK_LIVE, cellComponent, formatDuration, type FrameCtx, visibleWidth } from "../src/components.js";
+import { cellComponent, formatDuration, type FrameCtx, visibleWidth } from "../src/components.js";
 import type { PanelView } from "../src/approval-panel.js";
 
 /** The BODY region's left-wall rows ("│ ") — W6: the box's chrome wall
@@ -1096,121 +1096,12 @@ describe("TUI v6 — the one compositor", () => {
 	});
 });
 
-describe("W20 — the task checklist as STATE (the live block, the settle, the cap)", () => {
-	// the fixture: 1 active + 7 pending + 2 done — the live capped form
-	// is the active row, ≤2 pending, the overflow-pending fold, the done
-	// collapse; the active item is LISTED THIRD (the live form promotes
-	// it to the first row).
-	const ITEMS = [
-		{ text: "item 1", status: "done" as const },
-		{ text: "item 2", status: "done" as const },
-		{ text: "item 3", status: "active" as const },
-		{ text: "item 4", status: "pending" as const },
-		{ text: "item 5", status: "pending" as const },
-		{ text: "item 6", status: "pending" as const },
-		{ text: "item 7", status: "pending" as const },
-		{ text: "item 8", status: "pending" as const },
-		{ text: "item 9", status: "pending" as const },
-		{ text: "item 10", status: "pending" as const },
-	];
-	const CTX: FrameCtx = { spinnerI: 0, now: 0, height: 24 };
-	const liveCell = (expanded = false) =>
-		cellComponent({
-			kind: "checklist",
-			header: "10 items — 7 pending, 1 active, 2 done",
-			items: ITEMS,
-			done: false,
-			expanded,
-			startedAt: 0,
-			durationSeconds: 0,
-			turn: 0,
-		});
-
-	it("the LIVE block: the fixed prefix + derived counts, the active item FIRST with ▸, ≤2 pending, the cut rows — the cap holds at every width", () => {
-		for (const W of [60, 80, 120]) {
-			const rows = liveCell().render(W, CTX);
-			expect(rows.length).toBeLessThanOrEqual(CAP_TASK_LIVE);
-			// every row is exactly one screen row (no wrap) — the
-			// POST-FOLD cap equals the row count at every width
-			for (const row of rows) expect(visibleWidth(row)).toBeLessThanOrEqual(W);
-		}
-		// the shape at 80: the compositor-derived counts (never the
-		// model's wording), the model tail AFTER the fixed prefix
-		const rows = liveCell().render(80, CTX);
-		expect(rows[0]).toContain("task · 10 items · 1 active · 2 done");
-		expect(rows[0]).toContain("10 items — 7 pending, 1 active, 2 done");
-		expect(rows[1]).toContain("item 3"); // the active item promoted
-		expect(rows[1]).toContain("\x1b[1m▸\x1b[0m"); // the W20 glyph, bold (the menu vocabulary)
-		expect(rows[2]).toContain("□ item 4");
-		expect(rows[3]).toContain("□ item 5");
-		expect(rows[4]).toContain("└ +5 more · ctrl+o"); // 7 pending, 2 shown
-		expect(rows[5]).toContain("└ +2 done · ctrl+o"); // the done collapse
-	});
-
-	it("the cap holds when a long item text would wrap — the row CUTS, never folds", () => {
-		const long = [{ text: "a very long item text ".repeat(6) + "tail", status: "active" as const }];
-		for (const W of [60, 80]) {
-			const rows = cellComponent({ kind: "checklist", header: "h", items: long, done: false, expanded: false, startedAt: 0, durationSeconds: 0, turn: 0 }).render(W, CTX);
-			expect(rows.length).toBeLessThanOrEqual(CAP_TASK_LIVE);
-			for (const row of rows) expect(visibleWidth(row)).toBeLessThanOrEqual(W);
-		}
-	});
-
-	it("the LIVE ctrl+o toggle: the capped form flips to the FULL list in place — the ▣ the collapse hid", () => {
-		const rows = liveCell(true).render(80, CTX);
-		expect(rows).toHaveLength(11); // header + all 10 items, no collapse rows
-		// the full table in MODEL order (the promotion is the capped
-		// view's device — the full form shows the list as it is)
-		expect(rows[1]).toContain("▣ item 1"); // the done items the collapse hid
-		expect(rows[3]).toContain("item 3");
-		expect(rows[3]).toContain("\x1b[1m▸\x1b[0m"); // the live active glyph at its own row
-		expect(rows[10]).toContain("□ item 10");
-		expect(rows.join("")).not.toContain("ctrl+o");
-	});
-
-	it("the SETTLED block: the recap idiom + the model tail + the FULL final list in the existing checklist shape", () => {
-		const rows = cellComponent({ kind: "checklist", header: "the plan", items: ITEMS, done: true, expanded: false, startedAt: 0, durationSeconds: 8040, turn: 0 }).render(80, CTX);
-		expect(rows).toHaveLength(11);
-		expect(rows[0]).toContain("task done · 10 items · 2h 14m");
-		expect(rows[0]).toContain("the plan"); // the model tail rides after
-		// the durable glyphs — the checklist's existing shape (▖ for the
-		// active — the settled record, not the live marker)
-		expect(rows[1]).toContain("▣ item 1");
-		expect(rows[3]).toContain("▖ item 3");
-		expect(rows[4]).toContain("□ item 4");
-		expect(rows.join("")).not.toContain("ctrl+o");
-	});
-
+describe("formatDuration — the one duration idiom", () => {
 	it("formatDuration — the `2h 14m` form: seconds under a minute, m s under an hour, h m past it", () => {
 		expect(formatDuration(0)).toBe("0s");
 		expect(formatDuration(32)).toBe("32s");
 		expect(formatDuration(90)).toBe("1m 30s");
 		expect(formatDuration(8040)).toBe("2h 14m");
 		expect(formatDuration(3600)).toBe("1h 0m");
-	});
-
-	it("the compositor: same-turn updates MUTATE the one live block — the settle commits exactly ONCE, the next turn starts a fresh block", () => {
-		const { body, writes, tick } = makeBody({ W: 80 });
-		body.enter();
-		body.userLine("t1");
-		body.checklist("first", [{ text: "a", status: "active" }]);
-		body.checklist("second", [
-			{ text: "a", status: "done" },
-			{ text: "b", status: "active" },
-		]);
-		body.endTurn(1);
-		tick();
-		const turn1 = writes.join("");
-		// exactly ONE settled block for the turn — never one per update
-		expect(turn1.match(/task done · 2 items/g) ?? []).toHaveLength(1);
-		expect(turn1.match(/task done/g) ?? []).toHaveLength(1);
-		// the next turn starts a FRESH live block (the settled one is done)
-		body.userLine("t2");
-		body.checklist("third", [{ text: "c", status: "active" }]);
-		body.endTurn(2);
-		tick();
-		const turn2 = writes.join("");
-		expect(turn2.match(/task done · 1 item/g) ?? []).toHaveLength(1);
-		expect(turn2.match(/task done/g) ?? []).toHaveLength(2); // both turns' settles
 	});
 });
