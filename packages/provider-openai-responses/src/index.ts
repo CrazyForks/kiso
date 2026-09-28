@@ -183,7 +183,12 @@ function buildBody(options: StreamOptions, target: Target, scopeProviderId: stri
 		// dialect parameter for a human reader and never reaches an
 		// adapter — the dialect path is this adapter's own knowledge, and
 		// the level is transported as handed. Absent adds NO key.
-		...(options.reasoning?.effort !== undefined ? { reasoning: { effort: options.reasoning.effort } } : {}),
+		// With an effort, the reasoning summary is asked for too: the API
+		// streams summaries only on request (they arrive as `thinking`
+		// events below), and "auto" takes the most detailed one the model
+		// offers. No effort still means no key: whether a model reasons is
+		// not this adapter's call.
+		...(options.reasoning?.effort !== undefined ? { reasoning: { effort: options.reasoning.effort, summary: "auto" } } : {}),
 		...(options.maxTokens !== undefined ? { max_output_tokens: options.maxTokens } : {}),
 		...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
 		...target.extraBody,
