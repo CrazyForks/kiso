@@ -333,6 +333,14 @@ description: a review checklist for pull requests
 - **Approval:** `read_skill` reads user-installed local docs — the
   safe-defaults example allows it (read_file trust); everything else
   about skills is plain file access governed by the existing policy.
+- **A name found twice** resolves to its first occurrence (directory
+  order); the later one joins the broken skills in the warning line
+  instead of sitting in the index as a skill `read_skill` could never
+  serve.
+- **A host chooses the skills.** `createSkillsExtension({ roots, include })`:
+  `roots` replaces the default scan, in order; `include(entry)` filters
+  the one list that the index, `read_skill`, the catalog and the count
+  are built from. The CLI passes neither.
 
 ## Ask — the model puts a real choice to you
 
