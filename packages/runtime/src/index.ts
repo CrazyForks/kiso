@@ -33,7 +33,7 @@ export { PoisonedSessionError, ResumeBlockedError } from "./session.js";
 export type { ApprovalRequest, CompactInfo, ContextPolicy, SessionConfig, SummarizeResult } from "./session.js";
 
 // run
-export { Run } from "./run.js";
+export { Run, RunClosedError } from "./run.js";
 
 // store
 export { SessionStore, StaleWriterError, StoreCorruptionError } from "./store.js";

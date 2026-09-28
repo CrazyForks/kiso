@@ -121,6 +121,15 @@ not another recalibration)
   native argument validation. Withdrawn rather than tuned if real servers
   turn out small, and it waits on the skills behaviour check, whose
   architecture it would otherwise inherit untested.
+- 0057 — Safe Admission: new input enters a running run only at a
+  quiescent boundary — **Accepted**, 2026-09-28, ratified by the owner.
+  Steer is same-run admission: input may arrive at any time and is
+  admitted as a `user_input` only once the model turn is committed, every
+  started effect has its receipt, no approval is open, and the run may
+  still ask the model (`maxTurns` wins; END_TURN does not). Three sites,
+  an ingress sealed by every terminal, a person's input through
+  `onUserMessage` once and the runtime's never. Overturns architecture
+  §5 ("Run — one user turn") and "input lands between runs".
 
 - 0054 — The default tool table: what is always present, and what deferral
   is reserved for — PROPOSED, 2026-09-16, awaiting the owner's
