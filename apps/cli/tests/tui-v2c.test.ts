@@ -2,15 +2,16 @@
  * v2c — the self-drawn editor through the CLI's topmost entry, on a REAL
  * PTY (24×80, TIOCSWINSZ): the Chinese-input cursor lands on the DISPLAY
  * width column (the drift root cure), the submitted line renders in the
- * scroll region EXACTLY once, a turn submitted while another runs queues
- * with "+N queued" and executes next, Esc cancels a paused approval (the
+ * scroll region EXACTLY once, a line submitted while a run is live steers
+ * it (ADR-0057) and is answered next, Esc cancels a paused approval (the
  * conservative denial continues the run — the old abort is gone), and
  * exit turns bracketed paste off (?2004l) and resets the region (CSI r).
- * W22 adds the visibility invariant's e2e: queued turns pre-render ABOVE
- * the input row as the SAME UserMessage chips (the dim □ gutter marks the
- * queued state), ↑ pops the last chip back into the editor and esc pops
- * one more, the popped turns NEVER execute, and a piped session shows no
- * chips (the pipe path has no raw keys).
+ * W22 adds the visibility invariant's e2e — since ADR-0057 the chips are
+ * steers that have not landed: they pre-render ABOVE the input row as the
+ * SAME UserMessage chips (the dim □ gutter marks them), ↑ takes the last
+ * back into the editor and esc one more, a steer taken back NEVER lands,
+ * and a piped session shows no chips (the pipe path has no raw keys and
+ * keeps one turn per line).
  */
 
 import { execFileSync } from "node:child_process";
@@ -165,7 +166,7 @@ describe("TUI v2c (real PTY, 24×80)", () => {
 		expect(out).toContain("\x1b[r");
 	}, 90_000);
 
-	it("a turn submitted while another runs QUEUES — '+1 queued' rides the status bar and the next turn executes", () => {
+	it("a line submitted while a run is live STEERS it — the model's next request answers it (ADR-0057)", () => {
 		const { env, dirs } = isolatedEnv();
 		const dir = mkdtempSync(join(tmpdir(), "kiso-v2c-"));
 		const script = join(dir, "faux.json");
@@ -180,16 +181,15 @@ describe("TUI v2c (real PTY, 24×80)", () => {
 		const out = ptyRun(
 			{ ...env, KISO_FAUX_SCRIPT: script },
 			[
-				// Both lines land at the first prompt — the second submits
-				// while the first turn is queued/running.
+				// Both lines land at the first prompt — the second is a steer
+				// for the run the first one started.
 				["▌ ", "one\rtwo\r"],
 				["turn two done", "exit\r"],
 			],
 		);
 		const clean = stripANSI(out);
-		expect(clean).toContain("turn one done"); // the FIRST turn completed (the queued turn followed)
-		expect(clean).toContain("turn one done");
-		expect(clean).toContain("turn two done"); // the queued turn EXECUTED
+		expect(clean).toContain("turn one done"); // the first request answered
+		expect(clean).toContain("turn two done"); // the steer was answered next
 	}, 90_000);
 
 	it("Esc cancels a paused approval — the conservative denial CONTINUES the run, the REPL survives", () => {
@@ -243,7 +243,7 @@ describe("TUI v2c (real PTY, 24×80)", () => {
 		expect(clean).toContain("the tour is done");
 	}, 90_000);
 
-	it("W22: queued turns pre-render as the □ chips above the input row — ↑ pops the last back into the editor, esc pops one more, the re-submit runs and the popped turns NEVER execute", () => {
+	it("W22 / ADR-0057: steers that have not landed pre-render as the □ chips — ↑ takes the last back, esc one more, the re-submit is answered and a steer taken back NEVER lands", () => {
 		const { env } = isolatedEnv();
 		const dir = mkdtempSync(join(tmpdir(), "kiso-v2c-"));
 		const script = join(dir, "faux.json");
@@ -261,7 +261,7 @@ describe("TUI v2c (real PTY, 24×80)", () => {
 		const out = ptyRun(
 			{ ...env, KISO_FAUX_SCRIPT: script },
 			[
-				// "one" submits; "two" + "three" queue while turn one runs.
+				// "one" submits; "two" + "three" are steers while turn one runs.
 				["▌ ", "one\rtwo\rthree\r"],
 				// The three-chip needle — ↑ pops the LAST queued line back
 				// into the editor (the chip leaves the queue).
@@ -289,14 +289,14 @@ describe("TUI v2c (real PTY, 24×80)", () => {
 		// inverts the CURRENT colours).
 		expect(out).toContain("\x1b[2m□\x1b[0m \x1b[7m  two");
 		expect(out).toContain("\x1b[2m□\x1b[0m \x1b[7m  three");
-		// The status hint carries the queue depth.
-		expect(out).toContain("+2 queued");
-		expect(out).toContain("+1 queued");
+		// The status hint carries the count and where they land.
+		expect(out).toContain("+2 steer");
+		expect(out).toContain("+1 steer");
 		const clean = stripANSI(out);
 		expect(clean).toContain("turn one done");
 		// The resubmitted "two" ran as a fresh turn...
 		expect(clean).toContain("turn two done");
-		// ...but the popped "three" NEVER ran — its slot was cancelled.
+		// ...but "three", taken back, NEVER landed.
 		expect(clean).not.toContain("turn three done");
 	}, 90_000);
 

@@ -351,6 +351,9 @@ export interface LineInput {
 	 *  live slots (each pop cancels the turn), esc ends the walk after
 	 *  one more pop. The chips are the compositor's own bindQueue. */
 	bindQueue(state: () => readonly string[], pop: () => string | null): void;
+	/** ADR-0057: put text back into the editor — the steers a stop handed
+	 *  back before they landed. The pipe path has no editor; optional. */
+	restore?(text: string): void;
 	/** R3a: cross-session history — seed the recall buffer, register the
 	 *  append sink. The pipe path has no recall keys; optional. */
 	bindHistory?(seed: readonly string[], persist: (line: string) => void): void;
