@@ -17,8 +17,9 @@ Skill directories: `~/.kiso/skills/<name>/SKILL.md` (or the project-level
 `.kiso/skills/` after the trust gate). No configuration file — the
 extension scans the skills dir at startup.
 
-A name found twice resolves to its first occurrence (directory order);
-the later one is reported with the broken skills, never listed.
+A name found twice resolves to its first occurrence (root order, then
+directory-name order within each root); the later one is reported with
+the broken skills, never listed.
 
 A host passes options instead: `createSkillsExtension({ roots, include })`.
 `roots` replaces the default scan with the host's directories, in order.
