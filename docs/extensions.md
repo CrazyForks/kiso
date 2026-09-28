@@ -184,6 +184,11 @@ Configuration: `$KISO_MCP_CONFIG` (default `~/.kiso/mcp.json`):
   input schema passes through as-is. `mcp__status` (zero args) reports each
   server's connection state and errors — connection is a load-time fact
   and the CLI has no new UI for it, so the tool itself presents it.
+- **A host supplies its own servers** with `createMcpExtension({ servers })`,
+  the same map as `mcpServers` above. The file is not read, every entry is
+  checked as a file entry is, and the tool cache is not used: it is keyed
+  by server name alone, so a host's server and yours with the same name
+  would otherwise trade tool lists. The CLI passes no `servers`.
 - A server that fails to connect is a SOFT failure: its error lands in
   `mcp__status`, every other server keeps working. A missing config file
   means no servers (never an error); a broken config throws loudly at
