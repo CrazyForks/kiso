@@ -546,7 +546,10 @@ export class Run implements AsyncIterable<Event> {
 			yield log.append({ type: "tool_result", callId: call.callId, invocationSeq: call.seq, content: refusal, isError: true, errorKind: "invalid_input" });
 			return;
 		}
-		const payload: ToolCallPayload = { callId: call.callId, name: call.name, input: call.input ?? {} };
+		// #20: the same lexical evidence the fresh path hands onPreTool — THIS
+		// invocation's deltas, anchored by its seq; never given to the chain.
+		const rawInput = rawInputOf(log.all, call.callId, call.seq);
+		const payload: ToolCallPayload = { callId: call.callId, name: call.name, input: call.input ?? {}, ...(rawInput !== undefined ? { rawInput } : {}) };
 		const policyCall = { name: payload.name, input: payload.input };
 		let verdict: ChainVerdict | PermissionDecision | undefined;
 		try {
@@ -892,7 +895,7 @@ export class Run implements AsyncIterable<Event> {
 				};
 			}
 			if (this.#config.hooks?.onPostTool) {
-				result = await this.#config.hooks.onPostTool({ callId, name, input }, result, { sessionId: this.#session.id });
+				result = await this.#config.hooks.onPostTool({ callId, name, input, ...(rawInput !== undefined ? { rawInput } : {}) }, result, { sessionId: this.#session.id });
 			}
 		}
 

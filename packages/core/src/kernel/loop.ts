@@ -455,6 +455,7 @@ export async function* loop(config: LoopConfig): AsyncGenerator<Event> {
 							config.approvalPolicy,
 							nextDecisionId,
 							pushExec,
+							rawInput,
 						);
 						askOrder.ahead = askGate;
 						if (v.action === "ask") {
@@ -1137,6 +1138,7 @@ async function decideCall(
 	approvalPolicy: ApprovalChain | undefined,
 	nextDecisionId: () => string,
 	push: (ev: EventInput) => void,
+	rawInput: string | undefined,
 ): Promise<ExecVerdict> {
 	const payload: ToolCallPayload = {
 		callId: call.callId,
@@ -1271,7 +1273,9 @@ async function decideCall(
 	// resolved by the human pause above — the static hook never speaks for
 	// it, and a durable decision already spoke for the call).
 	if (durable === undefined && chainVerdict === undefined && hooks.onPreTool) {
-		const decision = await raceAbort(hooks.onPreTool(payload, ctx), signal);
+		// #20: the hook gets the lexical evidence; the chain above never did —
+		// it decides on the parsed call, the object it has always received.
+		const decision = await raceAbort(hooks.onPreTool(rawInput !== undefined ? { ...payload, rawInput } : payload, ctx), signal);
 		if (signal?.aborted) throw ABORTED;
 		if (decision.action === "defer") {
 			return { action: "ask", decisionId: nextDecisionId() };
@@ -1403,7 +1407,7 @@ async function runLedgered(
 	}
 
 	if (hooks.onPostTool) {
-		result = await hooks.onPostTool({ callId: call.callId, name: call.name, input: call.input ?? {} }, result, ctx);
+		result = await hooks.onPostTool({ callId: call.callId, name: call.name, input: call.input ?? {}, ...(ctx.rawInput !== undefined ? { rawInput: ctx.rawInput } : {}) }, result, ctx);
 	}
 
 	// ruling #12 correction one: a non-idempotent failure's side effects may have
