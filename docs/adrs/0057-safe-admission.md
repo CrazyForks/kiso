@@ -227,13 +227,24 @@ changes.
 - **Enter during a run = steer.** The steer row reads
   `◇ steer <text> · lands at the next step`, or
   `· delivers after approval` while an approval is open.
+  *As built (2c):* the Graphite restyle is its own round, so v1 keeps
+  today's chip rows (the dim `□` gutter) for steers that have not landed,
+  and the status hint is `+N steer` — a longer hint does not fit beside
+  the running status at 80 columns and would be dropped whole. While an
+  approval panel is open the panel owns the status row, so the "after
+  approval" variant has no row to ride; the chips stay.
 - **No queue.** The pending-turn queue (`pendingTurns`, the W22 chips)
   is removed. **Overturns** the Graphite spec's `tab` = queue (its §7
   "waits on the inbox" row), by the owner's ruling of 2026-09-28.
 - `↑` on an empty editor pulls back steers not yet admitted.
 - **Esc** aborts the run exactly as today; steers not yet admitted return
   to the editor.
-- **alt+Enter** keeps today's hard redirect (abort + send). Unchanged.
+- **alt+Enter** keeps today's hard redirect (abort + send). Steers that
+  had not landed ride the correction as ONE next message, the correction
+  first (KC2 §3: it corrects them).
+- A run that seals with steers still pending (`max_turns`, an END_TURN
+  result, an error) hands them back; the CLI sends them at once as the
+  next turn — they are the person's next message.
 
 ### 8. What this ADR does not do
 

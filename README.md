@@ -62,7 +62,7 @@ Say what you want done. The model has six tools — read, list, search, write, e
 
 | key | does |
 |---|---|
-| `enter` | send |
+| `enter` | send — while a run works, steer it: the model reads it at its next step |
 | `ctrl+j` / `shift+enter` | newline |
 | `esc` | stop the run |
 | `alt+enter` | stop the run and send this instead |
