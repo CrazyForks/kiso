@@ -60,3 +60,7 @@ export type { ProjectArtifact, ProjectArtifacts, TrustDecision, TrustRecord } fr
 // provider observation; canonicalizeUsage derives at the accounting
 // boundary (R4 Case B — the frozen usage union does not move).
 export { canonicalizeUsage } from "./usage/canonical.js";
+// ADR-0043 Amendment 13: the token estimator is runtime context-accounting
+// policy, not a kernel primitive — it moved here unchanged from the core
+// package, which never called it.
+export { estimateTokens } from "./estimate-tokens.js";

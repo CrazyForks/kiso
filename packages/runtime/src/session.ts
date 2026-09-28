@@ -69,7 +69,7 @@ import { canonicalizeUsageForModel } from "./usage/canonical.js";
 import { contextAnchor } from "./context-anchor.js";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { estimateTokens } from "@vincemakes/kiso-core";
+import { estimateTokens } from "./estimate-tokens.js";
 import { StaleWriterError, type SessionStore, type StoreRecord } from "./store.js";
 import { composeHooks, composeSystemPrompt, microcompactFor, runBasePrompt } from "./compose.js";
 import { checkpointBoundarySeq } from "./checkpoint.js";
