@@ -129,6 +129,12 @@ function resolveTarget(config: OpenAIResponsesProviderConfig): Target {
 					"chatgpt-account-id": token.accountId,
 					originator: "kiso",
 					"OpenAI-Beta": "responses=experimental",
+					// The backend routes a session's requests to one cache by
+					// this header. With the body's prompt_cache_key alone most
+					// requests landed elsewhere and missed the cache (measured:
+					// about 14% of input cached, 54% with the header). Same
+					// value as the key, so a conversation is one lane.
+					...(config.promptCacheKey !== undefined ? { "session-id": config.promptCacheKey } : {}),
 				};
 			},
 			// The backend rejects `store: true`; with nothing stored, the
