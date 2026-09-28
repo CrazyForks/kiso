@@ -4,7 +4,7 @@
  * verbatim from session.ts.
  */
 
-import { denialResult, loop, validateArgs, type AbortSignalLike, type Adapter, type ApprovalChain, type ChainVerdict, type ContentBlock, type Event, type EventLog, type HookHost, type PermissionDecision, type ToolCallPayload, type ToolResult } from "@vincemakes/kiso-core";
+import { denialResult, loop, validateArgs, type AbortSignalLike, type AdmissionInput, type Adapter, type ApprovalChain, type ChainVerdict, type ContentBlock, type Event, type EventLog, type HookHost, type PermissionDecision, type ToolCallPayload, type ToolResult } from "@vincemakes/kiso-core";
 import type { SessionStore } from "./store.js";
 import { ABORTED, MergedSignal, abortable, openRunId } from "./recovery.js";
 import { resolveReasoning, type WireReasoning } from "./provider/metadata.js";
@@ -19,8 +19,24 @@ import { runtimeVersion } from "./trace/writer.js";
 import { ResumeBlockedError, type AgentSession, type SessionConfig } from "./session.js";
 
 /**
- * A single turn. Async-iterable, so `for await (const ev of session.run(x))`
- * is the natural shape; the handle also carries the runId and the abort.
+ * ADR-0057: `run.steer()` after the run decided to end — its ingress is
+ * sealed. The host starts a new run with the input instead.
+ */
+export class RunClosedError extends Error {
+	readonly runId: string;
+	constructor(runId: string) {
+		super(`run ${runId} has ended — start a new run with this input`);
+		this.name = "RunClosedError";
+		this.runId = runId;
+	}
+}
+
+/**
+ * A single foreground execution, from its input to one terminal (ADR-0057:
+ * it may admit further input at Safe Admission boundaries).
+ * Async-iterable, so `for await (const ev of session.run(x))` is the
+ * natural shape; the handle also carries the runId, the abort and the
+ * steer.
  */
 export class Run implements AsyncIterable<Event> {
 	runId: string;
@@ -40,6 +56,12 @@ export class Run implements AsyncIterable<Event> {
 	readonly #externalSignal: AbortSignalLike | undefined;
 	readonly #decisionIds: string[] = [];
 	#started = false;
+	// ADR-0057 — the ephemeral ingress: a person's input in arrival order,
+	// held in memory until an admission site takes it. The log owns what was
+	// admitted; nothing here is durable (a crash before admission loses it).
+	readonly #pending: (string | readonly ContentBlock[])[] = [];
+	readonly #unadmitted: (string | readonly ContentBlock[])[] = [];
+	#sealed = false;
 
 	constructor(
 		store: SessionStore,
@@ -72,6 +94,44 @@ export class Run implements AsyncIterable<Event> {
 	/** Cancel the run: propagates to the adapter (SDK) and future executions. */
 	abort(): void {
 		this.#abort.abort();
+	}
+
+	/**
+	 * ADR-0057 — hand this run a person's input. It is admitted at the next
+	 * Safe Admission boundary (every started effect settled, no approval
+	 * open) as a user_input the model sees on its next request. Throws
+	 * {@link RunClosedError} once the run has decided to end.
+	 */
+	steer(content: string | readonly ContentBlock[]): void {
+		if (this.#sealed) throw new RunClosedError(this.runId);
+		this.#pending.push(content);
+	}
+
+	/** ADR-0057 — take back the input that has not been admitted yet. */
+	retract(): readonly (string | readonly ContentBlock[])[] {
+		return this.#pending.splice(0);
+	}
+
+	/** ADR-0057 — input that arrived but was not admitted when the run ended. */
+	unadmitted(): readonly (string | readonly ContentBlock[])[] {
+		return [...this.#unadmitted];
+	}
+
+	/** The kernel's `admit`: what is pending becomes ONE human input — a
+	 *  single line as itself, several as text blocks in arrival order. */
+	async #admit(mode: "take" | "takeOrSeal" | "seal"): Promise<readonly AdmissionInput[]> {
+		if (mode !== "seal" && this.#pending.length > 0) {
+			const lines = this.#pending.splice(0);
+			const content = lines.length === 1 ? lines[0]! : lines.flatMap((l): readonly ContentBlock[] => (typeof l === "string" ? [{ type: "text", text: l }] : l));
+			return [{ kind: "human", content, source: "user" }];
+		}
+		if (mode !== "take") this.#seal();
+		return [];
+	}
+
+	#seal(): void {
+		this.#sealed = true;
+		this.#unadmitted.push(...this.#pending.splice(0));
 	}
 
 	async *[Symbol.asyncIterator](): AsyncIterator<Event> {
@@ -219,6 +279,9 @@ export class Run implements AsyncIterable<Event> {
 					// the human gave in the same instant as the abort is
 					// recorded, exactly once.
 					approvalVerdict: (decisionId: string) => this.#session.approvalVerdict(decisionId),
+					// ADR-0057: the ingress — the kernel admits at its three sites
+					// and seals at every terminal.
+					admit: (mode: "take" | "takeOrSeal" | "seal") => this.#admit(mode),
 				}) satisfies Parameters<typeof loop>[0];
 
 			const self = this;
@@ -348,6 +411,9 @@ export class Run implements AsyncIterable<Event> {
 			//    is the projection, not a second copy.
 			for await (const ev of runLoop()) yield ev;
 		} finally {
+			// ADR-0057: however the run ended — terminal, throw or abandoned —
+			// its ingress is closed; pending input is handed back.
+			this.#seal();
 			// round 5(P1-5): flush verdicts the consumer submitted before the
 			// generator was abandoned — an approve()/resolveUncertain() whose
 			// durable event the loop never got to persist must STILL land on

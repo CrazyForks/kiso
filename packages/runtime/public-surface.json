@@ -17,6 +17,7 @@
 	"ProjectArtifacts",
 	"ResumeBlockedError",
 	"Run",
+	"RunClosedError",
 	"Session",
 	"SessionConfig",
 	"SessionMeta",
