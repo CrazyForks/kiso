@@ -499,3 +499,8 @@ derived from the durable invocation and execution, never from ephemeral
 process state: a handler that runs after a crash recovery gets the same
 invocation context as a fresh one (`sessionId`, `callId`, `rawInput`),
 and `executionId` is the id of the durable execution each path writes.
+The same text rides the `onPreTool` and `onPostTool` payloads as
+`rawInput` (0.44.0), fresh or recovered, so a host acting at the
+pre-tool verdict has it without assembling the stream itself; the
+approval chain never receives it — it decides on the parsed call, never
+on the lexical form.

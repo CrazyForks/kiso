@@ -31,6 +31,13 @@ export interface ToolCallPayload {
 	readonly callId: string;
 	readonly name: string;
 	readonly input: Readonly<Record<string, unknown>>;
+	/** 0.44.0 (#20): the invocation's arguments as the model streamed them —
+	 *  the same lexical evidence the tool receives as `ctx.rawInput`, on
+	 *  onPreTool and onPostTool alike, fresh or recovered; absent when no
+	 *  delta was streamed. Evidence for the host, never a control input: the
+	 *  approval chain never receives it, and validation, permission and
+	 *  execution read the parsed input. */
+	readonly rawInput?: string;
 }
 
 export interface HookHost {
