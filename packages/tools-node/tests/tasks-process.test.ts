@@ -91,7 +91,9 @@ describe("ADR-0058 — what the journal proves after a cut", () => {
 		const { cwd, manager } = setup();
 		const marker = join(cwd, "ran");
 		const t = await manager.start({ command: `touch ${marker}`, cwd, env: { ...process.env, KISO_TASK_RUNNER_DIE_AFTER: "command_started" } });
-		const info = await until(() => manager.get(t.id)!, (i) => i.state.kind !== "starting");
+		// "running" is the true verdict for the instant between the record and
+		// the runner's exit; the cut is read once the runner is gone
+		const info = await until(() => manager.get(t.id)!, (i) => i.state.kind !== "starting" && i.state.kind !== "running");
 		expect(info.state.kind).toBe("unknown");
 		await new Promise((r) => setTimeout(r, 200));
 		expect(manager.get(t.id)!.state.kind).toBe("unknown"); // nothing re-ran it
