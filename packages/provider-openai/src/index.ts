@@ -355,6 +355,11 @@ export function createOpenAICompatAdapter(client: OpenAI, adapterOpts: OpenAICom
 			// provider answered, we just do not know the word, and it still
 			// stops.
 			if (finishReason === null && !options.signal?.aborted) {
+				// The pending CALLS are withheld (above); a usage the stream
+				// already reported is not a call — a gateway that puts the
+				// cumulative usage on every chunk has billed this attempt, and
+				// that bill is known. It goes out once, before the failure.
+				if (lastUsage !== null) yield lastUsage;
 				throw streamFailure(`[${vendorOf(options.model)}] request failed: the stream ended with no finish reason`);
 			}
 

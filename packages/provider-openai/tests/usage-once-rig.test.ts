@@ -25,7 +25,7 @@ afterEach(async () => {
 	server = undefined;
 });
 
-async function streamOf(body: string[]): Promise<AdapterEvent[]> {
+async function streamOf(body: string[], opts: { keepError?: { error?: unknown } } = {}): Promise<AdapterEvent[]> {
 	server = createServer((req, res) => {
 		req.resume();
 		res.writeHead(200, { "content-type": "text/event-stream" });
@@ -37,7 +37,12 @@ async function streamOf(body: string[]): Promise<AdapterEvent[]> {
 	const port = (server.address() as { port: number }).port;
 	const adapter = createOpenAICompatProvider({ apiKey: "rig", baseUrl: `http://127.0.0.1:${port}/v1` });
 	const out: AdapterEvent[] = [];
-	for await (const ev of adapter.stream({ model: "m", messages: [{ role: "user", content: "go" }] })) out.push(ev);
+	try {
+		for await (const ev of adapter.stream({ model: "m", messages: [{ role: "user", content: "go" }] })) out.push(ev);
+	} catch (err) {
+		if (opts.keepError === undefined) throw err;
+		opts.keepError.error = err;
+	}
 	return out;
 }
 
@@ -77,5 +82,21 @@ describe("one request, one usage event", () => {
 		expect(types.indexOf("usage")).toBeGreaterThanOrEqual(0);
 		expect(types.indexOf("usage")).toBeLessThan(types.indexOf("stop"));
 		expect(types.filter((t) => t === "stop")).toHaveLength(1);
+	});
+
+	it("a stream cut off with no finish_reason still reports the usage it carried, once, before the failure", async () => {
+		const caught: { error?: unknown } = {};
+		const events = await streamOf(
+			[
+				chunk({ choices: [{ index: 0, delta: { content: "o" } }], usage: { ...USAGE, completion_tokens: 1 } }),
+				chunk({ choices: [{ index: 0, delta: { content: "k" } }], usage: { ...USAGE, completion_tokens: 2 } }),
+			],
+			{ keepError: caught },
+		);
+		expect(caught.error, "a truncated stream is still a failure").toBeDefined();
+		const u = usages(events);
+		expect(u).toHaveLength(1);
+		expect(u[0]).toMatchObject({ inputTokens: 100, outputTokens: 2, known: true });
+		expect(events.some((e) => e.type === "tool_call_end" || e.type === "stop")).toBe(false);
 	});
 });
