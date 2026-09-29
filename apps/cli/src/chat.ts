@@ -28,7 +28,7 @@ import { askView, coldResumeLine, coldResumeView, deletionRiskHint, editFileDiff
 import { canonicalTargetPath, isProtectedPath, protectedIdentity, shellProgressPath } from "@vincemakes/kiso-tools-node";
 import { queuedSwitchLines } from "./state.js";
 import { echoText } from "@vincemakes/kiso-tui-cells/render";
-import { canonicalizeUsage } from "@vincemakes/kiso-runtime";
+import { canonicalizeUsage, RunClosedError } from "@vincemakes/kiso-runtime";
 import { canonicalizeUsageForModel, requestBudget } from "@vincemakes/kiso-runtime/internal";
 import type { AgentSession, Run } from "@vincemakes/kiso-runtime";
 import type { UserInputVia } from "@vincemakes/kiso-core";
@@ -937,8 +937,11 @@ export async function consumeRun(
 	 *  threaded from chat's submitTurn; absent in the recovery flow
 	 *  (resume) where a dropped amend is noticed instead. */
 	submitTurn?: (line: string) => void,
+	/** ADR-0057: a steer landed — an input after the run's own. */
+	onInputLanded?: () => void,
 ): Promise<import("@vincemakes/kiso-core").Event | undefined> {
 	let last: import("@vincemakes/kiso-core").Event | undefined;
+	let inputsSeen = 0;
 	// W22: the TURN's usage — null until a call settles, then the sum of
 	// every call in this turn (accumulateUsage). Null rather than an empty
 	// accumulator, so the first call is the sum rather than an addition to
@@ -1011,6 +1014,8 @@ export async function consumeRun(
 		// construction (ADR-0040).
 		switch (ev.type) {
 			case "user_input":
+				inputsSeen += 1;
+				if (inputsSeen > 1) onInputLanded?.();
 				// The window title is re-derived here because THIS is when a
 				// session stops being nameless: the tab opened as `kiso —
 				// <workspace>` and the first substantive prompt is what gives
@@ -1347,7 +1352,7 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 	const endSignal = new Promise<void>((r) => {
 		resolveEnd = r;
 	});
-	let currentRun: { abort: () => void } | null = null;
+	let currentRun: Run | null = null;
 	let cancelled = false;
 	// E group (the graceful-exit gate ③, R-G 0.1.48): the terminal can
 	// close MID-run — the stream 'end' fires while currentRun is set, so
@@ -1396,10 +1401,11 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 			(async () => {
 				let last: import("@vincemakes/kiso-core").Event | undefined;
 				try {
-					last = await consumeRun(session, run, input, myTurn, faux, statusCb, submitTurn);
+					last = await consumeRun(session, run, input, myTurn, faux, statusCb, submitTurn, landed);
 					stopSpinner();
 					paintIdle();
 					currentRun = null;
+					handBack(run);
 					// 0.40.5: the kiso on disk may no longer be the one this
 					// session runs (an upgrade since it started) — said once per
 					// installed version (stale-version.ts).
@@ -1434,6 +1440,7 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 					}
 					console.error(`\n[run failed] ${err instanceof Error ? err.message : String(err)}\n`);
 					currentRun = null;
+					handBack(run);
 					input.prompt();
 					resolve();
 				}
@@ -1447,6 +1454,7 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 			// aborted terminal, which the consumer keeps consuming.
 			console.log("\n[aborting run]");
 			pendingAsk?.();
+			giveBack();
 			currentRun.abort();
 		} else if (pendingAsk !== null) {
 			pendingAsk?.(); // a startup/trust question — cancel it
@@ -1475,6 +1483,7 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 		if (currentRun) {
 			console.log("\n[aborting run]");
 			pendingAsk?.();
+			giveBack();
 			currentRun.abort();
 		}
 	});
@@ -1487,6 +1496,9 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 		if (currentRun === null) return dispatch(line, dispatchCtx);
 		console.log("\n[redirecting run]");
 		pendingAsk?.();
+		// ADR-0057: steers that had not landed ride the correction — one next
+		// message, not a queue; the correction first (§3: it corrects them).
+		const unsent = handed(currentRun.retract().length);
 		currentRun.abort();
 		// §3: a correction must run BEFORE the follow-ups queued earlier —
 		// it is a correction OF them. The existing slot mechanics compose
@@ -1500,8 +1512,8 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 		// model as the literal text of the command.
 		const jumped = pendingTurns.map((s) => ({ content: s.content, via: s.via }));
 		for (let i = jumped.length; i > 0; i -= 1) popQueue();
-		submitTurn(line);
-		for (const j of jumped) submitTurn(j.content, j.via);
+		queueTurn(unsent.length > 0 ? [line, ...unsent.map((u) => u.content)].join("\n\n") : line);
+		for (const j of jumped) queueTurn(j.content, j.via);
 	});
 
 	// round 5 (P1-11): the PERSISTENT line listener is installed BEFORE the
@@ -1639,7 +1651,7 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 		if (usd === null) return;
 		spentUsd = (spentUsd ?? 0) + usd;
 	};
-	const submitTurn = (line: string, via?: UserInputVia): void => {
+	const queueTurn = (line: string, via?: UserInputVia): void => {
 		const slot = { line: via?.line ?? line, content: line, ...(via !== undefined ? { via } : {}), cancelled: false };
 		pendingTurns.push(slot);
 		queued += 1;
@@ -1681,10 +1693,69 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 		queued = Math.max(0, queued - 1);
 		return slot.line;
 	};
+	// ADR-0057 (the owner's ruling, 2026-09-28): Enter while a run is live
+	// is a STEER — there is no queue. `steering` mirrors what the run holds
+	// and has not admitted; the run takes ALL of it at its next quiescent
+	// boundary, and the landed user_input clears the rows. Piped and
+	// task-file input keep one turn per line: a script has nobody steering.
+	const steerable = process.stdin.isTTY === true && input.literal !== true;
+	type Steer = { readonly line: string; readonly content: string; readonly via?: UserInputVia };
+	let steering: Steer[] = [];
+	const steer = (line: string, via?: UserInputVia): boolean => {
+		if (!steerable || currentRun === null) return false;
+		try {
+			currentRun.steer(via !== undefined ? line : attachImages(line, input.attachments?.(), protectedFiles()));
+		} catch (err) {
+			if (err instanceof RunClosedError) return false; // the run is ending: this is the next turn
+			throw err;
+		}
+		steering.push({ line: via?.line ?? line, content: line, ...(via !== undefined ? { via } : {}) });
+		return true;
+	};
+	const submitTurn = (line: string, via?: UserInputVia): void => {
+		if (!steer(line, via)) queueTurn(line, via);
+	};
+	/** The mirror of the last `n` steers the run handed back; clears it. */
+	const handed = (n: number): Steer[] => {
+		const out = n > 0 ? steering.slice(-n) : [];
+		steering = [];
+		return out;
+	};
+	const landed = (): void => {
+		steering = [];
+	};
+	/** A run sealed with steers still pending (max_turns, an END_TURN
+	 *  result, an error): they are the person's next message, sent now. */
+	const handBack = (run: Run): void => {
+		const left = handed(run.unadmitted().length);
+		if (left.length === 1) queueTurn(left[0]!.content, left[0]!.via);
+		else if (left.length > 1) queueTurn(left.map((s) => s.content).join("\n\n"));
+	};
+	/** Esc / ctrl+c: a stop is not a send — steers that have not landed
+	 *  go back to the editor. */
+	const giveBack = (): void => {
+		if (currentRun === null) return;
+		const back = handed(currentRun.retract().length);
+		if (back.length > 0) input.restore?.(back.map((s) => s.line).join("\n"));
+	};
+	/** ↑ takes back the LAST steer that has not landed (the others go back
+	 *  in, in order); with none, the pipe-era queue pop. */
+	const popPending = (): string | null => {
+		if (currentRun !== null && steering.length > 0) {
+			const back = currentRun.retract();
+			const mine = handed(back.length);
+			const last = mine.pop();
+			for (const c of back.slice(0, -1)) currentRun.steer(c);
+			steering = mine;
+			if (last !== undefined) return last.line;
+		}
+		return popQueue();
+	};
 	// W22: the visibility invariant's binds — the dock renders the
-	// pending chips (+N queued), the editor routes the pop keys.
-	dock.bindQueue(() => pendingTurns.map((s) => s.line));
-	input.bindQueue(() => pendingTurns.map((s) => s.line), popQueue);
+	// pending chips, the editor routes the pop keys.
+	const pendingLines = (): readonly string[] => [...steering.map((s) => s.line), ...pendingTurns.map((s) => s.line)];
+	dock.bindQueue(pendingLines);
+	input.bindQueue(pendingLines, popPending);
 	const dispatchCtx: DispatchCtx = {
 		session,
 		input,
@@ -1805,8 +1876,9 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 		runStart = Date.now();
 		runUsage = { in: null, out: null, cache: null, known: false };
 		lastTokPerSec = null; // TPS-1: nothing has settled in THIS turn yet
-		const last = await consumeRun(session, recoveryRun, input, turnNo, faux, statusCb, submitTurn);
+		const last = await consumeRun(session, recoveryRun, input, turnNo, faux, statusCb, submitTurn, landed);
 		currentRun = null;
+		handBack(recoveryRun);
 		failOnFauxExhaustion(last, faux, input);
 		// E group (the graceful-exit gate ③): the same deferred re-check
 		// as the turn path — the recovery run's end is also a safe point.
