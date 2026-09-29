@@ -180,6 +180,22 @@ export class PathEscapeError extends Error {
 	}
 }
 
+/** ADR-0058 §4: read_file's resolution — the workspace, or an absolute path
+ *  inside one of the host-granted read-only roots. The containment check is
+ *  the workspace's own, applied to that root. */
+function resolveReadable(opts: WorkspaceToolsOptions, input: string): { readonly full: string; readonly root: string } {
+	if (isAbsolute(input)) {
+		for (const root of opts.extraReadRoots ?? []) {
+			if (!existsSync(root)) continue;
+			for (const base of [root, realpathSync(root)]) {
+				const rel = relative(base, input);
+				if (rel !== "" && !rel.startsWith("..") && !isAbsolute(rel)) return { full: resolveWithinRoot(root, rel), root };
+			}
+		}
+	}
+	return { full: resolveWithinRoot(opts.workspaceRoot, input), root: opts.workspaceRoot };
+}
+
 export function resolveWithinRoot(root: string, input: string): string {
 	if (isAbsolute(input)) {
 		throw new PathEscapeError(`absolute paths are not allowed — use workspace-relative paths: ${input}`);
@@ -259,6 +275,11 @@ export interface WorkspaceToolsOptions {
 	 *  secrets — so it says so. Ignored when `shellEnv` is "inherit", which is
 	 *  an explicit opt-in to the whole environment. */
 	readonly secretEnvNames?: readonly string[];
+	/** ADR-0058 §4: read-only roots `read_file` may also serve, by ABSOLUTE
+	 *  path and only inside them — a session's task outputs. Nothing else
+	 *  widens: every other tool, and every relative path, stays inside the
+	 *  workspace. */
+	readonly extraReadRoots?: readonly string[];
 	/**
 	 * DC-54 — the bounds that keep a tool call finite. Every field is
 	 * optional and defaults to the constant beside it; a host embedding
@@ -434,12 +455,12 @@ export function readFileTool(opts: WorkspaceToolsOptions): Tool<{ path: string; 
 		execute: async ({ path, offset, limit }) => {
 			const maxReadBytes = opts.limits?.readMaxFileBytes ?? READ_MAX_FILE_BYTES;
 			try {
-				const full = resolveWithinRoot(opts.workspaceRoot, path);
+				const { full, root } = resolveReadable(opts, path);
 				// the credential store is never served (protected.ts) — checked
 				// by the disk's own resolution and by inode, before any read
 				const guard = protectedIdentity(opts.protectedFiles);
 				if (isProtectedPath(full, guard)) return precondition(protectedRefusalText("read_file", path));
-				const denied = await inodeReadPolicy(opts.workspaceRoot, full);
+				const denied = await inodeReadPolicy(root, full);
 				if (denied !== null) return escapeResult(denied);
 				// DC-54 — the ceiling. `read_file` had the same unbounded
 				// `readFileSync` that froze `search_text`, and the same 994 GB
@@ -1257,6 +1278,8 @@ export { PROTECTED_REFUSAL, diskPath, isProtectedPath, protectedIdentity, protec
  *  read-only shell allow holds a shell read to the same definition rather
  *  than a copy of it. */
 export { isCredentialName, isCredentialPath } from "./corpus.js";
+// ADR-0058: the process task backend (the runner ships beside it)
+export { processTaskBackend, type ProcessTaskBackend, type ProcessTaskBackendOptions } from "./process-backend.js";
 
 export function shellTool(opts: WorkspaceToolsOptions): Tool<{ command: string; timeoutMs?: number }> {
 	return defineTool<{ command: string; timeoutMs?: number }>({
