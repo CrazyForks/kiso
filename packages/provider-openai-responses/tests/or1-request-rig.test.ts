@@ -119,6 +119,9 @@ describe("OR-1 request rig — the frozen shapes", () => {
 		expect(req.headers.originator).toBe("kiso");
 		expect(req.headers["openai-beta"]).toBe("responses=experimental");
 		expect(req.headers.accept).toBe("text/event-stream");
+		// the backend routes a session's requests to one cache by this header;
+		// the body's prompt_cache_key alone left most requests missing the cache
+		expect(req.headers["session-id"]).toBe("sess-7");
 		expect(req.body).toBe(
 			'{"model":"gpt-5.5","stream":true,"instructions":"sys","input":[{"role":"user","content":[{"type":"input_text","text":"go"}]}],' +
 				'"store":false,"include":["reasoning.encrypted_content"],"prompt_cache_key":"sess-7"}',
@@ -131,6 +134,12 @@ describe("OR-1 request rig — the frozen shapes", () => {
 			'{"model":"gpt-5.5","stream":true,"instructions":"sys","input":[{"role":"user","content":[{"type":"input_text","text":"go"}]}],' +
 				'"reasoning":{"effort":"medium","summary":"auto"},"store":false,"include":["reasoning.encrypted_content"],"prompt_cache_key":"sess-7"}',
 		);
+	});
+
+	it("the ChatGPT target with no cache key sends no session-id: the header names the same lane or nothing", async () => {
+		await sendOauth({ systemPrompt: "sys" });
+		expect(rig.requests[0]!.headers["session-id"]).toBeUndefined();
+		expect(rig.requests[0]!.body).not.toContain("prompt_cache_key");
 	});
 
 	it("the ChatGPT-only headers and body fields are ABSENT on the first-party target", async () => {
@@ -165,6 +174,7 @@ describe("OR-1 request rig — the frozen shapes", () => {
 		const firstParty = rig.requests[0]!;
 		expect(firstParty.body).not.toContain("prompt_cache_key");
 		expect(firstParty.body).not.toContain("sess-first-party");
+		expect(firstParty.headers["session-id"]).toBeUndefined();
 
 		await sendOauth({ systemPrompt: "sys" }, "sess-subscription");
 		const chatgpt = rig.requests[1]!;
