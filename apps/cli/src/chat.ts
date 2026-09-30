@@ -1038,7 +1038,7 @@ export async function consumeRun(
 				}
 				// 0.40.0: a skill turn's chip is the line the person TYPED — the
 				// SKILL.md body is what the model read, not what they said.
-				if (ev.via !== undefined) {
+				if (ev.via?.kind === "skill") {
 					body.userLine(ev.via.line);
 					break;
 				}
@@ -1652,7 +1652,7 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 		spentUsd = (spentUsd ?? 0) + usd;
 	};
 	const queueTurn = (line: string, via?: UserInputVia): void => {
-		const slot = { line: via?.line ?? line, content: line, ...(via !== undefined ? { via } : {}), cancelled: false };
+		const slot = { line: (via?.kind === "skill" ? via.line : undefined) ?? line, content: line, ...(via !== undefined ? { via } : {}), cancelled: false };
 		pendingTurns.push(slot);
 		queued += 1;
 		chainRef.current = chainRef.current.then(async () => {
@@ -1709,7 +1709,7 @@ export async function chat(session: AgentSession, faux: boolean, input: LineInpu
 			if (err instanceof RunClosedError) return false; // the run is ending: this is the next turn
 			throw err;
 		}
-		steering.push({ line: via?.line ?? line, content: line, ...(via !== undefined ? { via } : {}) });
+		steering.push({ line: (via?.kind === "skill" ? via.line : undefined) ?? line, content: line, ...(via !== undefined ? { via } : {}) });
 		return true;
 	};
 	const submitTurn = (line: string, via?: UserInputVia): void => {
