@@ -23,7 +23,10 @@ export type TaskRecord =
 			readonly type: "planned";
 			readonly ts: number;
 			readonly taskId: string;
-			readonly backend: "process";
+			/** "process": a runner owns the command (it survives kiso).
+			 *  "foreground": a shell command promoted past its wait — the kiso
+			 *  process that started it owns it (ADR-0058 3b, D1). */
+			readonly backend: "process" | "foreground";
 			readonly command: string;
 			readonly cwd: string;
 			readonly profile: TaskProfile;
