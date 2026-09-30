@@ -325,6 +325,10 @@ function editorInput(editor: Editor): LineInput {
 		bindQueue(state, pop) {
 			editor.bindQueue(state, pop);
 		},
+		// ADR-0057: the steers a stop handed back return to the buffer.
+		restore(text) {
+			editor.restore(text);
+		},
 		// R3a: cross-session history — the CLI owns the file I/O.
 		bindHistory(seed, persist) {
 			editor.bindHistory(seed, persist);

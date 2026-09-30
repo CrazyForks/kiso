@@ -1,6 +1,6 @@
 <p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/hero-dark.png"><img src="assets/hero.png" width="100%" alt="kiso — the durable runtime for AI agents"></picture></p>
 
-<p align="center"><b>v0.44.0</b> · MIT · Node ≥ 22 · <a href="https://kiso.work">kiso.work</a> · <a href="README.zh.md">简体中文</a></p>
+<p align="center"><b>v0.45.1</b> · MIT · Node ≥ 22 · <a href="https://kiso.work">kiso.work</a> · <a href="README.zh.md">简体中文</a></p>
 
 **kiso is an AI coding agent for your terminal.** It runs on its own agent runtime, which you can also embed in your own program through [the SDK](#using-it).
 
@@ -62,7 +62,7 @@ Say what you want done. The model has six tools — read, list, search, write, e
 
 | key | does |
 |---|---|
-| `enter` | send |
+| `enter` | send — while a run works, steer it: the model reads it at its next step |
 | `ctrl+j` / `shift+enter` | newline |
 | `esc` | stop the run |
 | `alt+enter` | stop the run and send this instead |

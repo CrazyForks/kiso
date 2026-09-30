@@ -1,6 +1,6 @@
 <p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/hero-dark.png"><img src="assets/hero.png" width="100%" alt="kiso"></picture></p>
 
-<p align="center"><b>v0.44.0</b> · MIT · Node ≥ 22 · <a href="https://kiso.work">kiso.work</a> · <a href="README.md">English edition</a></p>
+<p align="center"><b>v0.45.1</b> · MIT · Node ≥ 22 · <a href="https://kiso.work">kiso.work</a> · <a href="README.md">English edition</a></p>
 
 **kiso 是一个在终端里用的 AI 编程助手。** 它建在自己的 agent 运行时之上，这套运行时也可以用 [SDK](#作为-sdk-使用) 嵌进你自己的程序。
 
@@ -63,7 +63,7 @@ kiso auth                # 查看已存的登录信息（已打码）
 
 | 按键 | 作用 |
 |---|---|
-| `enter` | 发送 |
+| `enter` | 发送——运行中则是插话：模型在下一步读到 |
 | `ctrl+j` / `shift+enter` | 换行 |
 | `esc` | 停止当前运行 |
 | `alt+enter` | 停止当前运行，改发这一条 |
