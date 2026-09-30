@@ -42,11 +42,11 @@ afterEach(async () => {
 it("a notice then a steer go out as two user messages, in that order, after the tool's result", async () => {
 	const adapter = createOpenAIResponsesProvider({ apiKey: "rig", baseUrl: `http://127.0.0.1:${port}/v1` });
 	try {
-		for await (const _ of adapter.stream({ model: "m", messages: HISTORY, maxRetries: 0 })) void _;
+		for await (const _ of adapter.stream({ model: "m", messages: HISTORY })) void _;
 	} catch {
 		// the rig answers 400: only the request matters here
 	}
-	const list = (body.input ?? []) as { role?: string; content?: unknown }[];
+	const list = ((body as Record<string, unknown> | null)?.input ?? []) as { role?: string; content?: unknown }[];
 	const users = list.filter((m) => m.role === "user");
 	const text = (m: { content?: unknown }): string =>
 		typeof m.content === "string" ? m.content : (m.content as { text?: string }[]).map((c) => c.text ?? "").join("");
