@@ -24,9 +24,9 @@
  * and is handed to the command, never recorded.
  */
 
-import { closeSync, fsyncSync, openSync, readFileSync, renameSync, writeSync } from "node:fs";
+import { closeSync, fsyncSync, openSync, readFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
-import { killTree, processStartTime, startCommand } from "./process.js";
+import { killTree, processStartTime, RotatingOutput, startCommand } from "./process.js";
 
 const OUTPUT_CAP_DEFAULT = 64 * 1024 * 1024;
 const STOP_GRACE_MS = 5_000;
@@ -54,39 +54,6 @@ function plannedOf(journal: string): Planned {
 		if (record.type === "planned") return record;
 	}
 	throw new Error(`no planned record in ${journal}`);
-}
-
-/** The output file, rotated at the cap so its tail is always kept. */
-class RotatingOutput {
-	readonly #path: string;
-	readonly #cap: number;
-	#fd: number;
-	#size = 0;
-
-	constructor(path: string, cap: number) {
-		this.#path = path;
-		this.#cap = cap;
-		this.#fd = openSync(path, "a");
-	}
-
-	write(chunk: Buffer): void {
-		if (this.#size > 0 && this.#size + chunk.length > this.#cap) this.#rotate();
-		writeSync(this.#fd, chunk);
-		this.#size += chunk.length;
-	}
-
-	#rotate(): void {
-		closeSync(this.#fd);
-		renameSync(this.#path, this.#path.replace(/\.log$/, ".1.log"));
-		this.#fd = openSync(this.#path, "a");
-		const marker = Buffer.from(`[kiso: output rotated after ${this.#size} bytes — the part before is in output.1.log]\n`);
-		writeSync(this.#fd, marker);
-		this.#size = marker.length;
-	}
-
-	close(): void {
-		closeSync(this.#fd);
-	}
 }
 
 function main(dir: string): void {
