@@ -41,6 +41,10 @@ describe("ADR-0058 §6 — the verdict table", () => {
 			stopped: true,
 		});
 	});
+	it("terminal with an error → ended, carrying why the command never ran", () => {
+		const terminal: TaskRecord = { type: "terminal", ts: now, exitCode: null, signal: null, error: "spawn bash ENOENT" };
+		expect(verdictOf([planned, runner, started, terminal], false, now)).toEqual({ kind: "ended", exitCode: null, signal: null, stopped: false, error: "spawn bash ENOENT" });
+	});
 	it("a torn last line is dropped, never guessed at", () => {
 		const dir = mkdtempSync(join(tmpdir(), "kiso-journal-"));
 		const file = join(dir, "journal.jsonl");
