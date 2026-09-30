@@ -18,12 +18,13 @@
  * always has a path to the full content.
  */
 
-import { execFile, execFileSync, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { appendFileSync, chmodSync, existsSync, linkSync, mkdirSync, readdirSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { Worker } from "node:worker_threads";
 import { fileURLToPath } from "node:url";
 import type { SearchReply, SearchRequest } from "./search-worker.js";
+import { killTree, startCommand } from "./process.js";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -1311,11 +1312,8 @@ export function shellTool(opts: WorkspaceToolsOptions): Tool<{ command: string; 
 				// provider credentials by default — only the explicit
 				// shellEnv: "inherit" opt-in keeps them. A record (ADR-0031
 				// Amendment 1) rides on the STRIPPED base and wins per key.
-				const child = spawn(command, {
-					shell: true,
-					detached: true,
+				const child = startCommand(command, {
 					cwd: opts.workspaceRoot,
-					stdio: ["ignore", "pipe", "pipe"],
 					env:
 						opts.shellEnv === "inherit"
 							? process.env
@@ -1325,7 +1323,6 @@ export function shellTool(opts: WorkspaceToolsOptions): Tool<{ command: string; 
 				let stderr = "";
 				let stdoutDropped = 0;
 				let stderrDropped = 0;
-				let exited = false;
 				let settled = false;
 				let killing = false;
 
@@ -1368,99 +1365,6 @@ export function shellTool(opts: WorkspaceToolsOptions): Tool<{ command: string; 
 					resolvePromise(result);
 				};
 
-				/**
-				 * Kill the whole tree and CONFIRM it exited (rounds 8/11):
-				 *
-				 * 1. FREEZE the root (SIGSTOP) FIRST — a stopped shell cannot
-				 *    fork new descendants while we enumerate;
-				 * 2. repeatedly discover AND freeze descendants (pid-table
-				 *    sweep — the only way to see a setsid()-escaped process)
-				 *    until the set is STABLE (two identical scans), so the
-				 *    enumeration cannot miss a mid-sweep fork;
-				 * 3. SIGKILL the process group and every tracked pid;
-				 * 4. poll every tracked pid to death. If ANY tracked pid is
-				 *    still alive at the deadline, the verdict is NOT
-				 *    "aborted"/"timed out" — it is an explicit UNCERTAIN
-				 *    error naming the survivors: the side effect may have
-				 *    outlived the tool, and the caller must not assume it
-				 *    was killed.
-				 */
-				const killTree = (): Promise<{ unconfirmed: number[] }> =>
-					new Promise((resolveKill) => {
-						const tracked = new Set<number>();
-						// round 11 (adversarial): the ROOT itself is tracked too — the
-						// verdict must not read "aborted" while the root
-						// survives. DOCUMENTED LIMITS: (1) a process that
-						// forks between SIGSTOP delivery and the next scan,
-						// setsids, and is then reparented when its parent is
-						// killed can escape the enumeration entirely — it is
-						// untracked and unknowable from the pid table; the
-						// platform cannot confirm it. (2) if THIS process is
-						// killed between the first SIGSTOP and the SIGKILL
-						// sweep, the stopped descendants stay permanently
-						// stopped (nobody SIGCONTs orphans) — the inherent
-						// cost of freeze-first. Both limits are recorded here
-						// so no claim of "the whole tree is gone" is ever
-						// stronger than what the platform can prove.
-						if (child.pid !== undefined && child.pid > 0) {
-							tracked.add(child.pid);
-							try {
-								process.kill(child.pid, "SIGSTOP"); // freeze the root
-							} catch {
-								// already gone
-							}
-						}
-						// Stable discovery: freeze as we go; stop when two
-						// consecutive scans are identical.
-						let previous = new Set<number>();
-						for (let i = 0; i < 10; i++) {
-							const current = new Set(descendantsOf(child.pid ?? 0));
-							for (const pid of current) {
-								tracked.add(pid);
-								try {
-									process.kill(pid, "SIGSTOP"); // freeze each descendant
-								} catch {
-									// already gone
-								}
-							}
-							if (current.size === previous.size && [...current].every((pid) => previous.has(pid))) {
-								break;
-							}
-							previous = current;
-						}
-						// The process group (E group: never kill an undefined/0
-						// pid), which also takes the frozen root down.
-						if (child.pid !== undefined && child.pid > 0) {
-							try {
-								process.kill(-child.pid, "SIGKILL");
-							} catch {
-								try {
-									child.kill("SIGKILL");
-								} catch {
-									// already gone
-								}
-							}
-						}
-						for (const pid of tracked) {
-							try {
-								process.kill(pid, "SIGKILL");
-							} catch {
-								// already gone
-							}
-						}
-						const confirm = (): void => {
-							void waitAllDead([...tracked]).then((unconfirmed) => resolveKill({ unconfirmed }));
-						};
-						if (exited) {
-							confirm();
-							return;
-						}
-						const fallback = setTimeout(confirm, 2000);
-						child.once("close", () => {
-							clearTimeout(fallback);
-							confirm();
-						});
-					});
 
 				child.stdout?.on("data", (d: Buffer) => {
 					const text = d.toString();
@@ -1480,7 +1384,6 @@ export function shellTool(opts: WorkspaceToolsOptions): Tool<{ command: string; 
 					settle({ content: `shell failed: ${err.message}`, isError: true, errorKind: "fatal" });
 				});
 				child.on("close", (code) => {
-					exited = true;
 					if (killing) return; // the timeout/abort verdict owns the result
 					// R-C item 2: the overflow note names WHAT was dropped and
 					// the recovery path — a silent tail-cut would be the exact
@@ -1510,7 +1413,7 @@ export function shellTool(opts: WorkspaceToolsOptions): Tool<{ command: string; 
 						: "";
 				const onAbort = (): void => {
 					killing = true;
-					void killTree().then(({ unconfirmed }) =>
+					void killTree(child).then(({ unconfirmed }) =>
 						settle({
 							content: `shell aborted${uncertainVerdict(unconfirmed) ? ` — ${uncertainVerdict(unconfirmed)}` : ""}`,
 							isError: true,
@@ -1521,7 +1424,7 @@ export function shellTool(opts: WorkspaceToolsOptions): Tool<{ command: string; 
 				ctx.signal.addEventListener("abort", onAbort);
 				const timer = setTimeout(() => {
 					killing = true;
-					void killTree().then(({ unconfirmed }) =>
+					void killTree(child).then(({ unconfirmed }) =>
 						settle({
 							content: `shell timed out after ${timeout}ms${uncertainVerdict(unconfirmed) ? ` — ${uncertainVerdict(unconfirmed)}` : ""}`,
 							isError: true,
@@ -1532,67 +1435,6 @@ export function shellTool(opts: WorkspaceToolsOptions): Tool<{ command: string; 
 				timer.unref?.();
 			});
 		},
-	});
-}
-
-/**
- * All live pids whose ancestor chain includes `pid`, from the pid table
- * (round 8: `ps -axo pid=,ppid=` — the ONLY way to see a setsid()-escaped
- * process, which is in its own group and invisible to a group kill).
- */
-function descendantsOf(pid: number): number[] {
-	if (pid <= 0) return [];
-	let table: string;
-	try {
-		table = execFileSync("ps", ["-axo", "pid=,ppid="], { encoding: "utf8", maxBuffer: 1 << 20 });
-	} catch {
-		return [];
-	}
-	const children = new Map<number, number[]>();
-	for (const line of table.split("\n")) {
-		const m = line.trim().match(/^(\d+)\s+(\d+)$/);
-		if (m === null) continue;
-		const child = Number(m[1]);
-		const parent = Number(m[2]);
-		if (!children.has(parent)) children.set(parent, []);
-		children.get(parent)!.push(child);
-	}
-	const out: number[] = [];
-	const queue = [pid];
-	while (queue.length > 0) {
-		const current = queue.shift()!;
-		for (const c of children.get(current) ?? []) {
-			out.push(c);
-			queue.push(c);
-		}
-	}
-	return out;
-}
-
-/**
- * Poll the pid table until NONE of the tracked pids is alive (bounded).
- * Returns the pids still alive at the deadline — the caller MUST NOT
- * report "aborted"/"timed out" while any tracked pid survives (round 11).
- */
-function waitAllDead(pids: readonly number[]): Promise<number[]> {
-	if (pids.length === 0) return Promise.resolve([]);
-	return new Promise((resolve) => {
-		const deadline = Date.now() + 2000;
-		const poll = (): void => {
-			const alive: number[] = [];
-			for (const pid of pids) {
-				try {
-					process.kill(pid, 0);
-					alive.push(pid);
-				} catch (err) {
-					if ((err as NodeJS.ErrnoException).code === "EPERM") alive.push(pid);
-					// ESRCH — gone
-				}
-			}
-			if (alive.length === 0 || Date.now() > deadline) return resolve(alive);
-			setTimeout(poll, 50);
-		};
-		poll();
 	});
 }
 

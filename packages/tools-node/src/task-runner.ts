@@ -12,7 +12,10 @@
  *   terminal         the exit code or signal, once the command's output closed
  *
  * The command runs in its own process group; SIGTERM to the runner stops
- * the whole group (TERM, then KILL after a grace). The output passes
+ * the whole tree (TERM, a grace, then the confirmed sweep of the process
+ * module). A stop that cannot confirm every process dead writes NO
+ * terminal — `stop_unconfirmed` names the survivors and the runner exits,
+ * so the journal reads `unknown`, never ended. The output passes
  * through the runner so it can rotate at the cap (64 MiB: the file moves to
  * output.1.log and a fresh output.log starts with a marker — the tail,
  * where errors live, is always kept) and match `readyWhen`.
@@ -21,10 +24,9 @@
  * and is handed to the command, never recorded.
  */
 
-import { spawn } from "node:child_process";
 import { closeSync, fsyncSync, openSync, readFileSync, renameSync, writeSync } from "node:fs";
 import { join } from "node:path";
-import { processStartTime } from "./task-identity.js";
+import { killTree, processStartTime, startCommand } from "./process.js";
 
 const OUTPUT_CAP_DEFAULT = 64 * 1024 * 1024;
 const STOP_GRACE_MS = 5_000;
@@ -93,21 +95,38 @@ function main(dir: string): void {
 	// test-only crash points: the process dies right after a record, before
 	// the step that record gates
 	const dieAfter = process.env.KISO_TASK_RUNNER_DIE_AFTER;
+	// test-only: report a stop as unconfirmed (a survivor the platform could
+	// not kill cannot be made on purpose)
+	const forceUnconfirmed = process.env.KISO_TASK_RUNNER_STOP_UNCONFIRMED === "1";
 	const cap = Number(process.env.KISO_TASK_OUTPUT_CAP ?? OUTPUT_CAP_DEFAULT);
 	const env = { ...process.env };
 	delete env.KISO_TASK_RUNNER_DIE_AFTER;
+	delete env.KISO_TASK_RUNNER_STOP_UNCONFIRMED;
 	delete env.KISO_TASK_OUTPUT_CAP;
 
-	append(journal, { type: "runner_started", ts: Date.now(), pid: process.pid, startedAt: processStartTime(process.pid) });
+	// "" when the start time cannot be read: the identity is then the pid
+	// alone, and the backend treats it as unverifiable, never as dead
+	const self = processStartTime(process.pid);
+	append(journal, { type: "runner_started", ts: Date.now(), pid: process.pid, startedAt: self.kind === "running" ? self.startedAt : "" });
 	if (dieAfter === "runner_started") process.exit(99);
 	append(journal, { type: "command_started", ts: Date.now() });
 	if (dieAfter === "command_started") process.exit(99);
 
-	const child = spawn(planned.command, { shell: true, cwd: planned.cwd, detached: true, stdio: ["ignore", "pipe", "pipe"], env });
+	const child = startCommand(planned.command, { cwd: planned.cwd, env });
 	const out = new RotatingOutput(join(dir, "output.log"), cap);
 	let seen = "";
 	let ready = false;
+	let finished = false;
+	/** The last record; the output closes first, and nothing is written after. */
+	const finish = (record: Record<string, unknown>): void => {
+		if (finished) return;
+		finished = true;
+		out.close();
+		append(journal, record);
+		process.exit(0);
+	};
 	const onData = (chunk: Buffer): void => {
+		if (finished) return;
 		out.write(chunk);
 		if (planned.readyWhen === undefined || ready) return;
 		seen = (seen + chunk.toString("utf8")).slice(-(planned.readyWhen.length + 65_536));
@@ -116,34 +135,39 @@ function main(dir: string): void {
 			append(journal, { type: "ready", ts: Date.now(), match: planned.readyWhen });
 		}
 	};
-	child.stdout.on("data", onData);
-	child.stderr.on("data", onData);
+	child.stdout?.on("data", onData);
+	child.stderr?.on("data", onData);
 	child.on("error", (err) => {
 		out.write(Buffer.from(`[kiso: the command could not start: ${err.message}]\n`));
 	});
+
+	let exit: { code: number | null; signal: NodeJS.Signals | null } | null = null;
+	child.on("exit", (code, signal) => {
+		exit = { code, signal };
+	});
+	const outputClosed = new Promise<void>((resolve) => child.once("close", () => resolve()));
 
 	let stopping = false;
 	process.on("SIGTERM", () => {
 		if (stopping || child.pid === undefined) return;
 		stopping = true;
-		try {
-			process.kill(-child.pid, "SIGTERM");
-		} catch {
-			// the group is already gone
-		}
-		setTimeout(() => {
-			try {
-				process.kill(-child.pid!, "SIGKILL");
-			} catch {
-				// gone within the grace
+		void killTree(child, { graceMs: STOP_GRACE_MS }).then(async ({ unconfirmed }) => {
+			const survivors = forceUnconfirmed ? [child.pid!] : unconfirmed;
+			if (survivors.length > 0) {
+				finish({ type: "stop_unconfirmed", ts: Date.now(), pids: survivors });
+				return;
 			}
-		}, STOP_GRACE_MS).unref();
+			// every tracked process is confirmed dead; the output drains
+			// (bounded: an untracked holder of the pipe must not hang the stop)
+			await Promise.race([outputClosed, new Promise((r) => setTimeout(r, 1_000))]);
+			const e = exit as { code: number | null; signal: NodeJS.Signals | null } | null;
+			finish({ type: "terminal", ts: Date.now(), exitCode: e?.code ?? null, signal: e?.signal ?? null });
+		});
 	});
 
+	// the command ended on its own: the terminal is written once its output closed
 	child.on("close", (code, signal) => {
-		out.close();
-		append(journal, { type: "terminal", ts: Date.now(), exitCode: code, signal });
-		process.exit(0);
+		if (!stopping) finish({ type: "terminal", ts: Date.now(), exitCode: code, signal });
 	});
 }
 

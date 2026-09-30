@@ -36,6 +36,9 @@ export type TaskRecord =
 	| { readonly type: "command_started"; readonly ts: number }
 	| { readonly type: "ready"; readonly ts: number; readonly match: string }
 	| { readonly type: "stop_requested"; readonly ts: number; readonly by: "person" | "model" | "exit" }
+	/** A stop the runner could not confirm: these pids may outlive it. No
+	 *  terminal follows — the verdict stays `unknown`. */
+	| { readonly type: "stop_unconfirmed"; readonly ts: number; readonly pids: readonly number[] }
 	| { readonly type: "terminal"; readonly ts: number; readonly exitCode: number | null; readonly signal: string | null };
 
 /** Append one record and fsync it before returning — the write-ahead step. */

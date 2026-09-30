@@ -14,7 +14,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { processStartTime } from "./task-identity.js";
+import { processStartTime } from "./process.js";
 
 export interface ProcessTaskBackendOptions {
 	/** The runner script. Default: the one shipped beside this module. */
@@ -46,13 +46,18 @@ export function processTaskBackend(options: ProcessTaskBackendOptions = {}): Pro
 			throw new Error(`the task runner did not record itself within ${options.startTimeoutMs ?? 10_000} ms (${dir})`);
 		},
 		alive(pid, startedAt) {
-			if (startedAt === "") return false;
 			try {
 				process.kill(pid, 0);
 			} catch (err) {
 				if ((err as NodeJS.ErrnoException).code !== "EPERM") return false;
 			}
-			return processStartTime(pid) === startedAt;
+			// The pid is live. Its start time decides whether it is still the
+			// runner; a time that cannot be read (now, or when the runner
+			// recorded "") is unverifiable — treated as alive, never as dead,
+			// so nothing is reported ended or re-run on a failed query.
+			const id = processStartTime(pid);
+			if (id.kind === "unknown" || startedAt === "") return id.kind !== "gone";
+			return id.kind === "running" && id.startedAt === startedAt;
 		},
 		signalStop(pid) {
 			try {

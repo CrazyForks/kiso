@@ -157,6 +157,42 @@ describe("ADR-0058 — the caller's death, a stop, the ready signal, the rotatio
 		manager.close();
 	});
 
+	it("a stop gives the task its grace: a service that traps TERM cleans up and ends stopped", async () => {
+		const { cwd, manager } = setup();
+		const marker = join(cwd, "cleaned");
+		const t = await manager.start({ command: `trap 'echo bye > ${marker}; exit 0' TERM; echo up; sleep 30 & wait`, cwd, profile: "service", readyWhen: "up" });
+		await until(() => manager.get(t.id)!, (i) => i.state.kind === "running" && i.state.ready);
+		expect(manager.stop(t.id, "person")).toBe(true);
+		const ended = await until(() => manager.get(t.id)!, (i) => i.state.kind === "ended");
+		expect(ended.state).toMatchObject({ kind: "ended", stopped: true });
+		expect(readFileSync(marker, "utf8").trim()).toBe("bye");
+		manager.close();
+	});
+
+	it("a stop that cannot confirm the tree dead writes no terminal: the task is unknown, never ended", async () => {
+		const { root, cwd, manager } = setup();
+		const t = await manager.start({ command: "sleep 30", cwd, env: { ...process.env, KISO_TASK_RUNNER_STOP_UNCONFIRMED: "1" } });
+		await until(() => manager.get(t.id)!, (i) => i.state.kind === "running");
+		expect(manager.stop(t.id, "person")).toBe(true);
+		const info = await until(() => manager.get(t.id)!, (i) => i.state.kind !== "running");
+		expect(info.state.kind).toBe("unknown");
+		const types = journalTypes(root, t.id);
+		expect(types).toContain("stop_unconfirmed");
+		expect(types).not.toContain("terminal");
+		manager.close();
+	});
+
+	it("a runner whose start time cannot be read is not declared dead", () => {
+		const path = process.env.PATH;
+		process.env.PATH = "";
+		try {
+			// `ps` is unreachable: identity cannot be checked, and a live pid stays live
+			expect(backend.alive(process.pid, "Thu Jan  1 00:00:00 1970")).toBe(true);
+		} finally {
+			process.env.PATH = path;
+		}
+	});
+
 	it("readyWhen: the task stays running and says it is ready once", async () => {
 		const seen: TaskTransition[] = [];
 		const { cwd, manager } = setup((_t, tr) => seen.push(tr));
