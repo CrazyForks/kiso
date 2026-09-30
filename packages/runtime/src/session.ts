@@ -365,9 +365,14 @@ export class AgentSession {
 	/** Deliver this session's task transitions to the model: into a live
 	 *  run at its next safe point, or — idle — held for the next run, or one
 	 *  continuation run through `onWake` (off with `wake: false`). */
-	useTasks(manager: TaskManager, options: Pick<TaskDeliveryOptions, "wake" | "onWake" | "windowMs"> = {}): void {
+	useTasks(manager: TaskManager, options: Pick<TaskDeliveryOptions, "wake" | "onWake" | "windowMs"> = {}): () => void {
 		this.#delivery?.close();
-		this.#delivery = new TaskDelivery({ ...options, manager, events: () => this.log.all, liveRun: () => [...this.#activeRuns][0] });
+		const delivery = new TaskDelivery({ ...options, manager, events: () => this.log.all, liveRun: () => [...this.#activeRuns][0] });
+		this.#delivery = delivery;
+		return () => {
+			delivery.close();
+			if (this.#delivery === delivery) this.#delivery = undefined;
+		};
 	}
 
 	/** A summary carries the tasks as the model was last told of them —
